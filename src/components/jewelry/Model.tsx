@@ -1,9 +1,11 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { useGLTF } from "@react-three/drei";
+import { useEnvironment, useGLTF } from "@react-three/drei";
 import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
-import { createGemMaterial, createMetalMaterial, facetGeometry, gemThickness } from "./materials";
+import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
+import { GemRefraction } from "./GemRefraction";
+import { ENV_PRESET } from "./environment";
 import { useFallbackScene } from "./FallbackPendant";
 
 /** What the camera needs to frame a piece. */
@@ -30,24 +32,29 @@ interface DressedProps {
 }
 
 export function DressedScene({ scene, finish, onFit, ownsScene = false }: DressedProps) {
-  const { object, owned } = useMemo(() => {
+  const { object, owned, stones } = useMemo(() => {
     const root = scene.clone(true);
     // Geometry we allocated here, and must therefore dispose. Anything reused
     // from the caller (the useGLTF cache, or an uploaded scene) is not ours to
     // free — disposing a cached geometry would break the next mount.
     const owned = new Set<THREE.BufferGeometry>();
+    // Stones are handed to GemRefraction, which swaps in the traced material.
+    const stones: THREE.Mesh[] = [];
 
     root.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
       const name = mesh.name.toLowerCase();
 
-      if (name.includes("gem") || name.includes("stone") || name.includes("diamond")) {
+      const isStone = name.includes("gem") || name.includes("stone") || name.includes("diamond");
+
+      if (isStone) {
         // Faceting rewrites the geometry, so this one really is a new buffer.
         mesh.geometry = facetGeometry(mesh.geometry.clone());
         owned.add(mesh.geometry);
-        // Thickness must come from the stone itself — see materials.ts.
-        mesh.material = createGemMaterial(gemThickness(mesh.geometry));
+        // Fallback only; GemRefraction replaces this once the env map is ready.
+        mesh.material = createGemMaterial();
+        stones.push(mesh);
       } else {
         // Metal is used exactly as supplied — .3dm normals come from the NURBS
         // surface and the GLB ships its own — so there's nothing to copy.
@@ -71,7 +78,7 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
 
     const wrapper = new THREE.Group();
     wrapper.add(root);
-    return { object: wrapper, owned };
+    return { object: wrapper, owned, stones };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene]);
 
@@ -128,7 +135,13 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
     };
   }, [object, owned, ownsScene]);
 
-  return <primitive object={object} />;
+  const envMap = useEnvironment({ preset: ENV_PRESET });
+  return (
+    <>
+      <primitive object={object} />
+      <GemRefraction meshes={stones} envMap={envMap} />
+    </>
+  );
 }
 
 export function GLBModel({

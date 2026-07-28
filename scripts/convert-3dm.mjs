@@ -79,8 +79,14 @@ if (!decoded || decoded.type === "error") throw new Error(decoded?.message ?? "d
 
 // ── assemble, normalise, export ──────────────────────────────────────────
 const group = new THREE.Group();
-for (const name of ["metal", "gem"]) {
-  const b = decoded[name];
+// "gem-melee" keeps the substring the viewer matches stones on, while letting
+// DressedScene pick the reflective melee material instead of the transmissive one.
+for (const [key, name] of [
+  ["metal", "metal"],
+  ["gem", "gem"],
+  ["melee", "gem-melee"],
+]) {
+  const b = decoded[key];
   if (!b) continue;
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(b.position, 3));

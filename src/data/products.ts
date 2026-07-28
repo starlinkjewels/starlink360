@@ -15,7 +15,7 @@ export const products: Product[] = [
     id: "lp-043",
     name: "Lumière Pendant",
     ref: "Ref. LP 043",
-    glbUrl: "/LP043.glb?v=5",
+    glbUrl: "/LP043.glb?v=8",
     description: "A flat brilliant-set pendant, hand-finished and set with a single round stone.",
   },
 ];

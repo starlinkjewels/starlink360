@@ -27,7 +27,10 @@ export interface DecodedBucket {
 
 export interface DecodedDocument {
   metal: DecodedBucket | null;
+  /** Stones large enough for screen-space refraction to actually work. */
   gem: DecodedBucket | null;
+  /** Pave / melee — too small to refract, shaded reflectively instead. */
+  melee: DecodedBucket | null;
   notices: string[];
   /** Objects skipped because Rhino stored no render mesh for them. */
   missingMesh: number;
@@ -131,11 +134,15 @@ self.onmessage = function (e) {
 
     var chunks = [];
     var missingMesh = 0;
+    // Chunks are per BRep face; this groups the faces of one solid together so
+    // winding can be judged against the solid's own centre.
+    var groupId = 0;
 
     // Pull every cached render mesh off one geometry, transformed if needed.
     function harvest(geometry, bucket, xf) {
       var type = geometry.constructor.name;
       var got = 0;
+      groupId++;
 
       if (type === "Brep") {
         // Jewellery has to be watertight to be manufactured, so a closed Brep
@@ -223,7 +230,7 @@ self.onmessage = function (e) {
 
       chunks.push({
         bucket: bucket, pos: pos, nrm: nrm, idx: idx, hasNormals: !!N,
-        solid: solid !== false,
+        solid: solid !== false, group: groupId,
         minx: minx, miny: miny, minz: minz, maxx: maxx, maxy: maxy, maxz: maxz,
         tris: idx.length / 3
       });
@@ -278,6 +285,64 @@ self.onmessage = function (e) {
 
     doc.delete();
 
+    /*
+     * ── make triangle winding consistent ──
+     *
+     * Rhino does not wind BRep faces consistently across a document. Measured
+     * on a real file, 87 of 194 stones came through wound backwards. Nothing
+     * downstream can recover from that: computeVertexNormals derives direction
+     * from winding, so those stones get inward normals and render inside-out —
+     * a stone that looks like it is sitting upside down in its setting. Face
+     * culling and any ray tracing against the mesh disagree with the shading
+     * for the same reason.
+     *
+     * A solid's faces should all point away from its interior, so the solid's
+     * own centre is the reference. Faces that mostly point inward get reversed.
+     */
+    var groups = {};
+    for (var gi = 0; gi < chunks.length; gi++) {
+      var gc = chunks[gi];
+      var slot = groups[gc.group];
+      if (!slot) slot = groups[gc.group] = { sx: 0, sy: 0, sz: 0, n: 0, items: [] };
+      slot.items.push(gc);
+      for (var vp = 0; vp < gc.pos.length; vp += 3) {
+        slot.sx += gc.pos[vp]; slot.sy += gc.pos[vp + 1]; slot.sz += gc.pos[vp + 2];
+        slot.n++;
+      }
+    }
+
+    for (var key in groups) {
+      var grp = groups[key];
+      if (!grp.n) continue;
+      var cx = grp.sx / grp.n, cy = grp.sy / grp.n, cz = grp.sz / grp.n;
+
+      for (var ci = 0; ci < grp.items.length; ci++) {
+        var ch = grp.items[ci];
+        var P = ch.pos, IDX = ch.idx;
+        var inward = 0, outward = 0;
+
+        for (var t = 0; t < IDX.length; t += 3) {
+          var a = IDX[t] * 3, b = IDX[t + 1] * 3, c = IDX[t + 2] * 3;
+          var ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+          var vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+          var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+          var mx = (P[a] + P[b] + P[c]) / 3 - cx;
+          var my = (P[a + 1] + P[b + 1] + P[c + 1]) / 3 - cy;
+          var mz = (P[a + 2] + P[b + 2] + P[c + 2]) / 3 - cz;
+          if (nx * mx + ny * my + nz * mz < 0) inward++; else outward++;
+        }
+
+        if (inward <= outward) continue;
+
+        // Reverse each triangle, and the stored normals with it so the two
+        // never disagree.
+        for (var r = 0; r < IDX.length; r += 3) {
+          var tmp = IDX[r + 1]; IDX[r + 1] = IDX[r + 2]; IDX[r + 2] = tmp;
+        }
+        for (var q = 0; q < ch.nrm.length; q++) ch.nrm[q] = -ch.nrm[q];
+      }
+    }
+
     // ── drop open construction surfaces, if real solids are present ──
     var anySolid = false;
     for (var q = 0; q < chunks.length; q++) if (chunks[q].solid) { anySolid = true; break; }
@@ -331,14 +396,32 @@ self.onmessage = function (e) {
       return { position: position, normal: normal, index: index };
     }
 
+    // ── separate melee from centre stones ──
+    // three refracts through a screen-space buffer, so a stone only a few
+    // pixels wide samples whatever sits behind it — the gold setting — and
+    // comes out looking like a cream bead. Below this size the stone is shaded
+    // reflectively instead, which is what reads as pave.
+    var MELEE_FRACTION = 0.06;
+    for (var mi = 0; mi < keep.length; mi++) {
+      var mk = keep[mi];
+      if (mk.bucket !== "gem") continue;
+      var ml = Math.max(mk.maxx - mk.minx, mk.maxy - mk.miny, mk.maxz - mk.minz);
+      if (ml < extent * MELEE_FRACTION) mk.bucket = "melee";
+    }
+
     var metal = build("metal");
     var gem = build("gem");
+    var melee = build("melee");
 
     var transfer = [];
     if (metal) transfer.push(metal.position.buffer, metal.normal.buffer, metal.index.buffer);
     if (gem) transfer.push(gem.position.buffer, gem.normal.buffer, gem.index.buffer);
+    if (melee) transfer.push(melee.position.buffer, melee.normal.buffer, melee.index.buffer);
 
-    post({ type: "done", metal: metal, gem: gem, missingMesh: missingMesh }, transfer);
+    post(
+      { type: "done", metal: metal, gem: gem, melee: melee, missingMesh: missingMesh },
+      transfer
+    );
   }
 };
 `;
@@ -387,7 +470,13 @@ export function decodeRhinoDocument(
           );
         }
         finish(() =>
-          resolve({ metal: data.metal, gem: data.gem, notices, missingMesh: data.missingMesh }),
+          resolve({
+            metal: data.metal,
+            gem: data.gem,
+            melee: data.melee ?? null,
+            notices,
+            missingMesh: data.missingMesh,
+          }),
         );
       }
     };

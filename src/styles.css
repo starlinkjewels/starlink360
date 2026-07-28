@@ -366,7 +366,7 @@
   border-bottom: none;
   border-start-start-radius: 1.5rem;
   border-start-end-radius: 1.5rem;
-  background: rgba(12, 10, 16, 0.94);
+  background: rgba(12, 10, 16, 0.92);
   backdrop-filter: blur(24px) saturate(150%);
   box-shadow: 0 -24px 60px -12px rgba(0, 0, 0, 0.9);
   animation: sheet-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1);
@@ -594,7 +594,7 @@
   padding: 1rem;
   border-radius: 1rem;
   border: 1px solid color-mix(in oklab, var(--gold) 22%, transparent);
-  background: rgba(12, 10, 16, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(24px) saturate(150%);
   box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.9);
   z-index: 50;

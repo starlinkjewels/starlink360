@@ -505,6 +505,8 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
 
   attach(decoded.metal, "metal");
   attach(decoded.gem, "gem");
+  // Name carries "gem" so existing stone detection still matches it.
+  attach(decoded.melee, "gem-melee");
 
   if (!group.children.length) {
     throw new Error(

@@ -29,6 +29,18 @@ export function UploadPiece({
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * iOS and Android resolve `accept` through their own type registries, and
+   * `.3dm` is not a type either of them knows. The filter therefore greys out
+   * every Rhino file in the picker and there is no way to select one. Drop the
+   * filter on touch devices and validate the extension in JS instead — the
+   * loader already rejects anything it cannot read, with a clear message.
+   */
+  const [filterPicker, setFilterPicker] = useState(true);
+  useEffect(() => {
+    setFilterPicker(!window.matchMedia("(pointer: coarse)").matches);
+  }, []);
+
   // Prefetch decoder libs on idle so first upload is faster
   useEffect(() => {
     const id =
@@ -80,7 +92,7 @@ export function UploadPiece({
       <input
         ref={inputRef}
         type="file"
-        accept=".3dm,.glb,.gltf,model/gltf-binary"
+        accept={filterPicker ? ".3dm,.glb,.gltf,model/gltf-binary" : undefined}
         className="sr-only"
         onChange={(e) => {
           const f = e.target.files?.[0];
