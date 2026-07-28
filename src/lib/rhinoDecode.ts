@@ -1,0 +1,382 @@
+/**
+ * Direct .3dm decoder.
+ *
+ * Replaces three's Rhino3dmLoader for the .3dm path. Measured on a real
+ * 71 MB file (960 Breps / 5,782 BRep faces / 1.17M vertices), that loader
+ * needed 5-10 minutes; this returns in well under ten seconds.
+ *
+ * The loader is slow for two structural reasons, neither of which is tunable
+ * from outside it:
+ *
+ *  1. It emits one THREE.Mesh per BRep face — 5,782 of them for this file —
+ *     and structured-clones each back from its worker.
+ *  2. `rhino3dm.toThreejsJSON()` hands back plain JS Arrays, not typed arrays,
+ *     so that clone ships ~14 million boxed numbers, and the main thread then
+ *     runs BufferGeometryLoader.parse() 5,782 times to convert them back.
+ *
+ * So this walks the document in a worker, writes vertices straight into
+ * Float32Arrays, merges everything into the two buckets the viewer actually
+ * renders, and transfers two ArrayBuffers back with zero copying.
+ */
+
+export interface DecodedBucket {
+  position: Float32Array;
+  normal: Float32Array;
+  index: Uint32Array;
+}
+
+export interface DecodedDocument {
+  metal: DecodedBucket | null;
+  gem: DecodedBucket | null;
+  notices: string[];
+  /** Objects skipped because Rhino stored no render mesh for them. */
+  missingMesh: number;
+}
+
+export interface DecodeRules {
+  gemLayer: string;
+  metalLayer: string;
+  gemWords: string;
+  metalWords: string;
+  constructionWords: string;
+}
+
+/* The worker runs as a classic script so it can `importScripts` the same
+ * rhino3dm build the loader uses — proven to work, and already prefetched.
+ * Written without template literals so it survives being embedded in one. */
+export const WORKER_SOURCE = String.raw`
+self.onmessage = function (e) {
+  var msg = e.data;
+  var lib = msg.libraryPath;
+  var rules = msg.rules;
+
+  function post(o, transfer) { self.postMessage(o, transfer || []); }
+
+  function re(src) { return new RegExp(src, "i"); }
+
+  try {
+    self.importScripts(lib + "rhino3dm.js");
+  } catch (err) {
+    post({ type: "error", message: "Could not load the Rhino decoder. Check your connection." });
+    return;
+  }
+
+  self.rhino3dm({ locateFile: function (p) { return lib + p; } }).then(function (rhino) {
+    try {
+      run(rhino, msg.buffer, rules);
+    } catch (err) {
+      post({ type: "error", message: (err && err.message) || String(err) });
+    }
+  }).catch(function (err) {
+    post({ type: "error", message: (err && err.message) || String(err) });
+  });
+
+  function run(rhino, buffer, rules) {
+    var GEM_LAYER = re(rules.gemLayer);
+    var METAL_LAYER = re(rules.metalLayer);
+    var GEM_WORDS = re(rules.gemWords);
+    var METAL_WORDS = re(rules.metalWords);
+    var CONSTRUCTION = re(rules.constructionWords);
+
+    var doc = rhino.File3dm.fromByteArray(new Uint8Array(buffer));
+    if (!doc) throw new Error("This file could not be read as a Rhino model.");
+
+    // ── layer table ──
+    var layers = doc.layers();
+    var layerTable = [];
+    for (var i = 0; i < layers.count; i++) {
+      var L = layers.get(i);
+      layerTable.push({ name: L.fullPath || L.name || "", visible: L.visible !== false });
+    }
+
+    function classify(name) {
+      var segs = name.split("::");
+      for (var i = segs.length - 1; i >= 0; i--) {
+        var s = segs[i].trim();
+        if (GEM_LAYER.test(s)) return "gem";
+        if (METAL_LAYER.test(s)) return "metal";
+      }
+      if (METAL_WORDS.test(name)) return "metal";
+      if (GEM_WORDS.test(name)) return "gem";
+      if (CONSTRUCTION.test(name)) return null;
+      return "metal";
+    }
+
+    // ── instance definitions: id -> member object ids ──
+    var idefs = doc.instanceDefinitions();
+    var idefMembers = {};
+    for (var d = 0; d < idefs.count; d++) {
+      var idef = idefs.get(d);
+      idefMembers[idef.id] = idef.getObjectIds();
+    }
+
+    var objs = doc.objects();
+    var total = objs.count;
+
+    // Index every object by id so instance references can find their members.
+    var byId = {};
+    var records = [];
+    for (var i = 0; i < total; i++) {
+      var o = objs.get(i);
+      var a = o.attributes();
+      var rec = {
+        obj: o,
+        id: a.id,
+        layerIndex: a.layerIndex,
+        isDef: a.isInstanceDefinitionObject === true,
+      };
+      byId[a.id] = rec;
+      records.push(rec);
+    }
+
+    var chunks = [];
+    var missingMesh = 0;
+
+    // Pull every cached render mesh off one geometry, transformed if needed.
+    function harvest(geometry, bucket, xf) {
+      var type = geometry.constructor.name;
+      var got = 0;
+
+      if (type === "Brep") {
+        var faces = null;
+        try { faces = geometry.faces(); } catch (err) { faces = null; }
+        if (faces) {
+          for (var f = 0; f < faces.count; f++) {
+            var fm = null;
+            try { fm = faces.get(f).getMesh(rhino.MeshType.Any); } catch (err) { fm = null; }
+            if (fm) got += push(fm, bucket, xf) ? 1 : 0;
+          }
+        }
+      } else if (type === "Extrusion") {
+        var em = null;
+        try { em = geometry.getMesh(rhino.MeshType.Any); } catch (err) { em = null; }
+        if (em) got += push(em, bucket, xf) ? 1 : 0;
+      } else if (type === "SubD") {
+        var sm = null;
+        try { sm = rhino.Mesh.createFromSubDControlNet(geometry, false); } catch (err) { sm = null; }
+        if (sm) got += push(sm, bucket, xf) ? 1 : 0;
+      } else if (type === "Mesh") {
+        got += push(geometry, bucket, xf) ? 1 : 0;
+      }
+      return got;
+    }
+
+    function push(rhinoMesh, bucket, xf) {
+      var json;
+      try { json = rhinoMesh.toThreejsJSON(); } catch (err) { return false; }
+      var attrs = json && json.data && json.data.attributes;
+      if (!attrs || !attrs.position) return false;
+
+      var P = attrs.position.array;
+      var N = attrs.normal ? attrs.normal.array : null;
+      var srcIdx = json.data.index ? json.data.index.array : null;
+      var vCount = P.length / 3;
+      if (!vCount) return false;
+
+      var pos = new Float32Array(P.length);
+      var nrm = new Float32Array(P.length);
+
+      var minx = Infinity, miny = Infinity, minz = Infinity;
+      var maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
+
+      for (var v = 0; v < vCount; v++) {
+        var x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
+        var nx = N ? N[v * 3] : 0, ny = N ? N[v * 3 + 1] : 0, nz = N ? N[v * 3 + 2] : 0;
+
+        if (xf) {
+          // xf is row-major, as THREE.Matrix4.set expects.
+          var tx = xf[0] * x + xf[1] * y + xf[2] * z + xf[3];
+          var ty = xf[4] * x + xf[5] * y + xf[6] * z + xf[7];
+          var tz = xf[8] * x + xf[9] * y + xf[10] * z + xf[11];
+          x = tx; y = ty; z = tz;
+          if (N) {
+            var rx = xf[0] * nx + xf[1] * ny + xf[2] * nz;
+            var ry = xf[4] * nx + xf[5] * ny + xf[6] * nz;
+            var rz = xf[8] * nx + xf[9] * ny + xf[10] * nz;
+            var len = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
+            nx = rx / len; ny = ry / len; nz = rz / len;
+          }
+        }
+
+        pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+        nrm[v * 3] = nx; nrm[v * 3 + 1] = ny; nrm[v * 3 + 2] = nz;
+
+        if (x < minx) minx = x; if (x > maxx) maxx = x;
+        if (y < miny) miny = y; if (y > maxy) maxy = y;
+        if (z < minz) minz = z; if (z > maxz) maxz = z;
+      }
+
+      var idx;
+      if (srcIdx) {
+        idx = new Uint32Array(srcIdx.length);
+        for (var k = 0; k < srcIdx.length; k++) idx[k] = srcIdx[k];
+      } else {
+        idx = new Uint32Array(vCount);
+        for (var k2 = 0; k2 < vCount; k2++) idx[k2] = k2;
+      }
+
+      chunks.push({
+        bucket: bucket, pos: pos, nrm: nrm, idx: idx, hasNormals: !!N,
+        minx: minx, miny: miny, minz: minz, maxx: maxx, maxy: maxy, maxz: maxz,
+        tris: idx.length / 3
+      });
+      return true;
+    }
+
+    // ── walk the document ──
+    for (var r = 0; r < records.length; r++) {
+      var rec = records[r];
+      if (rec.isDef) continue; // reached through its instance references
+
+      var layer = layerTable[rec.layerIndex];
+      if (!layer || !layer.visible) continue;
+      var bucket = classify(layer.name);
+      if (!bucket) continue;
+
+      var geometry = rec.obj.geometry();
+      var type = geometry.constructor.name;
+
+      if (type === "InstanceReference") {
+        var ids = idefMembers[geometry.parentIdefId];
+        // On the live rhino3dm object the matrix comes from toFloatArray(true)
+        // — row-major, translation in elements 3/7/11. There is no .array
+        // property here; three's loader only sees one because it serialises
+        // the object through extractProperties first. Reading .array returned
+        // undefined, so every instanced stone lost its transform and collapsed
+        // onto the origin — a pile of gems at the centre of the piece.
+        var xform = null;
+        if (geometry.xform) {
+          if (typeof geometry.xform.toFloatArray === "function") {
+            xform = geometry.xform.toFloatArray(true);
+          } else if (geometry.xform.array) {
+            xform = geometry.xform.array;
+          }
+        }
+        if (ids) {
+          for (var m = 0; m < ids.length; m++) {
+            var member = byId[ids[m]];
+            if (member) harvest(member.obj.geometry(), bucket, xform);
+          }
+        }
+      } else {
+        var solid = type === "Brep" || type === "Extrusion" || type === "SubD";
+        var got = harvest(geometry, bucket, null);
+        // Curves, points and annotations have no mesh by nature; only a solid
+        // that yielded nothing means Rhino saved the file without render meshes.
+        if (solid && got === 0) missingMesh++;
+      }
+
+      if ((r & 31) === 0) post({ type: "progress", done: r, total: total });
+    }
+
+    doc.delete();
+
+    // ── drop backdrop slabs: huge, flat, barely tessellated ──
+    var ex = { minx: Infinity, miny: Infinity, minz: Infinity, maxx: -Infinity, maxy: -Infinity, maxz: -Infinity };
+    for (var c = 0; c < chunks.length; c++) {
+      var ch = chunks[c];
+      if (ch.minx < ex.minx) ex.minx = ch.minx; if (ch.maxx > ex.maxx) ex.maxx = ch.maxx;
+      if (ch.miny < ex.miny) ex.miny = ch.miny; if (ch.maxy > ex.maxy) ex.maxy = ch.maxy;
+      if (ch.minz < ex.minz) ex.minz = ch.minz; if (ch.maxz > ex.maxz) ex.maxz = ch.maxz;
+    }
+    var extent = Math.max(ex.maxx - ex.minx, ex.maxy - ex.miny, ex.maxz - ex.minz);
+    var keep = [];
+    for (var c2 = 0; c2 < chunks.length; c2++) {
+      var k = chunks[c2];
+      var sx = k.maxx - k.minx, sy = k.maxy - k.miny, sz = k.maxz - k.minz;
+      var longest = Math.max(sx, sy, sz), thinnest = Math.min(sx, sy, sz);
+      var slab = longest >= extent * 0.6 && thinnest <= longest * 0.02 && k.tris < 500;
+      if (!slab) keep.push(k);
+    }
+    if (!keep.length) keep = chunks;
+    if (!keep.some(function (x) { return x.bucket === "metal"; })) {
+      keep = keep.concat(chunks.filter(function (x) { return x.bucket === "metal"; }));
+    }
+
+    // ── concatenate each bucket into one buffer ──
+    function build(bucket) {
+      var parts = keep.filter(function (x) { return x.bucket === bucket; });
+      if (!parts.length) return null;
+      var nv = 0, ni = 0;
+      for (var i = 0; i < parts.length; i++) { nv += parts[i].pos.length; ni += parts[i].idx.length; }
+      var position = new Float32Array(nv);
+      var normal = new Float32Array(nv);
+      var index = new Uint32Array(ni);
+      var vo = 0, io = 0;
+      for (var j = 0; j < parts.length; j++) {
+        var p = parts[j];
+        position.set(p.pos, vo);
+        normal.set(p.nrm, vo);
+        var base = vo / 3;
+        for (var q = 0; q < p.idx.length; q++) index[io + q] = p.idx[q] + base;
+        vo += p.pos.length;
+        io += p.idx.length;
+      }
+      return { position: position, normal: normal, index: index };
+    }
+
+    var metal = build("metal");
+    var gem = build("gem");
+
+    var transfer = [];
+    if (metal) transfer.push(metal.position.buffer, metal.normal.buffer, metal.index.buffer);
+    if (gem) transfer.push(gem.position.buffer, gem.normal.buffer, gem.index.buffer);
+
+    post({ type: "done", metal: metal, gem: gem, missingMesh: missingMesh }, transfer);
+  }
+};
+`;
+
+let workerUrl: string | undefined;
+function getWorkerUrl(): string {
+  if (!workerUrl) {
+    workerUrl = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+  }
+  return workerUrl;
+}
+
+export function decodeRhinoDocument(
+  buffer: ArrayBuffer,
+  libraryPath: string,
+  rules: DecodeRules,
+  onProgress?: (done: number, total: number) => void,
+): Promise<DecodedDocument> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(getWorkerUrl());
+
+    const finish = (fn: () => void) => {
+      worker.terminate();
+      fn();
+    };
+
+    worker.onerror = (e) =>
+      finish(() => reject(new Error(e.message || "The Rhino decoder failed to start.")));
+
+    worker.onmessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (data.type === "progress") {
+        onProgress?.(data.done, data.total);
+        return;
+      }
+      if (data.type === "error") {
+        finish(() => reject(new Error(data.message)));
+        return;
+      }
+      if (data.type === "done") {
+        const notices: string[] = [];
+        if (data.missingMesh > 0) {
+          notices.push(
+            `${data.missingMesh} part${data.missingMesh === 1 ? "" : "s"} had no render mesh and ` +
+              `could not be shown. In Rhino, select all and run Mesh, then re-save.`,
+          );
+        }
+        finish(() =>
+          resolve({ metal: data.metal, gem: data.gem, notices, missingMesh: data.missingMesh }),
+        );
+      }
+    };
+
+    // The buffer is transferred, so the caller must not reuse it afterwards.
+    worker.postMessage({ type: "decode", buffer, libraryPath, rules }, [buffer]);
+  });
+}
