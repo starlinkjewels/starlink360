@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { useGLTF } from "@react-three/drei";
 import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
-import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
+import { createGemMaterial, createMetalMaterial, facetGeometry, gemThickness } from "./materials";
 import { useFallbackScene } from "./FallbackPendant";
 
 /** What the camera needs to frame a piece. */
@@ -46,7 +46,8 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
         // Faceting rewrites the geometry, so this one really is a new buffer.
         mesh.geometry = facetGeometry(mesh.geometry.clone());
         owned.add(mesh.geometry);
-        mesh.material = createGemMaterial();
+        // Thickness must come from the stone itself — see materials.ts.
+        mesh.material = createGemMaterial(gemThickness(mesh.geometry));
       } else {
         // Metal is used exactly as supplied — .3dm normals come from the NURBS
         // surface and the GLB ships its own — so there's nothing to copy.

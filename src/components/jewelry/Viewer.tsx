@@ -209,8 +209,13 @@ export default function Viewer({
     () => ({
       antialias: true,
       alpha: true,
-      toneMapping: THREE.ACESFilmicToneMapping,
-      toneMappingExposure: 1.4,
+      // Khronos PBR Neutral, not ACES. ACES is a film curve: it desaturates as
+      // it approaches white, which is exactly where a diamond's fire lives, so
+      // it washes the rainbow out of the dispersion the gem material generates.
+      // Neutral is purpose-built for product rendering and holds hue into the
+      // highlights. It also rolls off less, so the exposure comes down to suit.
+      toneMapping: THREE.NeutralToneMapping,
+      toneMappingExposure: 1.15,
       outputColorSpace: THREE.SRGBColorSpace,
     }),
     [],
@@ -226,26 +231,60 @@ export default function Viewer({
       >
         <PerspectiveCamera makeDefault fov={FOV} position={[0, 0, 5]} />
 
-        {/* Jeweler's lamp — tight key from upper front-right */}
+        {/* Lighting is environment-first, the way product photography works:
+            the studio HDRI does the modelling, and these few sources only add
+            definition. The previous rig pushed ~14 units of direct light on top
+            of the map, which blew the metal toward white and erased the shading
+            gradient that describes the form. */}
+
+        {/* Key — also the shadow caster. */}
         <spotLight
           position={[2.8, 6, 3.5]}
-          intensity={5.5}
+          intensity={2.2}
           angle={0.38}
           penumbra={0.55}
           castShadow
           shadow-mapSize={[1024, 1024]}
           color="#fff6ee"
         />
-        {/* Cool fill from the left */}
-        <directionalLight intensity={1.4} position={[-4, 2, -1]} color="#b8ccff" />
-        {/* Warm rim from behind — outlines the silhouette */}
-        <directionalLight intensity={1.1} position={[0.5, 1.5, -4]} color="#ffd8a0" />
-        {/* Subtle ambient so shadow areas aren't pure black */}
-        <ambientLight intensity={0.12} />
-        {/* Close point light to ignite gem facets */}
-        <pointLight position={[0, 2.5, 1.2]} intensity={1.6} color="#fff4e0" distance={10} />
+        {/* Cool fill, so the shadow side keeps some shape. */}
+        <directionalLight intensity={0.45} position={[-4, 2, -1]} color="#b8ccff" />
+        {/* Warm rim, to separate the silhouette from the background. */}
+        <directionalLight intensity={0.4} position={[0.5, 1.5, -4]} color="#ffd8a0" />
 
-        <Environment preset="warehouse" />
+        {/* Scintillation accents.
+            A diamond sparkles because its facets sweep past several distinct,
+            hard highlights as the piece turns. One broad light gives an even
+            sheen, which reads as glass; small separated points produce the
+            flashing. Kept dim — they are for the stones, not the metal. */}
+        <pointLight
+          position={[2.4, 1.7, 2.5]}
+          intensity={2.2}
+          distance={14}
+          decay={2}
+          color="#ffffff"
+        />
+        <pointLight
+          position={[-2.7, 1.0, 1.9]}
+          intensity={1.6}
+          distance={14}
+          decay={2}
+          color="#eaf1ff"
+        />
+        <pointLight
+          position={[0.5, -1.9, 2.7]}
+          intensity={1.2}
+          distance={14}
+          decay={2}
+          color="#fff1de"
+        />
+
+        {/* A polished metal is mostly a mirror, so its look IS the environment.
+            An empty warehouse is broadly uniform, which reflects as flat, even
+            yellow — the "painted" look. A studio HDRI has bright panels against
+            dark surrounds, and that contrast is what reads as metal. Paired
+            with the measured F0 colours in finishes.ts. */}
+        <Environment preset="studio" environmentIntensity={1.15} />
 
         <Suspense fallback={null}>
           {/* Tap anywhere on the piece to orbit and zoom around that spot. */}
