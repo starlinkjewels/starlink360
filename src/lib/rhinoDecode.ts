@@ -138,30 +138,36 @@ self.onmessage = function (e) {
       var got = 0;
 
       if (type === "Brep") {
+        // Jewellery has to be watertight to be manufactured, so a closed Brep
+        // is a real part. An open surface is construction geometry — a profile,
+        // a cutter, a silhouette — and rendering it draws a stray gold outline
+        // tracing the piece. Recorded per chunk and filtered once the whole
+        // document is known, so a file made only of surfaces still shows.
+        var solid = geometry.isSolid !== false;
         var faces = null;
         try { faces = geometry.faces(); } catch (err) { faces = null; }
         if (faces) {
           for (var f = 0; f < faces.count; f++) {
             var fm = null;
             try { fm = faces.get(f).getMesh(rhino.MeshType.Any); } catch (err) { fm = null; }
-            if (fm) got += push(fm, bucket, xf) ? 1 : 0;
+            if (fm) got += push(fm, bucket, xf, solid) ? 1 : 0;
           }
         }
       } else if (type === "Extrusion") {
         var em = null;
         try { em = geometry.getMesh(rhino.MeshType.Any); } catch (err) { em = null; }
-        if (em) got += push(em, bucket, xf) ? 1 : 0;
+        if (em) got += push(em, bucket, xf, true) ? 1 : 0;
       } else if (type === "SubD") {
         var sm = null;
         try { sm = rhino.Mesh.createFromSubDControlNet(geometry, false); } catch (err) { sm = null; }
-        if (sm) got += push(sm, bucket, xf) ? 1 : 0;
+        if (sm) got += push(sm, bucket, xf, true) ? 1 : 0;
       } else if (type === "Mesh") {
-        got += push(geometry, bucket, xf) ? 1 : 0;
+        got += push(geometry, bucket, xf, true) ? 1 : 0;
       }
       return got;
     }
 
-    function push(rhinoMesh, bucket, xf) {
+    function push(rhinoMesh, bucket, xf, solid) {
       var json;
       try { json = rhinoMesh.toThreejsJSON(); } catch (err) { return false; }
       var attrs = json && json.data && json.data.attributes;
@@ -217,6 +223,7 @@ self.onmessage = function (e) {
 
       chunks.push({
         bucket: bucket, pos: pos, nrm: nrm, idx: idx, hasNormals: !!N,
+        solid: solid !== false,
         minx: minx, miny: miny, minz: minz, maxx: maxx, maxy: maxy, maxz: maxz,
         tris: idx.length / 3
       });
@@ -270,6 +277,15 @@ self.onmessage = function (e) {
     }
 
     doc.delete();
+
+    // ── drop open construction surfaces, if real solids are present ──
+    var anySolid = false;
+    for (var q = 0; q < chunks.length; q++) if (chunks[q].solid) { anySolid = true; break; }
+    if (anySolid) {
+      var solidsOnly = [];
+      for (var q2 = 0; q2 < chunks.length; q2++) if (chunks[q2].solid) solidsOnly.push(chunks[q2]);
+      chunks = solidsOnly;
+    }
 
     // ── drop backdrop slabs: huge, flat, barely tessellated ──
     var ex = { minx: Infinity, miny: Infinity, minz: Infinity, maxx: -Infinity, maxy: -Infinity, maxz: -Infinity };
