@@ -127,6 +127,19 @@ self.onmessage = function (e) {
       var dc = M.diffuseColor || { r: 255, g: 255, b: 255 };
       var tc = M.transparentColor;
       var pick = chroma(tc) > chroma(dc) ? tc : dc;
+
+      /*
+       * A near-black colour means "not set", not "black stone".
+       *
+       * Rhino leaves diffuse at (0,0,0) on plenty of materials — the same way
+       * every object in this file reports objectColor (0,0,0) while actually
+       * drawing ByLayer. Taken literally that paints the diamonds black, and a
+       * black gem is never a real material. Anything this dark falls back to
+       * colourless, which is what a diamond is.
+       */
+      var lum = Math.max(pick.r, pick.g, pick.b);
+      if (lum < 24) pick = { r: 255, g: 255, b: 255 };
+
       matTable.push({
         name: M.name || "",
         hex: "#" + hex2(pick.r) + hex2(pick.g) + hex2(pick.b),

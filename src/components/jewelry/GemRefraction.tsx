@@ -42,7 +42,15 @@ const DIAMOND_IOR = 2.417;
  */
 function stoneColor(name: string): THREE.Color {
   const match = /gem-([0-9a-f]{6})/i.exec(name);
-  return new THREE.Color(match ? `#${match[1]}` : "#ffffff");
+  if (!match) return new THREE.Color("#ffffff");
+  const c = new THREE.Color(`#${match[1]}`);
+  /*
+   * Second line of defence against a black stone. The decoder already treats a
+   * near-black material as unset, but a GLB authored elsewhere can still carry
+   * one, and this material multiplies the refraction — so black in means a
+   * black gem out, which is never a real stone.
+   */
+  return Math.max(c.r, c.g, c.b) < 0.09 ? new THREE.Color("#ffffff") : c;
 }
 /** Bounces of total internal reflection. 3 is where brilliance appears. */
 const BOUNCES = 3;

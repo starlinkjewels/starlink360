@@ -2,7 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finishes, type Finish } from "@/data/finishes";
 import { products, type Product } from "@/data/products";
-import { ControlSheet, ControlTrigger } from "@/components/jewelry/ControlSheet";
+import { ControlTrigger } from "@/components/jewelry/ControlSheet";
+import { StudioPanel } from "@/components/jewelry/StudioPanel";
+import type { StudioApi } from "@/components/jewelry/StudioRig";
 import { LoadingOverlay } from "@/components/jewelry/LoadingOverlay";
 import { UploadPiece, type UploadStatus } from "@/components/jewelry/UploadPiece";
 import { estimateDecodeMs, useSmoothProgress } from "@/hooks/useSmoothProgress";
@@ -35,6 +37,7 @@ function Index() {
   const [product, setProduct] = useState<Product>(products[0]);
   const [finish, setFinish] = useState<Finish>(finishes[0]);
   const [autoRotate, setAutoRotate] = useState(true);
+  const [rotateSpeed, setRotateSpeed] = useState(1);
   const [resetSignal, setResetSignal] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -45,6 +48,8 @@ function Index() {
     null,
   );
   const uploadRef = useRef<HTMLDivElement>(null);
+  const studio = useRef<StudioApi | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -148,14 +153,26 @@ function Index() {
               product={product}
               finish={finish}
               autoRotate={autoRotate}
+              rotateSpeed={rotateSpeed}
               resetSignal={resetSignal}
               onLoadedChange={onLoadedChange}
+              studioRef={studio}
             />
           </Suspense>
         ) : (
           <LoadingOverlay />
         )}
       </div>
+
+      {/* Curtain over the canvas while exporting. The renderer is resized to
+          the output dimensions for every frame, so the live viewport would
+          otherwise flicker between shapes and look broken. */}
+      {exporting && (
+        <div className="export-curtain" role="status">
+          <span className="loader-star">✦</span>
+          <p className="export-curtain-text">{exporting}</p>
+        </div>
+      )}
 
       {/* ── Upload outcome — the popover has closed by now ────────── */}
       {uploadMsg && !upload && (
@@ -211,15 +228,34 @@ function Index() {
         </div>
       </div>
 
-      <ControlSheet
-        open={showControls}
-        onClose={closeControls}
-        finish={finish}
-        onSelectFinish={setFinish}
-        autoRotate={autoRotate}
-        onToggleRotate={() => setAutoRotate((v) => !v)}
-        onReset={() => setResetSignal((n) => n + 1)}
-      />
+      {showControls && (
+        <>
+          {/* Phones get a dismissable sheet; from lg up it docks as a sidebar,
+              which is where a studio panel belongs when there is room. */}
+          <div className="sheet-backdrop lg:hidden" onClick={closeControls} aria-hidden="true" />
+          <div
+            className="sheet studio-scroll max-lg:max-h-[85dvh] lg:studio-sidebar"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Studio"
+          >
+            <div className="sheet-grabber lg:hidden" aria-hidden="true" />
+            <StudioPanel
+              finish={finish}
+              onSelectFinish={setFinish}
+              autoRotate={autoRotate}
+              onToggleRotate={() => setAutoRotate((v) => !v)}
+              onReset={() => setResetSignal((n) => n + 1)}
+              rotateSpeed={rotateSpeed}
+              onRotateSpeed={setRotateSpeed}
+              studio={studio}
+              onBusyChange={setExporting}
+              productRef={product.ref}
+              onClose={closeControls}
+            />
+          </div>
+        </>
+      )}
     </main>
   );
 }

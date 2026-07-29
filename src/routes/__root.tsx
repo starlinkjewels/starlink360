@@ -127,6 +127,21 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        {/*
+         * Applies the saved theme before the first paint.
+         *
+         * Doing this in a React effect is one frame too late: the page paints
+         * dark, then flips to light, and that flash is the first thing a client
+         * sees on every load. It has to be a blocking inline script in <head>.
+         */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('starlink.theme');" +
+              "document.documentElement.dataset.theme=t==='light'?'light':'dark'}" +
+              "catch(e){document.documentElement.dataset.theme='dark'}",
+          }}
+        />
       </head>
       <body>
         {children}

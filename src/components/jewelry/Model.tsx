@@ -1,11 +1,11 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { useEnvironment, useGLTF } from "@react-three/drei";
+import { useGLTF } from "@react-three/drei";
 import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
 import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
 import { GemRefraction } from "./GemRefraction";
-import { ENV_PRESET } from "./environment";
+import { getGemEnvironment } from "./gemEnvironment";
 import { useFallbackScene } from "./FallbackPendant";
 
 /** What the camera needs to frame a piece. */
@@ -135,11 +135,11 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
     };
   }, [object, owned, ownsScene]);
 
-  const envMap = useEnvironment({ preset: ENV_PRESET });
+  // Stones refract the light tent, not the room the metal sits in.
   return (
     <>
       <primitive object={object} />
-      <GemRefraction meshes={stones} envMap={envMap} />
+      <GemRefraction meshes={stones} envMap={getGemEnvironment()} />
     </>
   );
 }

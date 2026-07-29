@@ -7,6 +7,7 @@ import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
 import { LoadingOverlay } from "./LoadingOverlay";
+import { StudioRig, type StudioApi } from "./StudioRig";
 import { ENV_PRESET } from "./environment";
 
 const FOV = 38;
@@ -124,17 +125,25 @@ export interface ViewerProps {
   product: Product;
   finish: Finish;
   autoRotate: boolean;
+  /** Turntable speed multiplier, 1 = the original pace. */
+  rotateSpeed?: number;
   resetSignal: number;
   onLoadedChange: (loaded: boolean) => void;
+  /** Filled with the capture API once a piece is framed; null while loading. */
+  studioRef?: React.MutableRefObject<StudioApi | null>;
 }
 
 export default function Viewer({
   product,
   finish,
   autoRotate,
+  rotateSpeed = 1,
   resetSignal,
   onLoadedChange,
+  studioRef,
 }: ViewerProps) {
+  const localStudio = useRef<StudioApi | null>(null);
+  const studio = studioRef ?? localStudio;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const [fit, setFit] = useState<Fit | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
@@ -210,6 +219,9 @@ export default function Viewer({
     () => ({
       antialias: true,
       alpha: true,
+      // Required to read pixels back after a render. Without it the buffer is
+      // already cleared by the time an export tries to grab the frame.
+      preserveDrawingBuffer: true,
       toneMapping: THREE.ACESFilmicToneMapping,
       toneMappingExposure: 1.4,
       outputColorSpace: THREE.SRGBColorSpace,
@@ -280,6 +292,7 @@ export default function Viewer({
         )}
 
         <Framing fit={fit} resetSignal={resetSignal} controlsRef={controlsRef} />
+        <StudioRig fit={fit} apiRef={studio} controlsRef={controlsRef} />
         <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
         <OrbitControls
           ref={controlsRef}
@@ -287,7 +300,7 @@ export default function Viewer({
           dampingFactor={0.06}
           enablePan
           autoRotate={autoRotate}
-          autoRotateSpeed={2.4}
+          autoRotateSpeed={2.4 * rotateSpeed}
           zoomToCursor
           makeDefault
         />
