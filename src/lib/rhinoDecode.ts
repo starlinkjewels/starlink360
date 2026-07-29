@@ -25,12 +25,22 @@ export interface DecodedBucket {
   index: Uint32Array;
 }
 
+/** One stone colour present in the piece. */
+export interface DecodedGem extends DecodedBucket {
+  /** sRGB hex from the Rhino render material, e.g. "#ffffff" for diamond, "#a01c28" for ruby. */
+  color: string;
+  /** Material name Rhino had on it — "Diamond", "Ruby", "Emerald". */
+  material: string;
+}
+
 export interface DecodedDocument {
   metal: DecodedBucket | null;
-  /** Stones large enough for screen-space refraction to actually work. */
-  gem: DecodedBucket | null;
-  /** Pave / melee — too small to refract, shaded reflectively instead. */
-  melee: DecodedBucket | null;
+  /**
+   * Stones grouped by colour. A piece can set diamond, ruby and sapphire at
+   * once, and each needs its own material — a single merged gem mesh forces
+   * every stone to be the same colour.
+   */
+  gems: DecodedGem[];
   notices: string[];
   /** Objects skipped because Rhino stored no render mesh for them. */
   missingMesh: number;
@@ -84,12 +94,63 @@ self.onmessage = function (e) {
     var doc = rhino.File3dm.fromByteArray(new Uint8Array(buffer));
     if (!doc) throw new Error("This file could not be read as a Rhino model.");
 
+    /*
+     * ── material table ──
+     *
+     * This is where a stone's real colour lives. Layer colours are Rhino's
+     * organisation palette, not the gem: in a real file Gem 01-04 came through
+     * as four shades of blue purely because that is the default ramp, which
+     * would have turned a set of diamonds into sapphires. The render material
+     * is authoritative — those same layers pointed at a material literally
+     * named "Diamond".
+     */
+    function hex2(n) {
+      var v = Math.max(0, Math.min(255, Math.round(n))).toString(16);
+      return v.length < 2 ? "0" + v : v;
+    }
+    function chroma(c) {
+      if (!c) return -1;
+      return Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b);
+    }
+
+    var mats = doc.materials();
+    var matTable = [];
+    for (var mi = 0; mi < mats.count; mi++) {
+      var M = mats.get(mi);
+      /*
+       * Which colour actually describes the stone depends on how the material
+       * was authored. A ruby is often built as a transparent material with the
+       * red on transparentColor and diffuse left white — reading diffuse alone
+       * would render it as a colourless diamond. Take whichever channel
+       * actually carries colour, and fall back to diffuse when neither does.
+       */
+      var dc = M.diffuseColor || { r: 255, g: 255, b: 255 };
+      var tc = M.transparentColor;
+      var pick = chroma(tc) > chroma(dc) ? tc : dc;
+      matTable.push({
+        name: M.name || "",
+        hex: "#" + hex2(pick.r) + hex2(pick.g) + hex2(pick.b),
+      });
+    }
+
     // ── layer table ──
     var layers = doc.layers();
     var layerTable = [];
     for (var i = 0; i < layers.count; i++) {
       var L = layers.get(i);
-      layerTable.push({ name: L.fullPath || L.name || "", visible: L.visible !== false });
+      layerTable.push({
+        name: L.fullPath || L.name || "",
+        visible: L.visible !== false,
+        mat: typeof L.renderMaterialIndex === "number" ? L.renderMaterialIndex : -1,
+      });
+    }
+
+    /** Object material wins when set, otherwise the layer's. */
+    function resolveMaterial(attrs, layer) {
+      var idx = attrs && typeof attrs.materialIndex === "number" ? attrs.materialIndex : -1;
+      if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
+      if (idx < 0 || idx >= matTable.length) return { name: "", hex: "#ffffff" };
+      return matTable[idx];
     }
 
     function classify(name) {
@@ -139,7 +200,7 @@ self.onmessage = function (e) {
     var groupId = 0;
 
     // Pull every cached render mesh off one geometry, transformed if needed.
-    function harvest(geometry, bucket, xf) {
+    function harvest(geometry, bucket, xf, mat) {
       var type = geometry.constructor.name;
       var got = 0;
       groupId++;
@@ -157,24 +218,24 @@ self.onmessage = function (e) {
           for (var f = 0; f < faces.count; f++) {
             var fm = null;
             try { fm = faces.get(f).getMesh(rhino.MeshType.Any); } catch (err) { fm = null; }
-            if (fm) got += push(fm, bucket, xf, solid) ? 1 : 0;
+            if (fm) got += push(fm, bucket, xf, solid, mat) ? 1 : 0;
           }
         }
       } else if (type === "Extrusion") {
         var em = null;
         try { em = geometry.getMesh(rhino.MeshType.Any); } catch (err) { em = null; }
-        if (em) got += push(em, bucket, xf, true) ? 1 : 0;
+        if (em) got += push(em, bucket, xf, true, mat) ? 1 : 0;
       } else if (type === "SubD") {
         var sm = null;
         try { sm = rhino.Mesh.createFromSubDControlNet(geometry, false); } catch (err) { sm = null; }
-        if (sm) got += push(sm, bucket, xf, true) ? 1 : 0;
+        if (sm) got += push(sm, bucket, xf, true, mat) ? 1 : 0;
       } else if (type === "Mesh") {
-        got += push(geometry, bucket, xf, true) ? 1 : 0;
+        got += push(geometry, bucket, xf, true, mat) ? 1 : 0;
       }
       return got;
     }
 
-    function push(rhinoMesh, bucket, xf, solid) {
+    function push(rhinoMesh, bucket, xf, solid, mat) {
       var json;
       try { json = rhinoMesh.toThreejsJSON(); } catch (err) { return false; }
       var attrs = json && json.data && json.data.attributes;
@@ -231,6 +292,7 @@ self.onmessage = function (e) {
       chunks.push({
         bucket: bucket, pos: pos, nrm: nrm, idx: idx, hasNormals: !!N,
         solid: solid !== false, group: groupId,
+        matName: mat ? mat.name : "", matHex: mat ? mat.hex : "#ffffff",
         minx: minx, miny: miny, minz: minz, maxx: maxx, maxy: maxy, maxz: maxz,
         tris: idx.length / 3
       });
@@ -249,6 +311,7 @@ self.onmessage = function (e) {
 
       var geometry = rec.obj.geometry();
       var type = geometry.constructor.name;
+      var mat = resolveMaterial(rec.obj.attributes(), layer);
 
       if (type === "InstanceReference") {
         var ids = idefMembers[geometry.parentIdefId];
@@ -269,12 +332,12 @@ self.onmessage = function (e) {
         if (ids) {
           for (var m = 0; m < ids.length; m++) {
             var member = byId[ids[m]];
-            if (member) harvest(member.obj.geometry(), bucket, xform);
+            if (member) harvest(member.obj.geometry(), bucket, xform, mat);
           }
         }
       } else {
         var solid = type === "Brep" || type === "Extrusion" || type === "SubD";
-        var got = harvest(geometry, bucket, null);
+        var got = harvest(geometry, bucket, null, mat);
         // Curves, points and annotations have no mesh by nature; only a solid
         // that yielded nothing means Rhino saved the file without render meshes.
         if (solid && got === 0) missingMesh++;
@@ -396,32 +459,63 @@ self.onmessage = function (e) {
       return { position: position, normal: normal, index: index };
     }
 
-    // ── separate melee from centre stones ──
-    // three refracts through a screen-space buffer, so a stone only a few
-    // pixels wide samples whatever sits behind it — the gold setting — and
-    // comes out looking like a cream bead. Below this size the stone is shaded
-    // reflectively instead, which is what reads as pave.
-    var MELEE_FRACTION = 0.06;
-    for (var mi = 0; mi < keep.length; mi++) {
-      var mk = keep[mi];
-      if (mk.bucket !== "gem") continue;
-      var ml = Math.max(mk.maxx - mk.minx, mk.maxy - mk.miny, mk.maxz - mk.minz);
-      if (ml < extent * MELEE_FRACTION) mk.bucket = "melee";
+    var metal = build("metal");
+
+    /*
+     * ── group stones by colour ──
+     *
+     * A piece can carry diamond, ruby and sapphire at once. Merging every stone
+     * into one mesh forces them all to share a material, so a coloured stone
+     * comes out as a white diamond. Grouping by the Rhino render material keeps
+     * each colour separate and lets the viewer give each its own gem material.
+     */
+    function buildGems() {
+      var byColour = {};
+      for (var i = 0; i < keep.length; i++) {
+        var k = keep[i];
+        if (k.bucket !== "gem") continue;
+        var slot = byColour[k.matHex];
+        if (!slot) slot = byColour[k.matHex] = { hex: k.matHex, name: k.matName, parts: [] };
+        slot.parts.push(k);
+      }
+
+      var out = [];
+      for (var hexKey in byColour) {
+        var grp = byColour[hexKey];
+        var nv = 0, ni = 0;
+        for (var a = 0; a < grp.parts.length; a++) {
+          nv += grp.parts[a].pos.length;
+          ni += grp.parts[a].idx.length;
+        }
+        if (!nv) continue;
+
+        var position = new Float32Array(nv);
+        var normal = new Float32Array(nv);
+        var index = new Uint32Array(ni);
+        var vo = 0, io = 0;
+        for (var b = 0; b < grp.parts.length; b++) {
+          var pt = grp.parts[b];
+          position.set(pt.pos, vo);
+          normal.set(pt.nrm, vo);
+          var base = vo / 3;
+          for (var q = 0; q < pt.idx.length; q++) index[io + q] = pt.idx[q] + base;
+          vo += pt.pos.length;
+          io += pt.idx.length;
+        }
+        out.push({ position: position, normal: normal, index: index, color: grp.hex, material: grp.name });
+      }
+      return out;
     }
 
-    var metal = build("metal");
-    var gem = build("gem");
-    var melee = build("melee");
+    var gems = buildGems();
 
     var transfer = [];
     if (metal) transfer.push(metal.position.buffer, metal.normal.buffer, metal.index.buffer);
-    if (gem) transfer.push(gem.position.buffer, gem.normal.buffer, gem.index.buffer);
-    if (melee) transfer.push(melee.position.buffer, melee.normal.buffer, melee.index.buffer);
+    for (var gx = 0; gx < gems.length; gx++) {
+      transfer.push(gems[gx].position.buffer, gems[gx].normal.buffer, gems[gx].index.buffer);
+    }
 
-    post(
-      { type: "done", metal: metal, gem: gem, melee: melee, missingMesh: missingMesh },
-      transfer
-    );
+    post({ type: "done", metal: metal, gems: gems, missingMesh: missingMesh }, transfer);
   }
 };
 `;
@@ -472,8 +566,7 @@ export function decodeRhinoDocument(
         finish(() =>
           resolve({
             metal: data.metal,
-            gem: data.gem,
-            melee: data.melee ?? null,
+            gems: data.gems ?? [],
             notices,
             missingMesh: data.missingMesh,
           }),

@@ -79,14 +79,12 @@ if (!decoded || decoded.type === "error") throw new Error(decoded?.message ?? "d
 
 // ── assemble, normalise, export ──────────────────────────────────────────
 const group = new THREE.Group();
-// "gem-melee" keeps the substring the viewer matches stones on, while letting
-// DressedScene pick the reflective melee material instead of the transmissive one.
-for (const [key, name] of [
-  ["metal", "metal"],
-  ["gem", "gem"],
-  ["melee", "gem-melee"],
-]) {
-  const b = decoded[key];
+// Metal, then one mesh per stone colour. The "gem-" prefix is what the viewer
+// matches stones on, and the hex after it carries the colour through the GLB.
+const buckets = [["metal", decoded.metal]].concat(
+  (decoded.gems ?? []).map((g) => [`gem-${g.color.replace("#", "")}`, g]),
+);
+for (const [name, b] of buckets) {
   if (!b) continue;
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(b.position, 3));
@@ -95,7 +93,8 @@ for (const [key, name] of [
   const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ metalness: 1, roughness: 0.22 }));
   mesh.name = name;
   group.add(mesh);
-  console.log(`✔   ${name}: ${(b.position.length / 3).toLocaleString()} verts`);
+  const label = b.material ? ` (${b.material})` : "";
+  console.log(`✔   ${name}${label}: ${(b.position.length / 3).toLocaleString()} verts`);
 }
 if (!group.children.length) throw new Error("nothing renderable found");
 

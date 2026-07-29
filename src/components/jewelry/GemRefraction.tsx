@@ -31,6 +31,19 @@ import { MeshRefractionMaterial } from "@react-three/drei/materials/MeshRefracti
 
 /** Refractive index of diamond. Glass is ~1.5, cubic zirconia ~2.15. */
 const DIAMOND_IOR = 2.417;
+
+/**
+ * Stone colour, read back out of the mesh name.
+ *
+ * rhinoDecode groups stones by their Rhino render material and encodes the
+ * colour into the name as `gem-rrggbb`, so a piece set with diamond and ruby
+ * arrives as two meshes and each gets its own tint here. Anything without a
+ * colour suffix falls back to colourless.
+ */
+function stoneColor(name: string): THREE.Color {
+  const match = /gem-([0-9a-f]{6})/i.exec(name);
+  return new THREE.Color(match ? `#${match[1]}` : "#ffffff");
+}
 /** Bounces of total internal reflection. 3 is where brilliance appears. */
 const BOUNCES = 3;
 /** Splits the ray per wavelength — this is the fire. */
@@ -108,7 +121,7 @@ export function GemRefraction({ meshes, envMap }: { meshes: THREE.Mesh[]; envMap
       material.ior = DIAMOND_IOR;
       material.fresnel = FRESNEL;
       material.aberrationStrength = ABERRATION;
-      material.color = new THREE.Color("white");
+      material.color = stoneColor(mesh.name);
       material.resolution = new THREE.Vector2(size.width, size.height);
 
       // The BVH is what makes the internal bounces real: each ray is

@@ -504,9 +504,10 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
   };
 
   attach(decoded.metal, "metal");
-  attach(decoded.gem, "gem");
-  // Name carries "gem" so existing stone detection still matches it.
-  attach(decoded.melee, "gem-melee");
+  // One mesh per stone colour. The name keeps the "gem" prefix the viewer
+  // matches on and carries the colour after it, so a piece set with diamond and
+  // ruby renders each correctly instead of forcing both to one material.
+  for (const gem of decoded.gems) attach(gem, `gem-${gem.color.replace("#", "")}`);
 
   if (!group.children.length) {
     throw new Error(
