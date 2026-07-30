@@ -312,13 +312,14 @@ function Index() {
       {/* touch-none stops the page panning/pull-to-refresh while orbiting */}
       <div className="absolute inset-0 touch-none">
         {mounted ? (
-          <Suspense fallback={<LoadingOverlay />}>
+          <Suspense fallback={upload ? null : <LoadingOverlay />}>
             <Viewer
               product={product}
               finish={finish}
               autoRotate={autoRotate}
               rotateSpeed={rotateSpeed}
               resetSignal={resetSignal}
+              hideLoader={upload !== null}
               onLoadedChange={onLoadedChange}
               studioRef={studio}
             />
@@ -359,7 +360,11 @@ function Index() {
         <LoadingOverlay
           label={upload.progress.phase}
           percent={uploadPercent}
-          detail={`${upload.fileName} · ${(upload.fileBytes / 1048576).toFixed(1)} MB`}
+          detail={
+            upload.fileBytes > 0
+              ? `${upload.fileName} · ${(upload.fileBytes / 1048576).toFixed(1)} MB`
+              : upload.fileName
+          }
         />
       )}
 

@@ -141,6 +141,16 @@ export interface ViewerProps {
   /** Turntable speed multiplier, 1 = the original pace. */
   rotateSpeed?: number;
   resetSignal: number;
+  /**
+   * Set while the page is already showing its own loading state.
+   *
+   * Both this component and the page render a full-screen overlay, and a piece
+   * arriving by link triggers both at once — the download progress from the
+   * page, "setting the stones" from here — so the two stacked on top of each
+   * other and printed doubled text over doubled progress bars. Whoever knows
+   * more owns the stage; during a download that is the page.
+   */
+  hideLoader?: boolean;
   onLoadedChange: (loaded: boolean) => void;
   /** Filled with the capture API once a piece is framed; null while loading. */
   studioRef?: React.MutableRefObject<StudioApi | null>;
@@ -152,6 +162,7 @@ export default function Viewer({
   autoRotate,
   rotateSpeed = 1,
   resetSignal,
+  hideLoader = false,
   onLoadedChange,
   studioRef,
 }: ViewerProps) {
@@ -319,7 +330,7 @@ export default function Viewer({
         />
       </Canvas>
 
-      {!fit && <LoadingOverlay />}
+      {!fit && !hideLoader && <LoadingOverlay />}
     </div>
   );
 }
