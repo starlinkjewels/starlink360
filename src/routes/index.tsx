@@ -11,7 +11,61 @@ import { estimateDecodeMs, useSmoothProgress } from "@/hooks/useSmoothProgress";
 
 const Viewer = lazy(() => import("@/components/jewelry/Viewer"));
 
+/**
+ * Query parameters, so another system can drive the viewer by link.
+ *
+ * This is the embed contract: a jewellery management system that already holds
+ * .3dm files points an iframe at `/?file=<url>&embed=1` and the piece loads.
+ * Everything is optional and anything unrecognised is ignored, so a partial or
+ * future link degrades to the normal viewer instead of erroring.
+ *
+ * Validated rather than read raw because `validateSearch` output feeds straight
+ * into a fetch and into rendered text.
+ */
+export interface ViewerSearch {
+  /** Model to load: an http(s) URL to a .3dm, .glb or .gltf. */
+  file?: string;
+  /** Display name, when the host system knows it better than the filename. */
+  name?: string;
+  /** Reference/SKU line under the name. */
+  ref?: string;
+  /** Hides the brand header and upload control, for use inside an iframe. */
+  embed?: boolean;
+}
+
+const asText = (v: unknown, max: number): string | undefined => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s ? s.slice(0, max) : undefined;
+};
+
+/**
+ * Reads the embed flag in whatever form the link writes it.
+ *
+ * Two traps here, both of which cost a redirect on every page load:
+ *
+ *  - Search values arrive already JSON-parsed, so `embed=1` is the NUMBER 1 and
+ *    `embed=true` is a real boolean. A string-only check silently drops both,
+ *    and the router then rewrites the address to remove the parameter.
+ *  - The router rewrites whenever validation changes a value, so this must
+ *    return `undefined` — not `false` — when absent. Returning `false` appended
+ *    `embed=false` to every ordinary visit and redirected it.
+ *
+ * `embed=true` is therefore the canonical form and round-trips untouched. The
+ * others are accepted and cost one harmless redirect.
+ */
+function parseEmbed(v: unknown): boolean | undefined {
+  if (typeof v === "boolean") return v || undefined;
+  if (v === undefined || v === null || v === "") return undefined;
+  return ["1", "true", "yes", "on"].includes(String(v).toLowerCase()) || undefined;
+}
+
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>): ViewerSearch => ({
+    file: asText(search.file, 2048),
+    name: asText(search.name, 60),
+    ref: asText(search.ref, 40),
+    embed: parseEmbed(search.embed),
+  }),
   head: () => ({
     meta: [
       { title: "Starlink Jewels — 3D Fine Jewelry Atelier" },
@@ -98,11 +152,75 @@ function Index() {
     setShowUpload(false);
   }, []);
 
+  /*
+   * Load the piece named in the link.
+   *
+   * Keyed on the URL alone so navigating between two pieces inside the same
+   * embed reloads, while a re-render for any other reason does not. The abort
+   * matters: swapping pieces mid-download would otherwise let the first fetch
+   * finish later and overwrite the second.
+   */
+  const { file: fileUrl, name: linkName, ref: linkRef, embed } = Route.useSearch();
+
+  useEffect(() => {
+    if (!fileUrl) return;
+    const abort = new AbortController();
+    let live = true;
+
+    setUploadMsg(null);
+    void (async () => {
+      try {
+        const { loadRemoteJewelry } = await import("@/lib/loadRemoteJewelry");
+        const { object, fileName, bytes } = await loadRemoteJewelry(fileUrl, {
+          signal: abort.signal,
+          onProgress: (progress) => {
+            if (live) setUpload({ progress, fileName, fileBytes: bytes || 0 });
+          },
+        });
+        if (!live) return;
+
+        const base = fileName.replace(/\.[^.]+$/, "");
+        handleUploaded({
+          id: `link-${fileUrl}`,
+          name: linkName ?? base.slice(0, 28) ?? "Piece",
+          ref: linkRef ?? `Ref. ${base.slice(0, 10).toUpperCase()}`,
+          glbUrl: "",
+          description: `Loaded from link · ${(bytes / 1048576).toFixed(1)} MB.`,
+          object,
+        });
+
+        // Parts Rhino saved without a render mesh cannot be drawn — say so
+        // rather than let the piece show up missing its band unexplained.
+        const notices = (object.userData as { notices?: string[] }).notices;
+        if (notices?.length) setUploadMsg({ kind: "notice", text: notices.join(" ") });
+      } catch (e) {
+        if (!live || (e instanceof DOMException && e.name === "AbortError")) return;
+        const { RemoteLoadError } = await import("@/lib/loadRemoteJewelry");
+        setUploadMsg({
+          kind: "error",
+          text:
+            e instanceof RemoteLoadError
+              ? [e.message, e.detail].filter(Boolean).join(" ")
+              : e instanceof Error
+                ? e.message
+                : "Could not load that model link.",
+        });
+      } finally {
+        if (live) setUpload(null);
+      }
+    })();
+
+    return () => {
+      live = false;
+      abort.abort();
+    };
+  }, [fileUrl, linkName, linkRef, handleUploaded]);
+
   return (
     <main className="stage" onPointerDown={() => setShowHint(false)}>
       {/* ── Floating header ─────────────────────────────────────── */}
       <header className="stage-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3">
-        <div className="pointer-events-auto min-w-0">
+        <div className={`pointer-events-auto min-w-0 ${embed ? "sr-only" : ""}`}>
           <h1 className="truncate font-serif text-xl tracking-wide sm:text-3xl">
             Starlink <span className="text-accent">✦</span> Jewels
           </h1>
@@ -111,8 +229,10 @@ function Index() {
           </p>
         </div>
 
-        {/* Upload trigger — top right */}
-        <div ref={uploadRef} className="pointer-events-auto relative">
+        {/* Upload trigger — top right. Hidden in an embed: the host system
+            chooses the piece via ?file=, so offering a picker here would let a
+            visitor replace it with something the host never sent. */}
+        <div ref={uploadRef} className="pointer-events-auto relative" hidden={embed}>
           <button
             className="dock-btn"
             onClick={() => setShowUpload((v) => !v)}

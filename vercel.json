@@ -3,5 +3,20 @@
   "buildCommand": "npm run build",
   "outputDirectory": ".output/public",
   "framework": null,
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": ""
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors *"
+        }
+      ]
+    }
+  ]
 }

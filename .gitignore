@@ -33,3 +33,4 @@ dist-ssr
 
 # Ingest-test build output
 .tmp-jewelry
+.tmp-serve
