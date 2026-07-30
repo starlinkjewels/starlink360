@@ -83,6 +83,23 @@ function place(mesh, layerIndex, materialIndex) {
   doc.objects().addMesh(mesh, a);
 }
 
+/**
+ * A stone set to ByLayer while an index is still assigned to it.
+ *
+ * This documents a Rhino guarantee rather than guarding a bug: writing a .3dm
+ * NORMALISES materialIndex to -1 whenever the source is ByLayer, so a stale
+ * index cannot survive in a file. Verified both here and on a real client file,
+ * where all 186 ByLayer objects carried index -1 and no others did. Worth
+ * keeping so the day that stops being true, this fails.
+ */
+function placeStale(mesh, layerIndex, staleIndex) {
+  const a = new rhino.ObjectAttributes();
+  a.layerIndex = layerIndex;
+  a.materialIndex = staleIndex;
+  a.materialSource = rhino.ObjectMaterialSource.MaterialFromLayer;
+  doc.objects().addMesh(mesh, a);
+}
+
 // Per-object colour: three different stones on one stone layer.
 place(gemMesh(0, 0, 0, 4), layerStone, MATS.diamond);
 place(gemMesh(10, 0, 0, 3), layerStone, MATS.ruby);
@@ -91,13 +108,17 @@ place(gemMesh(30, 0, 0, 3), layerStone, MATS.ruby); // second ruby — must merg
 // ByLayer colour: nothing set on the object at all.
 place(gemMesh(40, 0, 0, 2), layerEmerald);
 place(gemMesh(50, 0, 0, 2), layerEmerald);
+// Two emeralds set ByLayer with an index assigned anyway. Rhino drops the
+// index on save, so these must come out emerald, from the layer.
+placeStale(gemMesh(70, 0, 0, 2), layerEmerald, MATS.ruby);
+placeStale(gemMesh(80, 0, 0, 2), layerEmerald, MATS.gold);
 // A genuinely dark stone, to pin down what the near-black guard does to one.
 place(gemMesh(60, 0, 0, 3), layerStone, MATS.onyx);
 // Metal, so the stones have something to be separated from.
 place(gemMesh(0, -20, 0, 12), layerMetal, MATS.gold);
 
 const bytes = doc.toByteArray();
-console.log(`  built a ${(bytes.length / 1024).toFixed(1)} KB .3dm with 7 stones in 5 colours\n`);
+console.log(`  built a ${(bytes.length / 1024).toFixed(1)} KB .3dm with 9 stones in 5 colours\n`);
 
 // ── run the real worker ────────────────────────────────────────────────────
 let done = null;
@@ -152,7 +173,7 @@ const EXPECTED = [
   { hex: "#ffffff", stones: 2, label: "Diamond + onyx fallback (per-object)" },
   { hex: "#b0102a", stones: 2, label: "Ruby x2, merged (per-object)" },
   { hex: "#0b3fa8", stones: 1, label: "Sapphire (per-object)" },
-  { hex: "#0f7a3d", stones: 2, label: "Emerald x2, merged (ByLayer)" },
+  { hex: "#0f7a3d", stones: 4, label: "Emerald x4 (ByLayer; assigned indices normalised away)" },
 ];
 
 let failures = 0;

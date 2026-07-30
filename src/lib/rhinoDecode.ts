@@ -126,7 +126,32 @@ self.onmessage = function (e) {
        */
       var dc = M.diffuseColor || { r: 255, g: 255, b: 255 };
       var tc = M.transparentColor;
-      var pick = chroma(tc) > chroma(dc) ? tc : dc;
+
+      /*
+       * Rhino 7 and 8 author gems as physically based materials, where the real
+       * colour lives on baseColor and legacy diffuse is often left plain white.
+       * Reading only diffuse renders every coloured stone as a white diamond.
+       *
+       * The guard is not defensive tidiness. In rhino3dm 8.17, reading
+       * baseColor on a material that is NOT physically based does not throw a
+       * normal error - it faults inside the wasm module ("null function or
+       * function signature mismatch"), which would take the whole decode down.
+       * So supported must be checked first, and the read wrapped even then.
+       */
+      var bc = null;
+      try {
+        var pbr = typeof M.physicallyBased === "function" ? M.physicallyBased() : null;
+        if (pbr && pbr.supported === true) bc = pbr.baseColor || null;
+      } catch (err) {
+        bc = null;
+      }
+
+      /* Whichever channel actually carries colour wins. A ruby is often built
+       * as a transparent material with the red on transparentColor and diffuse
+       * left white, so no single channel can be trusted alone. */
+      var pick = dc;
+      if (chroma(tc) > chroma(pick)) pick = tc;
+      if (bc && chroma(bc) > chroma(pick)) pick = bc;
 
       /*
        * A near-black colour means "not set", not "black stone".
@@ -158,10 +183,38 @@ self.onmessage = function (e) {
       });
     }
 
-    /** Object material wins when set, otherwise the layer's. */
+    var FROM_OBJECT = rhino.ObjectMaterialSource
+      ? rhino.ObjectMaterialSource.MaterialFromObject
+      : null;
+    var FROM_LAYER = rhino.ObjectMaterialSource
+      ? rhino.ObjectMaterialSource.MaterialFromLayer
+      : null;
+
+    /**
+     * The material an object actually draws with.
+     *
+     * The object's own index is only authoritative when the object says its
+     * material comes from itself. Rhino leaves a stale materialIndex behind on
+     * objects that were copied or imported and then set back to ByLayer, so
+     * trusting the index unconditionally applies a leftover material - which
+     * shows up as a set of stones in assorted wrong colours instead of one.
+     *
+     * The enum is compared by identity because rhino3dm exposes these as
+     * objects rather than numbers. When it is missing or unrecognised, fall
+     * back to the old rule (index when set, layer otherwise) rather than
+     * guessing.
+     */
     function resolveMaterial(attrs, layer) {
       var idx = attrs && typeof attrs.materialIndex === "number" ? attrs.materialIndex : -1;
-      if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
+      var src = attrs ? attrs.materialSource : null;
+
+      if (FROM_LAYER && src === FROM_LAYER) idx = layer ? layer.mat : -1;
+      else if (FROM_OBJECT && src === FROM_OBJECT) {
+        // Explicitly per-object, but an out-of-range index still has to fall
+        // back rather than drop the colour entirely.
+        if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
+      } else if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
+
       if (idx < 0 || idx >= matTable.length) return { name: "", hex: "#ffffff" };
       return matTable[idx];
     }
