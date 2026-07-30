@@ -168,6 +168,7 @@ self.onmessage = function (e) {
       matTable.push({
         name: M.name || "",
         hex: "#" + hex2(pick.r) + hex2(pick.g) + hex2(pick.b),
+        chroma: chroma(pick),
       });
     }
 
@@ -215,8 +216,99 @@ self.onmessage = function (e) {
         if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
       } else if (idx < 0 || idx >= matTable.length) idx = layer ? layer.mat : -1;
 
-      if (idx < 0 || idx >= matTable.length) return { name: "", hex: "#ffffff" };
+      if (idx < 0 || idx >= matTable.length) return { name: "", hex: "#ffffff", chroma: 0 };
       return matTable[idx];
+    }
+
+    /*
+     * Stone colour taken from the material or layer NAME.
+     *
+     * Jewellery CAD plugins - RhinoGold, MatrixGold - name a material after the
+     * stone and its size, which is why this client's files carry materials
+     * called "/Diamond0.2-<guid>" and "/Platinum-<guid>". The gem colour lives
+     * in the plugin's own data, NOT in the standard Rhino material, so the
+     * material that reaches us has plain white diffuse. Read literally, every
+     * coloured stone in such a file renders as a colourless diamond.
+     *
+     * The name is the only place the intent survives, so it is read here. Two
+     * rules keep this safe:
+     *
+     *  - A material that carries real colour of its own always wins. This is a
+     *    fallback for neutral materials, never an override.
+     *  - It is applied to stones only, so nothing here can tint metal.
+     *
+     * An entry of "" means "named, and genuinely colourless" - diamond, CZ,
+     * moissanite - which must stop the search rather than fall through to a
+     * later, looser pattern. Order matters: "pink sapphire" has to be read as
+     * pink before "sapphire" claims it as blue.
+     */
+    /*
+     * A trailing \b is useless on these names, and its absence is silent.
+     *
+     * The plugin writes the stone size straight onto the name with no
+     * separator — "/Diamond0.2", "/Ruby0.1" — and \b needs a word character
+     * beside a non-word character. Between "d" and "0" there is none, so
+     * /\bruby\b/ never matches "/Ruby0.1" and the stone just stays white.
+     * Short tokens are therefore closed with (?![a-z]), which still rejects
+     * "Czech" for "cz" but accepts a digit straight after.
+     */
+    var GEM_TINTS = [
+      // Compounds first. "Blue Topaz" is a pale aqua, not sapphire blue.
+      [/aquamarine|\baqua(?![a-z])|sky\s*blue|swiss\s*blue|blue\s*topaz/i, "#77c6d8"],
+      [/tanzanite|iolite/i, "#4b5ec4"],
+
+      // Then explicit colour words, so a "Pink Diamond" is pink, not white.
+      [/\bpink(?![a-z])/i, "#efa0bd"],
+      [/\bblack(?![a-z])|\bonyx(?![a-z])|\bjet(?![a-z])/i, "#141419"],
+      [/\bred(?![a-z])/i, "#a5182b"],
+      [/\bblue(?![a-z])/i, "#12409b"],
+      [/\bgreen(?![a-z])/i, "#0d7a45"],
+      [/\byellow(?![a-z])|canary/i, "#e6c33c"],
+      [/\bpurple(?![a-z])|violet|lavender/i, "#8f5cc0"],
+      [/\borange(?![a-z])/i, "#e07a2c"],
+      [/\bbrown(?![a-z])|cognac|smoky|champagne|chocolate/i, "#8b5a33"],
+
+      // Named and genuinely colourless. Must stop the search rather than fall
+      // through to a looser species pattern below.
+      [
+        /colou?rless|white\s*sapph|diamond|cubic\s*zirconia|\bcz(?![a-z])|moissanite|rock\s*crystal|crystal|\bglass(?![a-z])/i,
+        ""
+      ],
+
+      // Species whose name alone implies the colour.
+      [/\bruby(?![a-z])|rubellite|rhodolite/i, "#a5182b"],
+      [/garnet/i, "#7b2233"],
+      [/sapphire/i, "#12409b"],
+      [/emerald|tsavorite/i, "#0d7a45"],
+      [/peridot/i, "#adc523"],
+      [/amethyst/i, "#8f5cc0"],
+      [/citrine/i, "#e6c33c"],
+      [/padparadscha|spessartite|\bcoral(?![a-z])/i, "#e07a2c"],
+      [/morganite|rose\s*quartz/i, "#efa0bd"],
+      [/turquoise/i, "#3ec3bf"],
+      [/moonstone/i, "#e8eef5"],
+      [/\bopal(?![a-z])/i, "#e6eff2"],
+      [/\bpearl(?![a-z])/i, "#f7e8ea"],
+      [/\bamber(?![a-z])/i, "#cf8722"],
+      [/topaz/i, "#f0c164"]
+    ];
+
+    /** Hex for a stone name, "" when named-but-colourless, null when unknown. */
+    function gemTintFromName(text) {
+      if (!text) return null;
+      for (var t = 0; t < GEM_TINTS.length; t++) {
+        if (GEM_TINTS[t][0].test(text)) return GEM_TINTS[t][1];
+      }
+      return null;
+    }
+
+    /** Stones only. Anything with real colour of its own is left alone. */
+    function tintGem(mat, layer) {
+      if (mat.chroma >= 12) return mat;
+      var t = gemTintFromName(mat.name);
+      if (t === null && layer) t = gemTintFromName(layer.name);
+      if (!t) return mat;
+      return { name: mat.name, hex: t, chroma: 255 };
     }
 
     function classify(name) {
@@ -378,6 +470,8 @@ self.onmessage = function (e) {
       var geometry = rec.obj.geometry();
       var type = geometry.constructor.name;
       var mat = resolveMaterial(rec.obj.attributes(), layer);
+      // Names carry the stone type when the material does not carry the colour.
+      if (bucket === "gem") mat = tintGem(mat, layer);
 
       if (type === "InstanceReference") {
         var ids = idefMembers[geometry.parentIdefId];

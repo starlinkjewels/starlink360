@@ -170,7 +170,8 @@ for (const g of gems) {
 console.log(`  metal: ${done.metal ? done.metal.position.length / 3 + " verts" : "(none)"}\n`);
 
 const EXPECTED = [
-  { hex: "#ffffff", stones: 2, label: "Diamond + onyx fallback (per-object)" },
+  { hex: "#ffffff", stones: 1, label: "Diamond (per-object)" },
+  { hex: "#141419", stones: 1, label: "Black onyx keeps its colour, from its name" },
   { hex: "#b0102a", stones: 2, label: "Ruby x2, merged (per-object)" },
   { hex: "#0b3fa8", stones: 1, label: "Sapphire (per-object)" },
   { hex: "#0f7a3d", stones: 4, label: "Emerald x4 (ByLayer; assigned indices normalised away)" },
@@ -199,20 +200,22 @@ for (const want of EXPECTED) {
 }
 
 /*
- * Known limitation, asserted so it cannot change silently.
+ * Dark stones used to be unfixable here.
  *
  * Rhino leaves diffuse at (0,0,0) on any material where it was never set, so
- * the decoder reads anything below 24/255 as "unset" and falls back to
- * colourless. That is right for the common case and wrong for a genuinely dark
- * stone: black onyx, black spinel and the darkest garnets come through white.
- * Raising the threshold is not a fix — it would let real unset materials paint
- * stones black again, which is the worse failure.
+ * anything below 24/255 is read as "unset" and falls back to colourless —
+ * correct for the common case, but it also flattened genuinely dark stones.
+ * Raising the threshold was never the answer; it would let unset materials
+ * paint diamonds black again, which is the worse failure.
+ *
+ * The material NAME resolves it. "Black Onyx" is dark because it says so, while
+ * an unnamed near-black material still falls back to colourless.
  */
-const onyx = gems.find((g) => String(g.color).toLowerCase() === "#0a0a0c");
+const onyx = gems.find((g) => String(g.color).toLowerCase() === "#141419");
 check(
-  !onyx,
-  "KNOWN: black onyx is NOT kept dark — it falls back to colourless",
-  onyx ? "unexpectedly preserved" : "merged into the #ffffff group, as designed",
+  onyx !== undefined,
+  "black onyx is kept dark, resolved from its name",
+  onyx ? `${onyx.color} from material "${onyx.material}"` : "not found — fell back to white",
 );
 
 check(gems.length === EXPECTED.length, "no extra or missing groups", `${gems.length} groups`);
