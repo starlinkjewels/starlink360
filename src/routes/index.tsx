@@ -29,9 +29,25 @@ export interface ViewerSearch {
   name?: string;
   /** Reference/SKU line under the name. */
   ref?: string;
-  /** Hides the brand header and upload control, for use inside an iframe. */
+  /** Hides the brand header, for use inside an iframe. */
   embed?: boolean;
+  /**
+   * Reveals the upload control. Without it there is no way to load a file by
+   * hand, which is what keeps a client-facing link showing only the piece it
+   * was given.
+   */
+  key?: string;
 }
+
+/*
+ * Passphrase that reveals the upload control.
+ *
+ * Obscurity, not security: it travels in the address bar, so anyone who is sent
+ * a link with it — or who reads it out of the page source — can use it. That is
+ * acceptable for hiding a control, and must not be relied on for anything that
+ * needs actually protecting.
+ */
+const UPLOAD_KEY = "bhumit";
 
 const asText = (v: unknown, max: number): string | undefined => {
   const s = typeof v === "string" ? v.trim() : "";
@@ -65,6 +81,7 @@ export const Route = createFileRoute("/")({
     name: asText(search.name, 60),
     ref: asText(search.ref, 40),
     embed: parseEmbed(search.embed),
+    key: asText(search.key, 40),
   }),
   head: () => ({
     meta: [
@@ -160,7 +177,10 @@ function Index() {
    * matters: swapping pieces mid-download would otherwise let the first fetch
    * finish later and overwrite the second.
    */
-  const { file: fileUrl, name: linkName, ref: linkRef, embed } = Route.useSearch();
+  const { file: fileUrl, name: linkName, ref: linkRef, embed, key } = Route.useSearch();
+  // Hidden everywhere by default — on the plain route and behind a ?file= link
+  // alike. Only the passphrase brings it back.
+  const canUpload = key === UPLOAD_KEY;
 
   useEffect(() => {
     if (!fileUrl) return;
@@ -229,39 +249,46 @@ function Index() {
           </p>
         </div>
 
-        {/* Upload trigger — top right. Hidden in an embed: the host system
-            chooses the piece via ?file=, so offering a picker here would let a
-            visitor replace it with something the host never sent. */}
-        <div ref={uploadRef} className="pointer-events-auto relative" hidden={embed}>
-          <button
-            className="dock-btn"
-            onClick={() => setShowUpload((v) => !v)}
-            aria-label="Upload custom model"
-            aria-expanded={showUpload}
-            title="Upload your own .3dm / .glb"
-          >
-            <svg
-              className="size-3.5 shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              aria-hidden="true"
+        {/* Upload trigger — top right, and only behind the passphrase. A
+            client-facing link shows the piece it was given and nothing else, so
+            a visitor cannot swap in a file of their own. Rendered conditionally
+            rather than hidden, so it is absent from the page, not just unseen. */}
+        {canUpload && (
+          <div ref={uploadRef} className="pointer-events-auto relative">
+            <button
+              className="dock-btn"
+              onClick={() => setShowUpload((v) => !v)}
+              aria-label="Upload custom model"
+              aria-expanded={showUpload}
+              title="Upload your own .3dm / .glb"
             >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            {/* Icon-only below sm so the brand keeps its room on narrow phones */}
-            <span className="hidden sm:inline">Upload</span>
-          </button>
+              <svg
+                className="size-3.5 shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              {/* Icon-only below sm so the brand keeps its room on narrow phones */}
+              <span className="hidden sm:inline">Upload</span>
+            </button>
 
-          {showUpload && (
-            <div className="upload-popover">
-              <UploadPiece onLoaded={handleUploaded} onStatus={setUpload} onResult={setUploadMsg} />
-            </div>
-          )}
-        </div>
+            {showUpload && (
+              <div className="upload-popover">
+                <UploadPiece
+                  onLoaded={handleUploaded}
+                  onStatus={setUpload}
+                  onResult={setUploadMsg}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* ── Full-bleed 3D canvas ─────────────────────────────────── */}
