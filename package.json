@@ -17,7 +17,8 @@
     "test:3dm": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node --max-old-space-size=8192 scripts/test-worker-3dm.mjs",
     "profile:3dm": "node --max-old-space-size=8192 scripts/profile-3dm.mjs",
     "convert:3dm": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node --max-old-space-size=8192 scripts/convert-3dm.mjs",
-    "test:colours": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-coloured-stones.mjs"
+    "test:colours": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-coloured-stones.mjs",
+    "test:gem": "tsc src/components/jewelry/gemAbsorption.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-gem-absorption.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

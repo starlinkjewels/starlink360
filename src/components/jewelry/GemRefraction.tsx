@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
 import { MeshRefractionMaterial } from "@react-three/drei/materials/MeshRefractionMaterial";
+import { withPathAbsorption } from "./gemAbsorption";
 
 /*
  * A real diamond, rather than a transmissive approximation of one.
@@ -138,6 +139,36 @@ export function GemRefraction({ meshes, envMap }: { meshes: THREE.Mesh[]; envMap
       const geo = mesh.geometry;
       bvh.updateFrom(new MeshBVH(geo.index ? geo.toNonIndexed() : geo, { strategy: SAH }));
       material.bvh = bvh;
+
+      /*
+       * Depth-dependent colour, so a coloured stone reads as gemstone rather
+       * than tinted glass. Colourless stones are unaffected by construction —
+       * the absorption term is a power of the stone's colour, and one to any
+       * power is one — so the white diamond look is untouched.
+       *
+       * The reference length is measured from this stone, because the traced
+       * distance is in model space and a piece is scaled to unit size on load:
+       * a fixed number would absorb wildly differently on a solitaire and on a
+       * melee stone. Four radii approximates a ray's whole path through the
+       * stone across its internal bounces.
+       */
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      const reference = (geo.boundingSphere?.radius ?? 0.25) * 4;
+
+      material.onBeforeCompile = (shader) => {
+        const patched = withPathAbsorption(shader.fragmentShader, reference);
+        // Null means drei's shader is not the one this was written against.
+        // Keeping the original flat tint is correct; a partial patch is not.
+        if (patched) shader.fragmentShader = patched;
+      };
+      /*
+       * The reference length is baked into the shader text, so two stones of
+       * different sizes need different programs. Without this three reuses the
+       * first compiled program for all of them and every stone absorbs as if it
+       * were the size of whichever compiled first.
+       */
+      material.customProgramCacheKey = () => `gem-absorb-${reference.toPrecision(8)}`;
+
       material.needsUpdate = true;
 
       previous.push(mesh.material as THREE.Material);
