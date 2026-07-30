@@ -86,6 +86,23 @@ export interface RemoteJewelry {
 export interface RemoteLoadOptions {
   /** Assumed extension when the URL has none. */
   assumeType?: (typeof SUPPORTED)[number];
+  /**
+   * Name and size, as soon as each is known — first when the URL is parsed,
+   * again once the response headers give a length.
+   *
+   * This exists so a caller never has to reach into the returned object from
+   * inside `onProgress`. Writing
+   *
+   *   const { fileName, bytes } = await loadRemoteJewelry(url, {
+   *     onProgress: () => show(fileName),   // <- fileName is not initialised yet
+   *   });
+   *
+   * throws "Cannot access 'fileName' before initialization" on the very first
+   * progress tick, because the destructuring on the left cannot complete until
+   * the promise resolves. It is an easy mistake to make and a confusing one to
+   * read once minified, so the information is pushed instead of pulled.
+   */
+  onMeta?: (info: { fileName: string; bytes: number }) => void;
   onProgress?: (p: LoadProgress) => void;
   signal?: AbortSignal;
 }
@@ -99,10 +116,12 @@ export interface RemoteLoadOptions {
  */
 export async function loadRemoteJewelry(
   raw: string,
-  { assumeType = "3dm", onProgress, signal }: RemoteLoadOptions = {},
+  { assumeType = "3dm", onMeta, onProgress, signal }: RemoteLoadOptions = {},
 ): Promise<RemoteJewelry> {
   const url = parseUrl(raw);
   const fileName = fileNameFrom(url, assumeType);
+  // Name first; the size is not known until the headers arrive.
+  onMeta?.({ fileName, bytes: 0 });
 
   onProgress?.({ phase: "Fetching model", percent: 2 });
 
@@ -133,6 +152,7 @@ export async function loadRemoteJewelry(
   }
 
   const declared = Number(response.headers.get("content-length")) || 0;
+  onMeta?.({ fileName, bytes: declared });
   const buffer = await readWithProgress(response, declared, onProgress);
 
   if (buffer.byteLength === 0) {

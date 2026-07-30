@@ -191,14 +191,31 @@ function Index() {
     void (async () => {
       try {
         const { loadRemoteJewelry } = await import("@/lib/loadRemoteJewelry");
-        const { object, fileName, bytes } = await loadRemoteJewelry(fileUrl, {
+
+        /*
+         * Filled by `onMeta`, NOT destructured from the call below.
+         *
+         * Reading `fileName` out of `const { fileName } = await load(...)`
+         * inside this very call's `onProgress` throws "Cannot access 'fileName'
+         * before initialization" on the first progress tick — the binding does
+         * not exist until the promise resolves. It fired before the request was
+         * even sent, which made it look like a bundling fault rather than a
+         * plain scoping one.
+         */
+        const meta = { fileName: "", bytes: 0 };
+        const { object } = await loadRemoteJewelry(fileUrl, {
           signal: abort.signal,
+          onMeta: (m) => {
+            meta.fileName = m.fileName;
+            meta.bytes = m.bytes;
+          },
           onProgress: (progress) => {
-            if (live) setUpload({ progress, fileName, fileBytes: bytes || 0 });
+            if (live) setUpload({ progress, fileName: meta.fileName, fileBytes: meta.bytes });
           },
         });
         if (!live) return;
 
+        const { fileName, bytes } = meta;
         const base = fileName.replace(/\.[^.]+$/, "");
         handleUploaded({
           id: `link-${fileUrl}`,
