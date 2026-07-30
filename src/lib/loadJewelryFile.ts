@@ -12,7 +12,20 @@ export const DRACO_LIB = "https://www.gstatic.com/draco/versioned/decoders/1.5.7
  * crisp. Rhino tessellates NURBS into flat triangles, so without this every
  * curved band renders visibly faceted.
  */
-const METAL_CREASE_ANGLE = THREE.MathUtils.degToRad(35);
+/*
+ * Written out rather than `THREE.MathUtils.degToRad(35)`.
+ *
+ * That call ran while this module was still initialising, which means it read a
+ * binding out of the three.js chunk before that chunk had finished evaluating
+ * its own declarations. The bundler exposes the namespace as getters, so the
+ * getter handed back a value still in its temporal dead zone and the whole
+ * upload died with "Cannot access 'a' before initialization" — a minified name,
+ * from a file nobody had touched.
+ *
+ * Nothing imported may be *called* at module scope for that reason. A literal
+ * cannot fail. 35 degrees.
+ */
+const METAL_CREASE_ANGLE = (35 * Math.PI) / 180;
 
 /** Weld distance, applied after the model is normalised to a unit sphere. */
 const WELD_TOLERANCE = 1e-4;

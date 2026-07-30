@@ -15,10 +15,23 @@ const FOV = 38;
 /** Breathing room around the piece so it never touches the viewport edge. */
 const FIT_MARGIN = 1.12;
 
-/** Three-quarter view direction; length is normalised, distance comes from the fit. */
-const VIEW_DIR = new THREE.Vector3(0.22, 0.18, 0.98).normalize();
+/*
+ * Three-quarter view direction, pre-normalised by hand.
+ *
+ * Constructing a THREE.Vector3 at module scope ran during this chunk's own
+ * initialisation, which read a class out of the three.js chunk before that
+ * chunk had finished declaring it. The bundler exposes the namespace as
+ * getters, so the getter returned a binding still in its temporal dead zone and
+ * the viewer died with "Cannot access 'a' before initialization".
+ *
+ * Nothing imported may be constructed or called at module scope for that
+ * reason. Plain numbers cannot fail, and the vectors are built where they are
+ * used. Values are (0.22, 0.18, 0.98) divided by its length, 1.0203921.
+ */
+const VIEW_DIR = [0.2156034, 0.1764028, 0.9604151] as const;
 
-const ORIGIN = new THREE.Vector3();
+/** Rebuilt per call rather than shared — a module-scope instance is the hazard. */
+const origin = () => new THREE.Vector3();
 
 function Framing({
   fit,
@@ -51,7 +64,7 @@ function Framing({
     const forWidth = fit.radiusXZ / tanH + fit.radiusXZ;
     const dist = Math.max(forHeight, forWidth) * FIT_MARGIN;
 
-    camera.position.copy(VIEW_DIR).multiplyScalar(dist);
+    camera.position.set(...VIEW_DIR).multiplyScalar(dist);
     camera.near = Math.max(dist / 1000, 0.001);
     camera.far = dist * 20;
     camera.updateProjectionMatrix();
@@ -202,7 +215,7 @@ export default function Viewer({
       if (moved > 8) return;
 
       e.stopPropagation();
-      const current = e.camera.position.distanceTo(controlsRef.current?.target ?? ORIGIN);
+      const current = e.camera.position.distanceTo(controlsRef.current?.target ?? origin());
       setFocus({
         point: e.point.clone(),
         // Close enough to read a setting, but never pull back out if they've
