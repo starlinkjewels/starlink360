@@ -498,6 +498,29 @@ export async function compressToJewelryScene(
 }
 
 /**
+ * A readable name for a group.
+ *
+ * Rhino layer paths are nested — "Jewellery::Stones::Gem 01" — and only the
+ * last segment means anything to the person choosing a colour. The material
+ * name is the fallback, stripped of the plugin's decoration: RhinoGold writes
+ * "/Diamond0.2-960779ad-78a9-4f57-b66d-568aee82f44b", of which only "Diamond"
+ * is worth showing.
+ */
+export function stoneLabel(layer: string, material: string): string {
+  const leaf = layer.split("::").pop()?.trim();
+  if (leaf) return leaf;
+
+  const cleaned = material
+    .replace(/^\//, "")
+    // Trailing GUID the plugin appends to keep material names unique.
+    .replace(/-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i, "")
+    // The carat size welded onto the name, e.g. "Diamond0.2".
+    .replace(/[\d.]+$/, "")
+    .trim();
+  return cleaned || "Stones";
+}
+
+/**
  * Turns the worker's typed arrays into the two-mesh scene the viewer expects.
  * Everything heavy already happened off-thread; this is just wrapping buffers
  * and normalising scale, so it stays well inside one frame's budget.
@@ -506,7 +529,7 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
   const group = new THREE.Group();
 
   const attach = (bucket: DecodedBucket | null, name: string) => {
-    if (!bucket || !bucket.position.length) return;
+    if (!bucket || !bucket.position.length) return null;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(bucket.position, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(bucket.normal, 3));
@@ -514,13 +537,28 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial());
     mesh.name = name;
     group.add(mesh);
+    return mesh;
   };
 
   attach(decoded.metal, "metal");
-  // One mesh per stone colour. The name keeps the "gem" prefix the viewer
-  // matches on and carries the colour after it, so a piece set with diamond and
-  // ruby renders each correctly instead of forcing both to one material.
-  for (const gem of decoded.gems) attach(gem, `gem-${gem.color.replace("#", "")}`);
+  // One mesh per stone colour and layer. The name keeps the "gem" prefix the
+  // viewer matches on and carries the colour after it, so a piece set with
+  // diamond and ruby renders each correctly instead of forcing both to one
+  // material.
+  for (const gem of decoded.gems) {
+    const mesh = attach(gem, `gem-${gem.color.replace("#", "")}`);
+    if (!mesh) continue;
+    /*
+     * What the stone picker selects. Held on the mesh rather than returned
+     * separately so it survives the clone in DressedScene — the scene the
+     * viewer renders is a copy, and anything kept alongside would be lost.
+     */
+    mesh.userData.stone = {
+      id: `${gem.layer}|${gem.color}`,
+      label: stoneLabel(gem.layer, gem.material),
+      hex: gem.color,
+    };
+  }
 
   if (!group.children.length) {
     throw new Error(

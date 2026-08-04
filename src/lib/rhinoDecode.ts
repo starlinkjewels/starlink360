@@ -31,6 +31,16 @@ export interface DecodedGem extends DecodedBucket {
   color: string;
   /** Material name Rhino had on it — "Diamond", "Ruby", "Emerald". */
   material: string;
+  /**
+   * Rhino layer the stones sit on — "Gem 01", "Gem 02".
+   *
+   * This is the jeweller's own separation of centre stone from melee, and it is
+   * what makes a stone selectable: grouping by colour alone merges every white
+   * stone in a piece into one object with nothing to point at.
+   */
+  layer: string;
+  /** Mesh chunks merged in (BRep faces). Not a stone count. */
+  parts: number;
 }
 
 export interface DecodedDocument {
@@ -451,6 +461,7 @@ self.onmessage = function (e) {
         bucket: bucket, pos: pos, nrm: nrm, idx: idx, hasNormals: !!N,
         solid: solid !== false, group: groupId,
         matName: mat ? mat.name : "", matHex: mat ? mat.hex : "#ffffff",
+        matLayer: mat ? mat.layer || "" : "",
         minx: minx, miny: miny, minz: minz, maxx: maxx, maxy: maxy, maxz: maxz,
         tris: idx.length / 3
       });
@@ -472,6 +483,26 @@ self.onmessage = function (e) {
       var mat = resolveMaterial(rec.obj.attributes(), layer);
       // Names carry the stone type when the material does not carry the colour.
       if (bucket === "gem") mat = tintGem(mat, layer);
+
+      /*
+       * Copy, and carry the layer along.
+       *
+       * The copy matters: resolveMaterial hands back the shared table entry, so
+       * writing the layer onto it would smear one object's layer across every
+       * other object using that material.
+       *
+       * The layer is carried because it is how a jeweller separates stones -
+       * "Gem 01" the centre, "Gem 02" the melee - and grouping stones by colour
+       * alone merges all of those into a single object that cannot be picked
+       * apart. Selecting one stone type to recolour needs the jeweller's own
+       * grouping, not ours.
+       */
+      mat = {
+        name: mat.name,
+        hex: mat.hex,
+        chroma: mat.chroma,
+        layer: layer ? layer.name || "" : ""
+      };
 
       if (type === "InstanceReference") {
         var ids = idefMembers[geometry.parentIdefId];
@@ -630,12 +661,30 @@ self.onmessage = function (e) {
      * each colour separate and lets the viewer give each its own gem material.
      */
     function buildGems() {
+      /*
+       * Split by the jeweller's own grouping, not only by colour.
+       *
+       * Grouping by colour alone merges every white stone in a piece into one
+       * object, so there is nothing to point at: a centre diamond and two
+       * hundred melee stones are indistinguishable. Rhino layers already carry
+       * that distinction - "Gem 01" the centre, "Gem 02" the pave - so the
+       * layer is part of the key. Stones of one colour on one layer still merge
+       * into a single draw call, which is what keeps pave affordable.
+       */
       var byColour = {};
       for (var i = 0; i < keep.length; i++) {
         var k = keep[i];
         if (k.bucket !== "gem") continue;
-        var slot = byColour[k.matHex];
-        if (!slot) slot = byColour[k.matHex] = { hex: k.matHex, name: k.matName, parts: [] };
+        var gkey = k.matHex + "|" + (k.matLayer || "");
+        var slot = byColour[gkey];
+        if (!slot) {
+          slot = byColour[gkey] = {
+            hex: k.matHex,
+            name: k.matName,
+            layer: k.matLayer || "",
+            parts: []
+          };
+        }
         slot.parts.push(k);
       }
 
@@ -662,7 +711,16 @@ self.onmessage = function (e) {
           vo += pt.pos.length;
           io += pt.idx.length;
         }
-        out.push({ position: position, normal: normal, index: index, color: grp.hex, material: grp.name });
+        out.push({
+          position: position,
+          normal: normal,
+          index: index,
+          color: grp.hex,
+          material: grp.name,
+          layer: grp.layer,
+          // Mesh chunks merged in - BRep faces, not stones. Not a stone count.
+          parts: grp.parts.length
+        });
       }
       return out;
     }

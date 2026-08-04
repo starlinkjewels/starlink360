@@ -8,6 +8,7 @@ import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { StudioRig, type StudioApi } from "./StudioRig";
+import type { StoneGroup } from "./stones";
 import { ENV_PRESET } from "./environment";
 
 const FOV = 38;
@@ -151,6 +152,12 @@ export interface ViewerProps {
    * more owns the stage; during a download that is the page.
    */
   hideLoader?: boolean;
+  /** Colour chosen per stone group in the picker, keyed by group id. */
+  stoneColors?: Record<string, string>;
+  /** The selectable stone groups in the loaded piece. */
+  onStones?: (groups: StoneGroup[]) => void;
+  /** Fired when a stone is tapped on the piece, so the picker can follow. */
+  onStoneTap?: (id: string) => void;
   onLoadedChange: (loaded: boolean) => void;
   /** Filled with the capture API once a piece is framed; null while loading. */
   studioRef?: React.MutableRefObject<StudioApi | null>;
@@ -163,6 +170,9 @@ export default function Viewer({
   rotateSpeed = 1,
   resetSignal,
   hideLoader = false,
+  stoneColors,
+  onStones,
+  onStoneTap,
   onLoadedChange,
   studioRef,
 }: ViewerProps) {
@@ -226,6 +236,16 @@ export default function Viewer({
       if (moved > 8) return;
 
       e.stopPropagation();
+
+      /*
+       * Tapping a stone also selects it, so the picker follows the piece rather
+       * than making someone match a name in a list to a stone on screen. Focus
+       * still happens either way — the two are not exclusive, and suppressing
+       * the zoom would make stones feel unlike every other part of the model.
+       */
+      const stone = (e.object?.userData?.stone as { id?: string } | undefined)?.id;
+      if (stone) onStoneTap?.(stone);
+
       const current = e.camera.position.distanceTo(controlsRef.current?.target ?? origin());
       setFocus({
         point: e.point.clone(),
@@ -234,7 +254,7 @@ export default function Viewer({
         dist: Math.min(current, fit.radius * 0.55),
       });
     },
-    [fit],
+    [fit, onStoneTap],
   );
 
   const clearFocus = useCallback(() => setFocus(null), []);
@@ -289,15 +309,31 @@ export default function Viewer({
           {/* Tap anywhere on the piece to orbit and zoom around that spot. */}
           <group onClick={handleModelTap}>
             {source === "glb" && (
-              <GLBModel key={product.id} url={product.glbUrl} finish={finish} onFit={handleFit} />
+              <GLBModel
+                key={product.id}
+                url={product.glbUrl}
+                finish={finish}
+                onFit={handleFit}
+                stoneColors={stoneColors}
+                onStones={onStones}
+              />
             )}
-            {source === "fallback" && <FallbackModel finish={finish} onFit={handleFit} />}
+            {source === "fallback" && (
+              <FallbackModel
+                finish={finish}
+                onFit={handleFit}
+                stoneColors={stoneColors}
+                onStones={onStones}
+              />
+            )}
             {source === "object" && product.object && (
               <ObjectModel
                 key={product.id}
                 object={product.object}
                 finish={finish}
                 onFit={handleFit}
+                stoneColors={stoneColors}
+                onStones={onStones}
               />
             )}
           </group>

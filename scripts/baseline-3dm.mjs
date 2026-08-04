@@ -41,5 +41,7 @@ console.log(
 );
 console.log(`  gem groups   ${(done.gems ?? []).length}`);
 for (const g of done.gems ?? [])
-  console.log(`    ${g.color}  ${n(g.position.length / 3)} verts  material="${g.material}"`);
+  console.log(
+    `    ${g.color}  ${n(g.position.length / 3)} verts  ${g.parts} parts  layer="${g.layer}"  material="${g.material}"`,
+  );
 console.log(`  missingMesh  ${done.missingMesh}`);

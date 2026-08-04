@@ -107,7 +107,19 @@ interface RefractionMaterialLike extends THREE.ShaderMaterial {
  * alternative is lifting every stone out into JSX and re-deriving its world
  * transform, which risks the framing and recentering for no benefit.
  */
-export function GemRefraction({ meshes, envMap }: { meshes: THREE.Mesh[]; envMap: THREE.Texture }) {
+export function GemRefraction({
+  meshes,
+  envMap,
+  overrides,
+}: {
+  meshes: THREE.Mesh[];
+  envMap: THREE.Texture;
+  /**
+   * Colour chosen in the picker, by stone-group id. Absent means the group
+   * keeps whatever the file specified.
+   */
+  overrides?: Record<string, string>;
+}) {
   const size = useThree((s) => s.size);
   const materials = useRef<RefractionMaterialLike[]>([]);
 
@@ -188,6 +200,24 @@ export function GemRefraction({ meshes, envMap }: { meshes: THREE.Mesh[]; envMap
       materials.current = [];
     };
   }, [meshes, envMap, size.width, size.height]);
+
+  /*
+   * Recolour in place.
+   *
+   * Rebuilding the materials would mean rebuilding every BVH with them, which
+   * is the expensive part of setting up a stone — seconds on a pave field. The
+   * shader reads the colour as a uniform, so assigning it is enough and the
+   * change lands on the next frame.
+   */
+  useLayoutEffect(() => {
+    materials.current.forEach((material, i) => {
+      const mesh = meshes[i];
+      if (!mesh) return;
+      const id = (mesh.userData?.stone as { id?: string } | undefined)?.id;
+      const chosen = id ? overrides?.[id] : undefined;
+      material.color.set(chosen ?? stoneColor(mesh.name));
+    });
+  }, [meshes, overrides]);
 
   // The shader reconstructs world rays itself, so it needs the camera each frame.
   useFrame(({ camera }) => {

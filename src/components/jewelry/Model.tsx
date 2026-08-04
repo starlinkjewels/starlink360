@@ -6,6 +6,7 @@ import { DRACO_LIB } from "@/lib/loadJewelryFile";
 import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
 import { GemRefraction } from "./GemRefraction";
 import { ENV_PRESET } from "./environment";
+import { collectStoneGroups, type StoneGroup } from "./stones";
 import { useFallbackScene } from "./FallbackPendant";
 
 /** What the camera needs to frame a piece. */
@@ -22,6 +23,10 @@ interface DressedProps {
   scene: THREE.Object3D;
   finish: Finish;
   onFit: (fit: Fit) => void;
+  /** Colour chosen per stone group in the picker, keyed by group id. */
+  stoneColors?: Record<string, string>;
+  /** Reports the selectable stone groups once the piece is built. */
+  onStones?: (groups: StoneGroup[]) => void;
   /**
    * True when the caller hands us a scene nobody else holds — an upload or the
    * procedural stand-in. Those we free entirely on unmount, otherwise every
@@ -31,7 +36,14 @@ interface DressedProps {
   ownsScene?: boolean;
 }
 
-export function DressedScene({ scene, finish, onFit, ownsScene = false }: DressedProps) {
+export function DressedScene({
+  scene,
+  finish,
+  onFit,
+  stoneColors,
+  onStones,
+  ownsScene = false,
+}: DressedProps) {
   const { object, owned, stones } = useMemo(() => {
     const root = scene.clone(true);
     // Geometry we allocated here, and must therefore dispose. Anything reused
@@ -106,6 +118,17 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
     });
   }, [object, onFit]);
 
+  /*
+   * Publish the selectable stone groups.
+   *
+   * Read off the built scene rather than passed alongside it, because the scene
+   * the viewer renders is a clone — anything carried separately would point at
+   * the original's meshes and recolour nothing.
+   */
+  useEffect(() => {
+    onStones?.(collectStoneGroups(object));
+  }, [object, onStones]);
+
   // Live metal finish updates without rebuilding the scene.
   useEffect(() => {
     object.traverse((child) => {
@@ -139,7 +162,7 @@ export function DressedScene({ scene, finish, onFit, ownsScene = false }: Dresse
   return (
     <>
       <primitive object={object} />
-      <GemRefraction meshes={stones} envMap={envMap} />
+      <GemRefraction overrides={stoneColors} meshes={stones} envMap={envMap} />
     </>
   );
 }
@@ -148,31 +171,75 @@ export function GLBModel({
   url,
   finish,
   onFit,
+  stoneColors,
+  onStones,
 }: {
   url: string;
   finish: Finish;
   onFit: (fit: Fit) => void;
+  stoneColors?: Record<string, string>;
+  onStones?: (groups: StoneGroup[]) => void;
 }) {
   // The shipped GLB is Draco-compressed, so a decoder is required rather than
   // optional. Pin it to the same build UploadPiece prefetches on idle, so the
   // two paths share one download instead of pulling drei's default 1.5.5 too.
   const { scene } = useGLTF(url, DRACO_LIB);
-  return <DressedScene scene={scene} finish={finish} onFit={onFit} />;
+  return (
+    <DressedScene
+      scene={scene}
+      finish={finish}
+      onFit={onFit}
+      stoneColors={stoneColors}
+      onStones={onStones}
+    />
+  );
 }
 
-export function FallbackModel({ finish, onFit }: { finish: Finish; onFit: (fit: Fit) => void }) {
+export function FallbackModel({
+  finish,
+  onFit,
+  stoneColors,
+  onStones,
+}: {
+  finish: Finish;
+  onFit: (fit: Fit) => void;
+  stoneColors?: Record<string, string>;
+  onStones?: (groups: StoneGroup[]) => void;
+}) {
   const scene = useFallbackScene();
-  return <DressedScene scene={scene} finish={finish} onFit={onFit} ownsScene />;
+  return (
+    <DressedScene
+      scene={scene}
+      finish={finish}
+      onFit={onFit}
+      stoneColors={stoneColors}
+      onStones={onStones}
+      ownsScene
+    />
+  );
 }
 
 export function ObjectModel({
   object,
   finish,
   onFit,
+  stoneColors,
+  onStones,
 }: {
   object: THREE.Object3D;
   finish: Finish;
   onFit: (fit: Fit) => void;
+  stoneColors?: Record<string, string>;
+  onStones?: (groups: StoneGroup[]) => void;
 }) {
-  return <DressedScene scene={object} finish={finish} onFit={onFit} ownsScene />;
+  return (
+    <DressedScene
+      scene={object}
+      finish={finish}
+      onFit={onFit}
+      stoneColors={stoneColors}
+      onStones={onStones}
+      ownsScene
+    />
+  );
 }

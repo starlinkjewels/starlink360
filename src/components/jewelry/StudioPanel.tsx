@@ -6,6 +6,7 @@ import {
   Download,
   Film,
   Gem,
+  Sparkles,
   Image as ImageIcon,
   Pause,
   Play,
@@ -17,6 +18,7 @@ import {
 import { finishes, type Finish } from "@/data/finishes";
 import { Select } from "./Select";
 import { useTheme } from "@/hooks/useTheme";
+import { STONE_PRESETS, type StoneGroup } from "./stones";
 import type { SavedView, StudioApi } from "./StudioRig";
 import {
   ASPECTS,
@@ -215,6 +217,14 @@ export interface StudioPanelProps {
   onRotateSpeed: (v: number) => void;
   studio: React.MutableRefObject<StudioApi | null>;
   productRef: string;
+  /** Selectable stone groups in the loaded piece. */
+  stones?: StoneGroup[];
+  /** Colour chosen per group, keyed by group id. */
+  stoneColors?: Record<string, string>;
+  onStoneColor?: (id: string, hex: string | null) => void;
+  /** Group last tapped on the piece, so the list follows the 3D view. */
+  selectedStone?: string | null;
+  onSelectStone?: (id: string | null) => void;
   /** Lets the page curtain the canvas while frames are being rendered. */
   onBusyChange?: (label: string | null) => void;
   onClose?: () => void;
@@ -230,11 +240,25 @@ export function StudioPanel({
   onRotateSpeed,
   studio,
   productRef,
+  stones = [],
+  stoneColors = {},
+  onStoneColor,
+  selectedStone = null,
+  onSelectStone,
   onBusyChange,
   onClose,
 }: StudioPanelProps) {
   const [theme, setTheme] = useTheme();
   const [open, setOpen] = useState<string>("photos");
+
+  /*
+   * Tapping a stone on the piece opens this section and scrolls it into view.
+   * Without that the selection lands silently in a collapsed section and the
+   * tap looks like it did nothing.
+   */
+  useEffect(() => {
+    if (selectedStone) setOpen("stones");
+  }, [selectedStone]);
   const toggle = (id: string) => setOpen((cur) => (cur === id ? "" : id));
 
   const [aspect, setAspect] = useState<AspectPreset>(ASPECTS[0]);
@@ -574,6 +598,107 @@ export function StudioPanel({
           </button>
         )}
       </div>
+
+      {/* ── Stones ────────────────────────────────────────────────── */}
+      {stones.length > 0 && (
+        <Section
+          icon={<Sparkles className="size-4" />}
+          title="Stones"
+          subtitle={
+            stones.length === 1
+              ? stoneColors[stones[0].id]
+                ? "Recoloured"
+                : stones[0].label
+              : `${stones.length} sets`
+          }
+          open={open === "stones"}
+          onToggle={() => toggle("stones")}
+        >
+          <p className="field-hint mb-2">
+            Tap a stone on the piece to pick it, or choose a set below. Stones sharing a colour on
+            one layer are set together, which is how the file is organised.
+          </p>
+
+          <ul className="view-list">
+            {stones.map((g) => {
+              const current = stoneColors[g.id] ?? g.originalHex;
+              const changed = stoneColors[g.id] !== undefined;
+              return (
+                <li
+                  key={g.id}
+                  className={`stone-row ${selectedStone === g.id ? "stone-row-on" : ""}`}
+                >
+                  <button
+                    className="stone-pick"
+                    onClick={() => onSelectStone?.(selectedStone === g.id ? null : g.id)}
+                    aria-pressed={selectedStone === g.id}
+                  >
+                    <span className="swatch-dot swatch-dot-sm" style={{ background: current }} />
+                    <span className="stone-name">{g.label}</span>
+                  </button>
+                  {changed && (
+                    <button
+                      className="chip"
+                      onClick={() => onStoneColor?.(g.id, null)}
+                      title="Back to the colour in the file"
+                      aria-label={`Reset ${g.label}`}
+                    >
+                      <RotateCcw className="size-3" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          {selectedStone && (
+            <>
+              <p className="field-label mt-3">
+                Colour for {stones.find((g) => g.id === selectedStone)?.label ?? "this set"}
+              </p>
+              <div className="swatch-grid" role="radiogroup" aria-label="Stone colour">
+                {STONE_PRESETS.map((preset) => {
+                  const active =
+                    (stoneColors[selectedStone] ??
+                      stones.find((g) => g.id === selectedStone)?.originalHex) === preset.hex;
+                  return (
+                    <button
+                      key={preset.id}
+                      role="radio"
+                      aria-checked={active}
+                      aria-label={preset.label}
+                      className="swatch-cell"
+                      onClick={() => onStoneColor?.(selectedStone, preset.hex)}
+                    >
+                      <span className={`swatch ${active ? "swatch-active" : ""}`}>
+                        <span className="swatch-dot" style={{ background: preset.hex }} />
+                      </span>
+                      <span className="swatch-label">{preset.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Anything the presets do not cover — a house colour, a match to
+                  a client's existing piece. */}
+              <label className="field mt-2">
+                <span className="field-label">Any other colour</span>
+                <input
+                  className="stone-colour-input"
+                  type="color"
+                  value={
+                    stoneColors[selectedStone] ??
+                    stones.find((g) => g.id === selectedStone)?.originalHex ??
+                    "#ffffff"
+                  }
+                  onChange={(e) => onStoneColor?.(selectedStone, e.target.value)}
+                  aria-label="Custom stone colour"
+                />
+              </label>
+            </>
+          )}
+        </Section>
+      )}
 
       {/* ── 1. Metal ──────────────────────────────────────────────── */}
       <Section

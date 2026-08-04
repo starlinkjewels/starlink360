@@ -20,7 +20,8 @@
     "test:colours": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-coloured-stones.mjs",
     "test:gem": "tsc src/components/jewelry/gemAbsorption.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-gem-absorption.mjs",
     "inspect:3dm": "node --max-old-space-size=8192 scripts/inspect-3dm.mjs",
-    "test:names": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-named-stones.mjs"
+    "test:names": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-named-stones.mjs",
+    "test:labels": "tsc src/lib/loadJewelryFile.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-stone-labels.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

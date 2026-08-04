@@ -5,6 +5,7 @@ import { products, type Product } from "@/data/products";
 import { ControlTrigger } from "@/components/jewelry/ControlSheet";
 import { StudioPanel } from "@/components/jewelry/StudioPanel";
 import type { StudioApi } from "@/components/jewelry/StudioRig";
+import type { StoneGroup } from "@/components/jewelry/stones";
 import { LoadingOverlay } from "@/components/jewelry/LoadingOverlay";
 import { UploadPiece, type UploadStatus } from "@/components/jewelry/UploadPiece";
 import { estimateDecodeMs, useSmoothProgress } from "@/hooks/useSmoothProgress";
@@ -121,6 +122,36 @@ function Index() {
   const uploadRef = useRef<HTMLDivElement>(null);
   const studio = useRef<StudioApi | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+
+  /*
+   * Stone recolouring.
+   *
+   * Overrides are keyed by group id and hold only what the user changed, so
+   * "reset" is a delete rather than a stored copy of the original — the file
+   * stays the source of truth for anything untouched.
+   */
+  const [stones, setStones] = useState<StoneGroup[]>([]);
+  const [stoneColors, setStoneColors] = useState<Record<string, string>>({});
+  const [selectedStone, setSelectedStone] = useState<string | null>(null);
+
+  const handleStones = useCallback((groups: StoneGroup[]) => {
+    setStones(groups);
+    // A new piece has different stones; carrying colours across would apply a
+    // ruby chosen on one ring to whatever happens to share an id on the next.
+    setStoneColors({});
+    setSelectedStone(null);
+  }, []);
+
+  const handleStoneColor = useCallback((id: string, hex: string | null) => {
+    setStoneColors((prev) => {
+      if (hex === null) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: hex };
+    });
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -320,6 +351,9 @@ function Index() {
               rotateSpeed={rotateSpeed}
               resetSignal={resetSignal}
               hideLoader={upload !== null}
+              stoneColors={stoneColors}
+              onStones={handleStones}
+              onStoneTap={setSelectedStone}
               onLoadedChange={onLoadedChange}
               studioRef={studio}
             />
@@ -420,6 +454,11 @@ function Index() {
               studio={studio}
               onBusyChange={setExporting}
               productRef={product.ref}
+              stones={stones}
+              stoneColors={stoneColors}
+              onStoneColor={handleStoneColor}
+              selectedStone={selectedStone}
+              onSelectStone={setSelectedStone}
               onClose={closeControls}
             />
           </div>
