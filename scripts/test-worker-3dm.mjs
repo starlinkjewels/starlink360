@@ -63,23 +63,40 @@ const fmt = (n) => n.toLocaleString("en-US");
 console.log(`\n  TOTAL decode        ${(elapsed / 1000).toFixed(2)}s`);
 console.log(`  progress messages   ${progressCalls} (last ${(lastProgress * 100).toFixed(0)}%)`);
 console.log(`  parts w/o mesh      ${done.missingMesh}`);
-for (const k of ["metal", "gem"]) {
-  const b = done[k];
-  if (!b) {
-    console.log(`  ${k.padEnd(19)} (none)`);
-    continue;
+/*
+ * Both buckets arrive as a list of groups now — metal split by layer the same
+ * way stones always were, so each part can be picked on its own. The geometry
+ * has to be sound in every group, not just in aggregate: one out-of-range index
+ * in one group is enough to drop a whole draw call on the floor.
+ */
+let broken = 0;
+for (const k of ["metals", "gems"]) {
+  const groups = done[k] ?? [];
+  console.log(`\n  ${k} (${groups.length})`);
+  if (groups.length === 0) console.log("    (none)");
+  for (const b of groups) {
+    const verts = b.position.length / 3;
+    console.log(
+      `    ${String(b.color).padEnd(8)} verts=${fmt(verts).padStart(9)}  tris=${fmt(b.index.length / 3).padStart(9)}  layer="${b.layer}"`,
+    );
+    let bad = 0,
+      zeroN = 0;
+    for (let i = 0; i < b.position.length; i++) if (!Number.isFinite(b.position[i])) bad++;
+    for (let i = 0; i < b.normal.length; i += 3)
+      if (b.normal[i] === 0 && b.normal[i + 1] === 0 && b.normal[i + 2] === 0) zeroN++;
+    let maxIdx = 0;
+    for (let i = 0; i < b.index.length; i++) if (b.index[i] > maxIdx) maxIdx = b.index[i];
+    const inRange = maxIdx < verts;
+    if (bad > 0 || !inRange) broken++;
+    console.log(
+      `    ${" ".repeat(8)} non-finite=${bad}  zero-normals=${zeroN}  maxIndex=${fmt(maxIdx)} (bound ${fmt(verts - 1)}) ${inRange ? "OK" : "OUT OF RANGE"}`,
+    );
   }
-  console.log(
-    `  ${k.padEnd(19)} verts=${fmt(b.position.length / 3).padStart(10)}  tris=${fmt(b.index.length / 3).padStart(10)}`,
-  );
-  let bad = 0,
-    zeroN = 0;
-  for (let i = 0; i < b.position.length; i++) if (!Number.isFinite(b.position[i])) bad++;
-  for (let i = 0; i < b.normal.length; i += 3)
-    if (b.normal[i] === 0 && b.normal[i + 1] === 0 && b.normal[i + 2] === 0) zeroN++;
-  let maxIdx = 0;
-  for (let i = 0; i < b.index.length; i++) if (b.index[i] > maxIdx) maxIdx = b.index[i];
-  console.log(
-    `  ${" ".repeat(19)} non-finite=${bad}  zero-normals=${zeroN}  maxIndex=${fmt(maxIdx)} (bound ${fmt(b.position.length / 3 - 1)}) ${maxIdx < b.position.length / 3 ? "OK" : "OUT OF RANGE"}`,
-  );
 }
+
+const totalVerts = ["metals", "gems"]
+  .flatMap((k) => done[k] ?? [])
+  .reduce((t, b) => t + b.position.length / 3, 0);
+console.log(`\n  ${fmt(totalVerts)} verts across every group`);
+console.log(broken === 0 ? "  All checks passed" : `  ${broken} FAILED`);
+process.exit(broken === 0 ? 0 : 1);

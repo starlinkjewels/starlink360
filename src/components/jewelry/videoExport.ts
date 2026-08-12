@@ -12,15 +12,65 @@ import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 
 export type VideoFormat = "mp4" | "webm" | "png-sequence";
 
+/*
+ * H.264 levels, and why the codec string cannot be a constant.
+ *
+ * "avc1.640028" is High profile at Level 4.0, which is capped at 8192
+ * macroblocks per frame and 245,760 per second — 1080p30 and no more. Ask it
+ * for 4K, or for 1080p60, and `isConfigSupported` returns false. The old code
+ * then fell through to the WebM branch, so choosing 4K silently produced a
+ * real-time WebM instead of the frame-by-frame MP4 that was the whole point.
+ *
+ * So the level is chosen from the actual frame size and rate. Limits are from
+ * the spec: MaxFS in macroblocks, MaxMBPS per second.
+ */
+const H264_LEVELS = [
+  { name: "4.0", hex: "28", maxFrame: 8192, maxRate: 245760 },
+  { name: "4.2", hex: "2a", maxFrame: 8704, maxRate: 522240 },
+  { name: "5.0", hex: "32", maxFrame: 22080, maxRate: 589824 },
+  { name: "5.1", hex: "33", maxFrame: 36864, maxRate: 983040 },
+  { name: "5.2", hex: "34", maxFrame: 36864, maxRate: 2073600 },
+] as const;
+
+/** Lowest H.264 level that can carry this frame size and rate. */
+export function h264Codec(width: number, height: number, fps: number): string {
+  // A macroblock is 16x16, rounded up on both axes.
+  const macroblocks = Math.ceil(width / 16) * Math.ceil(height / 16);
+  const perSecond = macroblocks * fps;
+  const level =
+    H264_LEVELS.find((l) => macroblocks <= l.maxFrame && perSecond <= l.maxRate) ??
+    H264_LEVELS[H264_LEVELS.length - 1];
+  return `avc1.6400${level.hex}`;
+}
+
+/**
+ * Bitrate for a given frame size and rate.
+ *
+ * Jewellery is all fine specular detail, and a low bitrate turns sparkle into
+ * mush — so this is generous. Scaled by pixel count rather than fixed, because
+ * 20 Mbps is right for 1080p and starves 4K badly.
+ */
+export function bitrateFor(width: number, height: number, fps: number): number {
+  const perPixelPerFrame = 0.11; // bits, tuned against the old 1080p30 number
+  const raw = width * height * fps * perPixelPerFrame;
+  // Floor keeps small exports crisp; ceiling keeps a 4K60 file openable.
+  return Math.round(Math.min(Math.max(raw, 8_000_000), 90_000_000));
+}
+
 /** What this browser can actually produce, best first. */
-export async function bestAvailableFormat(width: number, height: number): Promise<VideoFormat> {
+export async function bestAvailableFormat(
+  width: number,
+  height: number,
+  fps = 30,
+): Promise<VideoFormat> {
   if (typeof VideoEncoder === "undefined") return "png-sequence";
   try {
     const support = await VideoEncoder.isConfigSupported({
-      codec: "avc1.640028", // H.264 High 4.0
+      codec: h264Codec(width, height, fps),
       width,
       height,
-      bitrate: 20_000_000,
+      bitrate: bitrateFor(width, height, fps),
+      framerate: fps,
     });
     if (support.supported) return "mp4";
   } catch {
@@ -65,12 +115,10 @@ export async function encodeMp4(opts: EncodeOptions): Promise<Blob> {
   });
 
   encoder.configure({
-    codec: "avc1.640028",
+    codec: h264Codec(width, height, fps),
     width,
     height,
-    // Generous for 1080p — jewellery is all fine specular detail, and a low
-    // bitrate turns sparkle into mush.
-    bitrate: 20_000_000,
+    bitrate: bitrateFor(width, height, fps),
     framerate: fps,
   });
 
@@ -141,7 +189,7 @@ export async function encodeWebm(opts: EncodeOptions): Promise<Blob> {
     mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
       ? "video/webm;codecs=vp9"
       : "video/webm",
-    videoBitsPerSecond: 20_000_000,
+    videoBitsPerSecond: bitrateFor(width, height, fps),
   });
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
 

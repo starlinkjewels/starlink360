@@ -11,8 +11,17 @@ import {
   beginOffscreen,
   renderAtSize,
   type AnglePreset,
-  type StillBackground,
 } from "./studio";
+import { paintBackground, paintForeground, type ResolvedBackground } from "./background";
+import { DEFAULT_CAMERA, frameFit, type CameraSettings } from "./camera";
+import { DEFAULT_WATERMARK, paintWatermark, type WatermarkSettings } from "./watermark";
+import {
+  objectPoseAt,
+  poseAt,
+  posePosition,
+  type AnimationPreset,
+  type ObjectMove,
+} from "./animation";
 
 /**
  * A camera position the user set themselves.
@@ -32,15 +41,17 @@ export interface SavedView {
 export interface StillRequest {
   width: number;
   height: number;
-  background: StillBackground;
+  background: ResolvedBackground;
+  watermark?: WatermarkSettings;
 }
 
 export interface TurntableRequest {
   width: number;
   height: number;
   frames: number;
-  /** Solid fill behind the piece. H.264 has no alpha, so video is never transparent. */
-  background: string;
+  /** Backdrop behind the piece. H.264 has no alpha, so video is never transparent. */
+  background: ResolvedBackground;
+  watermark?: WatermarkSettings;
   zoom?: number;
   elevation?: number;
   elevationSweep?: number;
@@ -55,6 +66,17 @@ export interface TurntableRequest {
    * instead of an orbit. Overrides `view` when present.
    */
   path?: SavedView[] | null;
+  /**
+   * A named camera move, which overrides the raw orbit.
+   *
+   * The same preset the viewport previews, so the download is the shot that
+   * was watched rather than a second implementation of roughly the same idea.
+   */
+  preset?: AnimationPreset | null;
+  /** A move applied to the piece itself, played alongside the camera. */
+  objectMove?: ObjectMove | null;
+  /** The group an object move drives. Restored when the export finishes. */
+  piece?: THREE.Object3D | null;
 }
 
 export interface StudioApi {
@@ -80,16 +102,26 @@ export interface StudioApi {
 
 export function StudioRig({
   fit,
+  camera: settings = DEFAULT_CAMERA,
+  renderFrame,
   apiRef,
   controlsRef,
+  piece,
 }: {
   fit: Fit | null;
+  /** Projection, lens and clipping, so exports match what is on screen. */
+  camera?: CameraSettings;
+  /** Set while the scene is composed, so exports bloom exactly as the screen does. */
+  renderFrame?: { render(): void; setSize(w: number, h: number): void } | null;
   apiRef: React.MutableRefObject<StudioApi | null>;
   controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  /** The group an object move drives, so an export can play one. */
+  piece?: React.RefObject<THREE.Group | null>;
 }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const pieceRef = piece;
 
   useEffect(() => {
     if (!fit) {
@@ -97,7 +129,7 @@ export function StudioRig({
       return;
     }
 
-    const target = { gl, scene, camera };
+    const target = { gl, scene, camera, renderFrame };
     const ORIGIN = new THREE.Vector3();
 
     const orbitTarget = () => controlsRef.current?.target ?? ORIGIN;
@@ -149,7 +181,7 @@ export function StudioRig({
       },
 
       angleView(angle) {
-        const dist = fitDistance(fit, camera.fov, 1) * (angle.zoom ?? 1);
+        const dist = fitDistance(fit, settings, 1) * (angle.zoom ?? 1);
         const p = new THREE.Vector3(...angle.dir).normalize().multiplyScalar(dist);
         return {
           id: angle.id,
@@ -170,23 +202,23 @@ export function StudioRig({
         }
       },
 
-      async captureAngle(angle, { width, height, background }) {
+      async captureAngle(angle, { width, height, background, watermark }) {
         const saved = save();
         let blob: Blob | null = null;
         try {
           // Frame for the requested shape, so a 9:16 crop still fits the piece
           // rather than slicing its sides off.
-          applyAngle(camera, angle, fit, width / height);
+          applyAngle(camera, angle, fit, width / height, settings);
           let frame: HTMLCanvasElement | null = null;
           renderAtSize(target, width, height, (c) => (frame = grab(c)));
-          if (frame) blob = await canvasToBlob(frame, background);
+          if (frame) blob = await canvasToBlob(frame, background, watermark);
         } finally {
           restore(saved);
         }
         return blob;
       },
 
-      async captureView(view, { width, height, background }) {
+      async captureView(view, { width, height, background, watermark }) {
         const saved = save();
         let blob: Blob | null = null;
         try {
@@ -198,7 +230,7 @@ export function StudioRig({
           }
           let frame: HTMLCanvasElement | null = null;
           renderAtSize(target, width, height, (c) => (frame = grab(c)));
-          if (frame) blob = await canvasToBlob(frame, background);
+          if (frame) blob = await canvasToBlob(frame, background, watermark);
         } finally {
           restore(saved);
         }
@@ -210,15 +242,30 @@ export function StudioRig({
         height,
         frames,
         background,
+        watermark = DEFAULT_WATERMARK,
         zoom = 1,
         elevation = 0.22,
         elevationSweep = 0,
         turns = 1,
         view = null,
         path = null,
+        preset = null,
+        objectMove = null,
+        // Defaults to the rig's own piece, so a caller only has to say WHICH
+        // move to play, not where the geometry lives.
+        piece = pieceRef?.current ?? null,
       }) {
         const saved = save();
         const aspect = width / height;
+
+        /*
+         * The piece's own transform, so an object move can be undone.
+         *
+         * A drop leaves the piece wherever the last frame put it, which on a
+         * bouncing move is mid-air. Without this the viewport is left showing a
+         * necklace hanging in space after every export.
+         */
+        const savedPiece = piece ? { y: piece.position.y, rot: piece.rotation.clone() } : null;
 
         /*
          * Travelling shot.
@@ -264,7 +311,7 @@ export function StudioRig({
         const minDist = Math.max(fit.radius * 0.08, 1e-3);
         const rawDist = view
           ? new THREE.Vector3(...view.position).distanceTo(centre)
-          : fitDistance(fit, camera.fov, aspect);
+          : fitDistance(fit, settings, aspect);
         const dist = Math.max(rawDist * zoom, minDist);
 
         const scratch = document.createElement("canvas");
@@ -273,7 +320,14 @@ export function StudioRig({
         const ctx = scratch.getContext("2d");
 
         // Enter export size once for the whole clip rather than per frame.
-        const offscreen = beginOffscreen(target, width, height);
+        const offscreen = beginOffscreen(
+          target,
+          width,
+          height,
+          // Under an orthographic projection the frustum, not the distance,
+          // decides how large the piece renders.
+          frameFit(fit, settings, aspect).orthoHalfHeight,
+        );
 
         return {
           drawFrame(index: number) {
@@ -292,9 +346,42 @@ export function StudioRig({
 
               const seqFrame = offscreen.render();
               if (ctx) {
-                ctx.fillStyle = background;
-                ctx.fillRect(0, 0, width, height);
+                paintBackground(ctx, width, height, background);
                 ctx.drawImage(seqFrame, 0, 0);
+                paintWatermark(ctx, width, height, watermark);
+              }
+              return scratch;
+            }
+
+            /*
+             * A named move wins over the raw turntable maths.
+             *
+             * This is the same `poseAt` the viewport preview calls, which is
+             * the point: the exporter used to carry its own shots, so what was
+             * watched and what was downloaded were two pieces of code with no
+             * reason to agree.
+             */
+            if (objectMove && piece) {
+              const op = objectPoseAt(objectMove, progress);
+              piece.position.y = op.lift * fit.radius;
+              piece.rotation.set(op.rotX, op.rotY, op.rotZ);
+            }
+
+            if (preset) {
+              const framing = frameFit(fit, settings, aspect);
+              camera.position.set(...posePosition(poseAt(preset, progress), framing.distance));
+              camera.up.set(0, 1, 0);
+              camera.lookAt(centre);
+              camera.near = framing.near;
+              camera.far = framing.far;
+              camera.updateProjectionMatrix();
+
+              const moveFrame = offscreen.render();
+              if (ctx) {
+                paintBackground(ctx, width, height, background);
+                ctx.drawImage(moveFrame, 0, 0);
+                paintForeground(ctx, width, height, background);
+                paintWatermark(ctx, width, height, watermark);
               }
               return scratch;
             }
@@ -316,15 +403,19 @@ export function StudioRig({
 
             const frame = offscreen.render();
             if (ctx) {
-              ctx.fillStyle = background;
-              ctx.fillRect(0, 0, width, height);
+              paintBackground(ctx, width, height, background);
               ctx.drawImage(frame, 0, 0);
+              paintWatermark(ctx, width, height, watermark);
             }
             return scratch;
           },
           finish() {
             offscreen.end();
             restore(saved);
+            if (piece && savedPiece) {
+              piece.position.y = savedPiece.y;
+              piece.rotation.copy(savedPiece.rot);
+            }
           },
         };
       },
@@ -333,7 +424,7 @@ export function StudioRig({
     return () => {
       apiRef.current = null;
     };
-  }, [gl, scene, camera, fit, apiRef, controlsRef]);
+  }, [gl, scene, camera, fit, settings, renderFrame, apiRef, controlsRef, pieceRef]);
 
   return null;
 }

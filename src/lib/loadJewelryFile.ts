@@ -536,11 +536,38 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
     geo.setIndex(new THREE.BufferAttribute(bucket.index, 1));
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial());
     mesh.name = name;
+    /*
+     * Where each separate solid sits in the index buffer. This is what makes a
+     * single stone selectable out of a merged pave — the decoder reordered the
+     * triangles so every solid is one contiguous run.
+     *
+     * Stored as a PLAIN ARRAY, not the Uint32Array the decoder sent.
+     * `Object3D.clone()` round-trips userData through JSON, and the viewer
+     * clones the loaded scene: a typed array comes out the other side as
+     * `{"0":0,"1":954}` with no `.length`, so every read of it silently found
+     * nothing and single-stone selection and colour both did nothing at all.
+     * A plain array survives that round trip intact.
+     */
+    const solids = (bucket as { solids?: Uint32Array }).solids;
+    if (solids && solids.length > 1) mesh.userData.solids = Array.from(solids);
     group.add(mesh);
     return mesh;
   };
 
-  attach(decoded.metal, "metal");
+  /*
+   * One mesh per metal group. The name keeps the "metal" prefix that the viewer
+   * and the finish updater match on, and carries the layer after it so two
+   * groups never collide.
+   */
+  for (const part of decoded.metals) {
+    const mesh = attach(part, `metal-${part.layer || part.material || "part"}`);
+    if (!mesh) continue;
+    mesh.userData.part = {
+      id: `metal|${part.layer}|${part.color}`,
+      label: stoneLabel(part.layer, part.material),
+      kind: "metal",
+    };
+  }
   // One mesh per stone colour and layer. The name keeps the "gem" prefix the
   // viewer matches on and carries the colour after it, so a piece set with
   // diamond and ruby renders each correctly instead of forcing both to one
@@ -557,6 +584,13 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
       id: `${gem.layer}|${gem.color}`,
       label: stoneLabel(gem.layer, gem.material),
       hex: gem.color,
+    };
+    // The same identity in the form the selection engine reads, so stones and
+    // metal are one list rather than two special cases.
+    mesh.userData.part = {
+      id: `${gem.layer}|${gem.color}`,
+      label: stoneLabel(gem.layer, gem.material),
+      kind: "stone",
     };
   }
 
@@ -647,13 +681,52 @@ export async function loadJewelryFile(
     } finally {
       draco.dispose();
     }
+  } else if (ext === "obj") {
+    /*
+     * OBJ keeps object and group names, so the same name-based classification
+     * the GLB path uses still separates stones from metal. What it does not
+     * keep is any notion of a layer, and its materials live in a separate .mtl
+     * file that is not part of this upload — so a piece whose parts are named
+     * "Object_1" arrives as one lump of metal. Said plainly below rather than
+     * left to look like lost geometry.
+     */
+    onProgress?.({ phase: "Decoding model", percent: 30 });
+    const { OBJLoader } = await import("three/examples/jsm/loaders/OBJLoader.js");
+    root = new OBJLoader().parse(new TextDecoder().decode(buffer));
+  } else if (ext === "stl") {
+    /*
+     * STL carries geometry and nothing else: no names, no groups, no
+     * materials, no colour. Everything therefore comes through as a single
+     * metal object, and there is no way to find the stones — that is the
+     * format, not a failure of the reader.
+     */
+    onProgress?.({ phase: "Decoding model", percent: 30 });
+    const { STLLoader } = await import("three/examples/jsm/loaders/STLLoader.js");
+    const geo = new STLLoader().parse(buffer);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial());
+    mesh.name = "metal";
+    root = new THREE.Group().add(mesh);
   } else {
-    throw new Error("Unsupported file. Please upload a .3dm, .glb or .gltf file.");
+    throw new Error("Unsupported file. Please upload a .3dm, .glb, .gltf, .obj or .stl file.");
   }
 
   onProgress?.({ phase: "Sorting layers", percent: 70 });
   await yieldToBrowser();
   const scene = await compressToJewelryScene(root, onProgress);
+
+  /*
+   * Say what the format could not carry, rather than letting it look like the
+   * stones went missing. Only for the formats that genuinely cannot express it.
+   */
+  if (ext === "stl" || ext === "obj") {
+    const notices = (scene.userData.notices as string[] | undefined) ?? [];
+    notices.push(
+      ext === "stl"
+        ? "STL files carry geometry only — no materials, names or layers — so the whole piece is shown as metal and no stones can be found. Upload a .3dm or .glb to separate them."
+        : "OBJ files carry no layers, and their materials live in a separate .mtl file. Parts were sorted by name where possible.",
+    );
+    scene.userData.notices = notices;
+  }
   onProgress?.({ phase: "Setting the stones", percent: 100 });
   return scene;
 }

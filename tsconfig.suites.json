@@ -1,0 +1,38 @@
+{
+  // Compiles app modules for the Node test suites.
+  //
+  // The suites used to invoke `tsc` on individual files, which cannot resolve
+  // the "@/" alias — so any module touching it had to be kept alias-free, and
+  // one helper was moved between files purely to satisfy that. This carries the
+  // alias, so a suite can compile whatever it needs to test.
+  "compilerOptions": {
+    "outDir": ".tmp-suite",
+    "module": "esnext",
+    "target": "es2022",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": [
+    "src/lib/rhinoDecode.ts",
+    "src/lib/loadJewelryFile.ts",
+    "src/components/jewelry/materials.ts",
+    "src/components/jewelry/selection.ts",
+    "src/components/jewelry/plan.ts",
+    "src/components/jewelry/assign.ts",
+    "src/components/jewelry/library.ts",
+    "src/components/jewelry/preview.ts",
+    "src/components/jewelry/project.ts",
+    "src/components/jewelry/exportOptions.ts",
+    "src/components/jewelry/lighting.ts",
+    "src/components/jewelry/lights.ts",
+    "src/components/jewelry/shadows.ts",
+    "src/components/jewelry/ground.ts",
+    "src/components/jewelry/background.ts",
+    "src/components/jewelry/bloom.ts",
+    "src/components/jewelry/watermark.ts",
+    "src/components/jewelry/camera.ts",
+    "src/data/finishes.ts"
+  ]
+}

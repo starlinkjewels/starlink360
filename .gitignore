@@ -35,3 +35,4 @@ dist-ssr
 .tmp-jewelry
 .tmp-serve
 .tmp-local
+.tmp-suite/

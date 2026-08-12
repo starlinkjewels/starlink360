@@ -25,7 +25,7 @@ export interface DecodedBucket {
   index: Uint32Array;
 }
 
-/** One stone colour present in the piece. */
+/** One group of parts sharing a colour and a layer. */
 export interface DecodedGem extends DecodedBucket {
   /** sRGB hex from the Rhino render material, e.g. "#ffffff" for diamond, "#a01c28" for ruby. */
   color: string;
@@ -41,10 +41,23 @@ export interface DecodedGem extends DecodedBucket {
   layer: string;
   /** Mesh chunks merged in (BRep faces). Not a stone count. */
   parts: number;
+  /**
+   * Index-buffer offsets, one per separate solid plus a terminator, so solid
+   * `i` is `index[solids[i] .. solids[i + 1])`. The stone count is
+   * `solids.length - 1` — the only honest one, since `parts` counts BRep faces.
+   */
+  solids: Uint32Array;
 }
 
 export interface DecodedDocument {
-  metal: DecodedBucket | null;
+  /**
+   * Metal grouped by colour and layer, so each part is separately selectable.
+   *
+   * Was a single merged mesh. One mesh draws marginally faster, but it makes
+   * every metal part the same object — there is nothing to select, recolour or
+   * texture on its own.
+   */
+  metals: DecodedGem[];
   /**
    * Stones grouped by colour. A piece can set diamond, ruby and sapphire at
    * once, and each needs its own material — a single merged gem mesh forces
@@ -650,7 +663,6 @@ self.onmessage = function (e) {
       return { position: position, normal: normal, index: index };
     }
 
-    var metal = build("metal");
 
     /*
      * ── group stones by colour ──
@@ -660,7 +672,105 @@ self.onmessage = function (e) {
      * comes out as a white diamond. Grouping by the Rhino render material keeps
      * each colour separate and lets the viewer give each its own gem material.
      */
-    function buildGems() {
+    /*
+     * Finds the genuinely separate solids in a merged group, and reorders the
+     * index buffer so each one occupies a contiguous run.
+     *
+     * A Rhino layer is not a part. "Gem 03" on the client's file arrives as
+     * 17,780 mesh chunks that together make 140 actual stones — the chunks are
+     * BRep faces, not objects, so counting them tells you nothing and neither
+     * does trusting the object list. Connectivity is the only thing that
+     * answers "which triangles are one stone".
+     *
+     * Two triangles belong to the same solid when they share a vertex POSITION.
+     * Index sharing is not enough: every chunk carries its own copy of the
+     * vertices along its seams, so a stone split across chunks would come out
+     * as several solids. Positions are quantised to a tenth of a micron in
+     * model units before hashing, so a seam that does not close to the last
+     * float bit still welds.
+     *
+     * Contiguity is what makes this cheap to use downstream: one solid is then
+     * a draw range, so highlighting or recolouring one stone costs an offset
+     * and a count rather than a new buffer.
+     *
+     * Runs in the worker, off the main thread. Roughly 1.7s for the client's
+     * whole million-vertex file, once, at load.
+     */
+    function splitSolids(position, index) {
+      var triCount = index.length / 3;
+      if (!triCount) return new Uint32Array([0]);
+
+      var vertCount = position.length / 3;
+      var parent = new Int32Array(vertCount);
+      for (var i = 0; i < vertCount; i++) parent[i] = i;
+
+      function find(x) {
+        while (parent[x] !== x) {
+          parent[x] = parent[parent[x]];
+          x = parent[x];
+        }
+        return x;
+      }
+      function union(a, b) {
+        a = find(a);
+        b = find(b);
+        if (a !== b) parent[a] = b;
+      }
+
+      // Weld coincident vertices, so chunk seams stop cutting solids apart.
+      var byPos = new Map();
+      for (var v = 0; v < vertCount; v++) {
+        var key =
+          Math.round(position[v * 3] * 1e4) + "," +
+          Math.round(position[v * 3 + 1] * 1e4) + "," +
+          Math.round(position[v * 3 + 2] * 1e4);
+        var seen = byPos.get(key);
+        if (seen === undefined) byPos.set(key, v);
+        else union(v, seen);
+      }
+
+      for (var t = 0; t < index.length; t += 3) {
+        union(index[t], index[t + 1]);
+        union(index[t + 1], index[t + 2]);
+      }
+
+      /*
+       * Bucket the triangles by root, keeping first-seen order. Order matters:
+       * it has to be stable across loads or a saved material assignment would
+       * land on a different stone next time the file is opened.
+       */
+      var order = new Map();
+      var triRoot = new Int32Array(triCount);
+      for (var f = 0; f < triCount; f++) {
+        var root = find(index[f * 3]);
+        triRoot[f] = root;
+        if (!order.has(root)) order.set(root, order.size);
+      }
+
+      var count = order.size;
+      var counts = new Uint32Array(count);
+      for (var f2 = 0; f2 < triCount; f2++) counts[order.get(triRoot[f2])]++;
+
+      var starts = new Uint32Array(count + 1);
+      for (var s = 0; s < count; s++) starts[s + 1] = starts[s] + counts[s] * 3;
+
+      // Rewrite the index buffer in solid order.
+      var cursor = starts.slice(0, count);
+      var sorted = new Uint32Array(index.length);
+      for (var f3 = 0; f3 < triCount; f3++) {
+        var slotAt = order.get(triRoot[f3]);
+        var to = cursor[slotAt];
+        sorted[to] = index[f3 * 3];
+        sorted[to + 1] = index[f3 * 3 + 1];
+        sorted[to + 2] = index[f3 * 3 + 2];
+        cursor[slotAt] = to + 3;
+      }
+      index.set(sorted);
+
+      return starts;
+    }
+
+    function buildGroups(bucket) {
       /*
        * Split by the jeweller's own grouping, not only by colour.
        *
@@ -674,7 +784,7 @@ self.onmessage = function (e) {
       var byColour = {};
       for (var i = 0; i < keep.length; i++) {
         var k = keep[i];
-        if (k.bucket !== "gem") continue;
+        if (k.bucket !== bucket) continue;
         var gkey = k.matHex + "|" + (k.matLayer || "");
         var slot = byColour[gkey];
         if (!slot) {
@@ -711,6 +821,8 @@ self.onmessage = function (e) {
           vo += pt.pos.length;
           io += pt.idx.length;
         }
+        var solids = splitSolids(position, index);
+
         out.push({
           position: position,
           normal: normal,
@@ -719,21 +831,44 @@ self.onmessage = function (e) {
           material: grp.name,
           layer: grp.layer,
           // Mesh chunks merged in - BRep faces, not stones. Not a stone count.
-          parts: grp.parts.length
+          parts: grp.parts.length,
+          // Index offsets, one per solid plus a terminator. THIS is the stone
+          // count: solids.length - 1.
+          solids: solids
         });
       }
       return out;
     }
 
-    var gems = buildGems();
+    /*
+     * Both buckets are grouped the same way, by colour and layer. Metal used
+     * to be merged into a single mesh, which is cheaper to draw but leaves
+     * nothing to point at: a shank, a head and two hundred prongs arrive as
+     * one object, so 'select this prong' cannot be expressed. Grouping by the
+     * jeweller's own layers gives selectable parts at no extra vertex cost.
+     */
+    var gems = buildGroups("gem");
+    var metals = buildGroups("metal");
 
     var transfer = [];
-    if (metal) transfer.push(metal.position.buffer, metal.normal.buffer, metal.index.buffer);
+    for (var mx = 0; mx < metals.length; mx++) {
+      transfer.push(
+        metals[mx].position.buffer,
+        metals[mx].normal.buffer,
+        metals[mx].index.buffer,
+        metals[mx].solids.buffer
+      );
+    }
     for (var gx = 0; gx < gems.length; gx++) {
-      transfer.push(gems[gx].position.buffer, gems[gx].normal.buffer, gems[gx].index.buffer);
+      transfer.push(
+        gems[gx].position.buffer,
+        gems[gx].normal.buffer,
+        gems[gx].index.buffer,
+        gems[gx].solids.buffer
+      );
     }
 
-    post({ type: "done", metal: metal, gems: gems, missingMesh: missingMesh }, transfer);
+    post({ type: "done", metals: metals, gems: gems, missingMesh: missingMesh }, transfer);
   }
 };
 `;
@@ -783,7 +918,7 @@ export function decodeRhinoDocument(
         }
         finish(() =>
           resolve({
-            metal: data.metal,
+            metals: data.metals ?? [],
             gems: data.gems ?? [],
             notices,
             missingMesh: data.missingMesh,

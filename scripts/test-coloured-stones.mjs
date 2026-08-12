@@ -219,7 +219,12 @@ check(
 );
 
 check(gems.length === EXPECTED.length, "no extra or missing groups", `${gems.length} groups`);
-check(!!done.metal, "metal kept separate from the stones");
+check((done.metals ?? []).length > 0, "metal kept separate from the stones");
+// Metal is grouped by layer now, so each part can be selected on its own.
+check(
+  (done.metals ?? []).every((m) => typeof m.layer === "string"),
+  "every metal group carries its layer, which is what makes it selectable",
+);
 check(
   !gems.some((g) => String(g.color).toLowerCase() === "#d4af37"),
   "gold did not leak into the stones",

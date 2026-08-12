@@ -6,7 +6,9 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  // The .tmp-* directories are compiler output for the Node test suites, not
+  // source. Linting generated code reports formatting we do not control.
+  { ignores: ["dist", ".output", ".vinxi", ".tmp-jewelry", ".tmp-suite"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

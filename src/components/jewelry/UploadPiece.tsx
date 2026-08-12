@@ -92,7 +92,7 @@ export function UploadPiece({
       <input
         ref={inputRef}
         type="file"
-        accept={filterPicker ? ".3dm,.glb,.gltf,model/gltf-binary" : undefined}
+        accept={filterPicker ? ".3dm,.glb,.gltf,.obj,.stl,model/gltf-binary" : undefined}
         className="sr-only"
         onChange={(e) => {
           const f = e.target.files?.[0];

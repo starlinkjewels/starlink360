@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import type { Fit } from "./Model";
+import { paintBackground, paintForeground, type ResolvedBackground } from "./background";
+import { applyAspect, frameFit, type CameraSettings } from "./camera";
+import { hideOverlays } from "./selection";
+import { DEFAULT_WATERMARK, paintWatermark, type WatermarkSettings } from "./watermark";
 
 /*
  * Studio export.
@@ -35,45 +39,63 @@ export const ANGLE_PRESETS: AnglePreset[] = [
   { id: "macro", label: "Macro", dir: [0.35, 0.3, 1], zoom: 0.45 },
 ];
 
-/** Leaves the same breathing room the interactive view uses. */
-const FIT_MARGIN = 1.12;
-
 /**
  * Distance that frames the whole piece for a given aspect ratio.
  *
- * Mirrors the interactive framing: solve the vertical and horizontal fits and
- * take whichever is tighter, so a wide necklace still fits a portrait frame.
+ * Delegates to the shared framing so an export and the viewport cannot disagree
+ * — this maths used to be duplicated here, which was survivable with one
+ * projection and would silently break the moment orthographic arrived.
  */
-export function fitDistance(fit: Fit, fovDeg: number, aspect: number): number {
-  const tanV = Math.tan((fovDeg * Math.PI) / 360);
-  const tanH = tanV * aspect;
-  const forHeight = fit.halfHeight / tanV + fit.radiusXZ;
-  const forWidth = fit.radiusXZ / tanH + fit.radiusXZ;
-  return Math.max(forHeight, forWidth) * FIT_MARGIN;
+export function fitDistance(fit: Fit, settings: CameraSettings, aspect: number): number {
+  return frameFit(fit, settings, aspect).distance;
 }
 
 /** Places the camera on a preset, framed for the target aspect ratio. */
 export function applyAngle(
-  camera: THREE.PerspectiveCamera,
+  camera: THREE.Camera,
   preset: AnglePreset,
   fit: Fit,
   aspect: number,
+  settings: CameraSettings,
 ) {
-  const dist = fitDistance(fit, camera.fov, aspect) * (preset.zoom ?? 1);
+  const framing = frameFit(fit, settings, aspect);
+  const dist = framing.distance * (preset.zoom ?? 1);
   const dir = new THREE.Vector3(...preset.dir).normalize();
   camera.position.copy(dir).multiplyScalar(dist);
   camera.up.set(0, 1, 0);
   camera.lookAt(0, 0, 0);
-  camera.near = Math.max(dist / 1000, 0.001);
-  camera.far = dist * 20;
-  camera.aspect = aspect;
-  camera.updateProjectionMatrix();
+
+  const cam = camera as unknown as THREE.PerspectiveCamera & THREE.OrthographicCamera;
+  cam.near = framing.near;
+  cam.far = framing.far;
+  /*
+   * A preset zoom moves the camera closer, which shrinks nothing under an
+   * orthographic projection — the frustum has to shrink instead, or "Macro"
+   * exports identically to "Front".
+   */
+  applyAspect(
+    cam,
+    aspect,
+    framing.orthoHalfHeight !== undefined
+      ? framing.orthoHalfHeight * (preset.zoom ?? 1)
+      : undefined,
+  );
 }
 
 export interface CaptureTarget {
   gl: THREE.WebGLRenderer;
   scene: THREE.Scene;
+  /** Either projection; `applyAspect` handles the difference. */
   camera: THREE.PerspectiveCamera;
+  /**
+   * Draws one frame, when the scene is composed rather than rendered directly.
+   *
+   * Bloom runs through an EffectComposer, and an export that called `gl.render`
+   * would quietly produce an unbloomed file while the screen showed bloom. So
+   * the caller hands the same renderer both paths use, and `resize` keeps the
+   * composer's buffers in step with the export size.
+   */
+  renderFrame?: { render(): void; setSize(w: number, h: number): void } | null;
 }
 
 /**
@@ -97,13 +119,19 @@ export interface CaptureTarget {
  * this mode once, draws every frame, then leaves once.
  */
 export function beginOffscreen(
-  { gl, scene, camera }: CaptureTarget,
+  { gl, scene, camera, renderFrame }: CaptureTarget,
   width: number,
   height: number,
+  /** Frustum half-height when the camera is orthographic. */
+  orthoHalfHeight?: number,
 ) {
   const prevSize = gl.getSize(new THREE.Vector2());
   const prevRatio = gl.getPixelRatio();
-  const prevAspect = camera.aspect;
+  const ortho = camera as unknown as THREE.OrthographicCamera;
+  const prevAspect = ortho.isOrthographicCamera
+    ? (ortho.right - ortho.left) / (ortho.top - ortho.bottom)
+    : camera.aspect;
+  const prevOrthoHalf = ortho.isOrthographicCamera ? ortho.top : undefined;
 
   const patched: { mat: { resolution: THREE.Vector2 }; prev: THREE.Vector2 }[] = [];
   scene.traverse((obj) => {
@@ -114,30 +142,36 @@ export function beginOffscreen(
     }
   });
 
+  // Held down for the whole video, not per frame — a turntable is a photo too.
+  const showOverlays = hideOverlays(scene);
+
   gl.setPixelRatio(1);
   gl.setSize(width, height, false);
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
+  applyAspect(camera as unknown as THREE.PerspectiveCamera, width / height, orthoHalfHeight);
+  renderFrame?.setSize(width, height);
 
   return {
     /** Draws one frame at the export size. The camera must already be posed. */
     render(): HTMLCanvasElement {
-      gl.render(scene, camera);
+      if (renderFrame) renderFrame.render();
+      else gl.render(scene, camera);
       return gl.domElement as HTMLCanvasElement;
     },
     end() {
       for (const { mat, prev } of patched) mat.resolution = prev;
+      showOverlays();
       gl.setPixelRatio(prevRatio);
       gl.setSize(prevSize.x, prevSize.y, false);
-      camera.aspect = prevAspect;
-      camera.updateProjectionMatrix();
-      gl.render(scene, camera);
+      applyAspect(camera as unknown as THREE.PerspectiveCamera, prevAspect, prevOrthoHalf);
+      renderFrame?.setSize(prevSize.x, prevSize.y);
+      if (renderFrame) renderFrame.render();
+      else gl.render(scene, camera);
     },
   };
 }
 
 export function renderAtSize(
-  { gl, scene, camera }: CaptureTarget,
+  { gl, scene, camera, renderFrame }: CaptureTarget,
   width: number,
   height: number,
   onFrame: (canvas: HTMLCanvasElement) => void,
@@ -164,35 +198,76 @@ export function renderAtSize(
     }
   });
 
+  // An export is a photo of the piece, not a screenshot of the editor.
+  const showOverlays = hideOverlays(scene);
+
   try {
     // Pixel ratio 1: `width`/`height` are already the real output pixels.
     gl.setPixelRatio(1);
     gl.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    gl.render(scene, camera);
+    renderFrame?.setSize(width, height);
+    if (renderFrame) renderFrame.render();
+    else gl.render(scene, camera);
     onFrame(gl.domElement as HTMLCanvasElement);
   } finally {
     for (const { mat, prev } of resolutionUniforms) mat.resolution = prev;
+    // Restored before the re-render below, so the viewport gets its tint back.
+    showOverlays();
     gl.setPixelRatio(prevRatio);
     gl.setSize(prevSize.x, prevSize.y, false);
     camera.aspect = prevAspect;
     camera.updateProjectionMatrix();
-    gl.render(scene, camera);
+    renderFrame?.setSize(prevSize.x, prevSize.y);
+    if (renderFrame) renderFrame.render();
+    else gl.render(scene, camera);
   }
 }
 
-/** Composites the frame onto a solid colour, for formats without alpha. */
-function flatten(source: HTMLCanvasElement, background: string): HTMLCanvasElement {
+/**
+ * Composites the frame onto the scene's backdrop.
+ *
+ * Returns the frame untouched for a transparent backdrop, so the alpha channel
+ * survives into a PNG.
+ */
+export function composite(
+  source: HTMLCanvasElement,
+  background: ResolvedBackground,
+  watermark: WatermarkSettings = DEFAULT_WATERMARK,
+): { canvas: HTMLCanvasElement; opaque: boolean } {
   const out = document.createElement("canvas");
   out.width = source.width;
   out.height = source.height;
   const ctx = out.getContext("2d");
-  if (!ctx) return source;
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, out.width, out.height);
+  if (!ctx) return { canvas: source, opaque: false };
+
+  const opaque = paintBackground(ctx, out.width, out.height, background);
+  if (!opaque) {
+    /*
+     * A transparent export keeps its alpha, so the frame cannot be flattened —
+     * but the mark still has to be burned in, or a cut-out PNG would be the one
+     * download that leaves the studio unbranded.
+     */
+    const marked = document.createElement("canvas");
+    marked.width = source.width;
+    marked.height = source.height;
+    const mctx = marked.getContext("2d");
+    if (!mctx) return { canvas: source, opaque: false };
+    mctx.drawImage(source, 0, 0);
+    paintWatermark(mctx, marked.width, marked.height, watermark);
+    return { canvas: marked, opaque: false };
+  }
+
   ctx.drawImage(source, 0, 0);
-  return out;
+  /*
+   * A front-placed image goes on after the piece and before the mark. That
+   * order is the point: the prop covers the jewellery, and the studio's mark
+   * still sits on top of everything.
+   */
+  paintForeground(ctx, out.width, out.height, background);
+  paintWatermark(ctx, out.width, out.height, watermark);
+  return { canvas: out, opaque: true };
 }
 
 /**
@@ -230,17 +305,15 @@ export function dimensionsFor(
     : { width: even(base), height: even((base * aspect.h) / aspect.w) };
 }
 
-export type StillBackground = "transparent" | "white" | "black";
-
 export function canvasToBlob(
   canvas: HTMLCanvasElement,
-  background: StillBackground,
+  background: ResolvedBackground,
+  watermark?: WatermarkSettings,
 ): Promise<Blob | null> {
-  // JPEG has no alpha, so a transparent request has to stay PNG.
-  const useJpeg = background !== "transparent";
-  const src = useJpeg ? flatten(canvas, background === "white" ? "#ffffff" : "#000000") : canvas;
+  // JPEG has no alpha, so a transparent backdrop has to stay PNG.
+  const { canvas: src, opaque } = composite(canvas, background, watermark);
   return new Promise((resolve) =>
-    src.toBlob(resolve, useJpeg ? "image/jpeg" : "image/png", useJpeg ? 0.95 : undefined),
+    src.toBlob(resolve, opaque ? "image/jpeg" : "image/png", opaque ? 0.95 : undefined),
   );
 }
 

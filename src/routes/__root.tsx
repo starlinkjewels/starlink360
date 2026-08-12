@@ -85,21 +85,19 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#06050a" },
       // Defaults for any route that doesn't set its own; "/" overrides the
       // title and descriptions with piece-specific copy.
-      { title: "Starlink Jewels — 3D Fine Jewelry Atelier" },
+      { title: "RenderGod — Photorealistic Jewellery Rendering" },
       {
         name: "description",
-        content:
-          "Explore Starlink Jewels in interactive 3D — 360° turntable and live metal finishes.",
+        content: "Explore RenderGod in interactive 3D — 360° turntable and live metal finishes.",
       },
-      { name: "author", content: "Starlink Jewels" },
-      { property: "og:title", content: "Starlink Jewels — 3D Fine Jewelry Atelier" },
+      { name: "author", content: "RenderGod" },
+      { property: "og:title", content: "RenderGod — Photorealistic Jewellery Rendering" },
       {
         property: "og:description",
-        content:
-          "Explore Starlink Jewels in interactive 3D — 360° turntable and live metal finishes.",
+        content: "Explore RenderGod in interactive 3D — 360° turntable and live metal finishes.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:site_name", content: "Starlink Jewels" },
+      { property: "og:site_name", content: "RenderGod" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
@@ -137,9 +135,9 @@ function RootShell({ children }: { children: ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('starlink.theme');" +
-              "document.documentElement.dataset.theme=t==='light'?'light':'dark'}" +
-              "catch(e){document.documentElement.dataset.theme='dark'}",
+              "try{var t=localStorage.getItem('rendergod.theme');" +
+              "document.documentElement.dataset.theme=t==='dark'?'dark':'light'}" +
+              "catch(e){document.documentElement.dataset.theme='light'}",
           }}
         />
       </head>

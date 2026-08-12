@@ -37,11 +37,17 @@ if (!done || done.type === "error") {
 }
 const n = (x) => x.toLocaleString("en-US");
 console.log(
-  `  metal        ${done.metal ? n(done.metal.position.length / 3) + " verts" : "(none)"}`,
+  `  metal groups ${(done.metals ?? []).length}  (${n(
+    (done.metals ?? []).reduce((t, m) => t + m.position.length / 3, 0),
+  )} verts total)`,
 );
+for (const m of done.metals ?? [])
+  console.log(
+    `    ${m.color}  ${n(m.position.length / 3)} verts  ${n((m.solids?.length ?? 1) - 1)} solids  layer="${m.layer}"`,
+  );
 console.log(`  gem groups   ${(done.gems ?? []).length}`);
 for (const g of done.gems ?? [])
   console.log(
-    `    ${g.color}  ${n(g.position.length / 3)} verts  ${g.parts} parts  layer="${g.layer}"  material="${g.material}"`,
+    `    ${g.color}  ${n(g.position.length / 3)} verts  ${n((g.solids?.length ?? 1) - 1)} solids  layer="${g.layer}"  material="${g.material}"`,
   );
 console.log(`  missingMesh  ${done.missingMesh}`);

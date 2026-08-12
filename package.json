@@ -21,7 +21,22 @@
     "test:gem": "tsc src/components/jewelry/gemAbsorption.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-gem-absorption.mjs",
     "inspect:3dm": "node --max-old-space-size=8192 scripts/inspect-3dm.mjs",
     "test:names": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-named-stones.mjs",
-    "test:labels": "tsc src/lib/loadJewelryFile.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-stone-labels.mjs"
+    "test:labels": "tsc src/lib/loadJewelryFile.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-stone-labels.mjs",
+    "test:bg": "tsc src/components/jewelry/background.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-background.mjs",
+    "test:camera": "tsc src/components/jewelry/camera.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-camera.mjs",
+    "test:lighting": "tsc src/components/jewelry/lighting.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-lighting.mjs",
+    "test:ground": "tsc src/components/jewelry/ground.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-ground.mjs",
+    "test:export": "tsc src/components/jewelry/watermark.ts src/components/jewelry/videoExport.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-export.mjs",
+    "test:textures": "tsc src/components/jewelry/textures.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-textures.mjs",
+    "test:selection": "tsc src/components/jewelry/selection.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-selection.mjs",
+    "test:library": "tsc src/components/jewelry/library.ts src/components/jewelry/preview.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && tsc -p tsconfig.suites.json && node scripts/test-library.mjs",
+    "test:assign": "tsc src/components/jewelry/assign.ts src/components/jewelry/selection.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-assign.mjs",
+    "test:plan": "tsc src/components/jewelry/plan.ts src/components/jewelry/selection.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-plan.mjs",
+    "test:pipeline": "tsc -p tsconfig.suites.json && node scripts/test-pipeline.mjs",
+    "test:lights": "tsc src/components/jewelry/lights.ts src/components/jewelry/shadows.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-lights.mjs",
+    "test:post": "tsc src/components/jewelry/bloom.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-post.mjs",
+    "test:project": "tsc -p tsconfig.suites.json && node scripts/test-export-options.mjs",
+    "test:animation": "tsc src/components/jewelry/animation.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-animation.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

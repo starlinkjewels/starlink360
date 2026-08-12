@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export type Theme = "dark" | "light";
 
-const KEY = "starlink.theme";
+const KEY = "rendergod.theme";
 
 /**
  * Theme lives on the <html> element as `data-theme`, which is what the CSS
@@ -11,7 +11,7 @@ const KEY = "starlink.theme";
  * every component that happens to read a colour.
  */
 export function useTheme(): [Theme, (t: Theme) => void] {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  const [theme, setThemeState] = useState<Theme>("light");
 
   useEffect(() => {
     const saved = (() => {
@@ -21,7 +21,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
         return null;
       }
     })();
-    const initial: Theme = saved === "light" || saved === "dark" ? saved : "dark";
+    const initial: Theme = saved === "light" || saved === "dark" ? saved : "light";
     setThemeState(initial);
     document.documentElement.dataset.theme = initial;
   }, []);

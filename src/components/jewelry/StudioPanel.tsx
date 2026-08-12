@@ -7,6 +7,14 @@ import {
   Film,
   Gem,
   Sparkles,
+  Palette,
+  Video,
+  Lightbulb,
+  Layers,
+  Triangle,
+  Type,
+  Waves,
+  Zap,
   Image as ImageIcon,
   Pause,
   Play,
@@ -15,10 +23,57 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { finishes, type Finish } from "@/data/finishes";
+import { finishById, finishes, type Finish } from "@/data/finishes";
 import { Select } from "./Select";
 import { useTheme } from "@/hooks/useTheme";
-import { STONE_PRESETS, type StoneGroup } from "./stones";
+import type { StoneGroup } from "./stones";
+import type { Part, PartKind } from "./selection";
+import type { Assignments } from "./assign";
+import { NumberField } from "./ui/NumberField";
+import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
+import { MaterialsPanel } from "./panels/MaterialsPanel";
+import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
+import { LightsPanel } from "./panels/LightsPanel";
+import { ShadowsPanel } from "./panels/ShadowsPanel";
+import { EnvironmentPanel } from "./panels/EnvironmentPanel";
+import { GroundPanel } from "./panels/GroundPanel";
+import { PostPanel } from "./panels/PostPanel";
+import { AnimationPanel } from "./panels/AnimationPanel";
+import { animationById, objectMoveById } from "./animation";
+import { ExportOptionsPanel, type ExportTab } from "./panels/ExportOptionsPanel";
+import {
+  DEFAULT_EXPORT_OPTIONS,
+  resolveFileName,
+  withJpegDpi,
+  withPngDpi,
+  type ExportOptions,
+} from "./exportOptions";
+import { DEFAULT_LIGHTS, casterOf, describeLights, type LightDef } from "./lights";
+import { DEFAULT_SHADOWS, type ShadowSettings } from "./shadows";
+import { SURFACE_FINISHES } from "./textures";
+import { DEFAULT_POST, type PostSettings } from "./bloom";
+import { DEFAULT_CAMERA, isPinned, type CameraSettings } from "./camera";
+import { DEFAULT_LIGHTING, ENVIRONMENTS, type LightingSettings } from "./lighting";
+import { DEFAULT_WATERMARK, WATERMARK_PLACEMENTS, type WatermarkSettings } from "./watermark";
+import {
+  DEFAULT_GROUND,
+  GROUND_PRESETS,
+  REFLECTION_RESOLUTIONS,
+  clampResolution,
+  maxReflectionResolution,
+  reflectionWarning,
+  type GroundSettings,
+  type GroundStyle,
+} from "./ground";
+import {
+  GRADIENT_DIRECTIONS,
+  GRADIENT_PRESETS,
+  SOLID_PRESETS,
+  resolveBackground,
+  type Background,
+  type BackgroundKind,
+  type GradientDirection,
+} from "./background";
 import type { SavedView, StudioApi } from "./StudioRig";
 import {
   ASPECTS,
@@ -27,9 +82,14 @@ import {
   exportName,
   type AnglePreset,
   type AspectPreset,
-  type StillBackground,
 } from "./studio";
-import { bestAvailableFormat, encodeMp4, encodeWebm, type VideoFormat } from "./videoExport";
+import {
+  bestAvailableFormat,
+  bitrateFor,
+  encodeMp4,
+  encodeWebm,
+  type VideoFormat,
+} from "./videoExport";
 
 /** Short edge in pixels. Phones cannot hold the largest frames. */
 const IMAGE_QUALITY = [
@@ -39,26 +99,27 @@ const IMAGE_QUALITY = [
 ] as const;
 
 const VIDEO_QUALITY = [
-  { id: "1080", label: "1080p", base: 1080 },
   { id: "720", label: "720p", base: 720 },
+  { id: "1080", label: "1080p Full HD", base: 1080 },
+  { id: "1440", label: "1440p 2K", base: 1440 },
+  { id: "2160", label: "2160p 4K", base: 2160 },
 ] as const;
-
-const BACKGROUNDS: { id: StillBackground; label: string }[] = [
-  { id: "transparent", label: "Transparent" },
-  { id: "white", label: "White" },
-  { id: "black", label: "Black" },
-];
 
 /*
- * Video backgrounds are always solid. H.264 carries no alpha channel, so a
- * transparent MP4 is not a thing that exists — the fill has to be baked in.
+ * Frame rates. 60 is four times the work of 30 at twice the resolution, so the
+ * mobile cap below covers rate as well as size — 4K60 on a phone is a killed
+ * tab, not a slow export.
  */
-const VIDEO_BACKGROUNDS = [
-  { id: "stage", label: "Dark", css: "#0b0910" },
-  { id: "black", label: "Black", css: "#000000" },
-  { id: "white", label: "White", css: "#ffffff" },
-  { id: "grey", label: "Soft grey", css: "#f1f1f3" },
-] as const;
+const VIDEO_FPS = [24, 30, 60] as const;
+const MOBILE_MAX_FPS = 30;
+
+const BG_KINDS: { value: BackgroundKind; label: string; hint: string }[] = [
+  { value: "stage", label: "Atelier (default)", hint: "The viewer's own dark stage" },
+  { value: "solid", label: "Solid colour", hint: "One flat colour" },
+  { value: "gradient", label: "Gradient", hint: "Two colours, any direction" },
+  { value: "image", label: "Image", hint: "Your own backdrop photo" },
+  { value: "transparent", label: "Transparent", hint: "Cut-out PNG; video falls back to black" },
+];
 
 /** Camera moves, named for what they do rather than what they are. */
 const VIDEO_SHOTS = [
@@ -76,36 +137,51 @@ const TURNS = [1, 2, 3] as const;
 const LENGTHS = [3, 4, 6, 8, 12, 16, 24, 30] as const;
 const MOBILE_MAX_SECONDS = 12;
 const MOBILE_MAX_BASE = 1080;
-const FPS = 30;
-const BITRATE_MBPS = 20;
 
 /** Collapsible section, so the panel reads as a few clear steps. */
+/**
+ * One section of the panel.
+ *
+ * The rail decides which is open, so exactly one renders at a time and there is
+ * no header to click — the panel already shows the title. The `icon` and
+ * `subtitle` props are still accepted because every call site passes them and
+ * the subtitle carries useful state ("Orthographic", "3 sets"); it is shown as
+ * a caption under the panel heading rather than in a row of collapsed bars.
+ */
+/**
+ * Re-tags an encoded image with the chosen DPI.
+ *
+ * Byte surgery on the header, not a re-encode: the pixels are already correct
+ * and re-encoding a JPEG would lose quality to fix metadata.
+ */
+async function withDpi(blob: Blob, ext: string, dpi: number): Promise<Blob> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const out = ext === "png" ? withPngDpi(bytes, dpi) : withJpegDpi(bytes, dpi);
+  // Unchanged means it was not the format we thought; hand back the original
+  // rather than re-wrapping it for nothing.
+  return out === bytes ? blob : new Blob([out as BlobPart], { type: blob.type });
+}
+
+/** Shared so a default prop does not allocate a new Set on every render. */
+const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+
 function Section({
-  icon,
-  title,
   subtitle,
   open,
-  onToggle,
   children,
 }: {
-  icon: React.ReactNode;
-  title: string;
+  icon?: React.ReactNode;
+  title?: string;
   subtitle?: string;
   open: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
   children: React.ReactNode;
 }) {
+  if (!open) return null;
   return (
-    <section className="sect">
-      <button className="sect-head" onClick={onToggle} aria-expanded={open}>
-        <span className="sect-icon">{icon}</span>
-        <span className="sect-titles">
-          <span className="sect-title">{title}</span>
-          {subtitle && <span className="sect-sub">{subtitle}</span>}
-        </span>
-        <ChevronDown className={`sect-chevron size-4 ${open ? "sect-chevron-open" : ""}`} />
-      </button>
-      {open && <div className="sect-body">{children}</div>}
+    <section className="sect-panel">
+      {subtitle && <p className="sect-caption">{subtitle}</p>}
+      {children}
     </section>
   );
 }
@@ -217,6 +293,27 @@ export interface StudioPanelProps {
   onRotateSpeed: (v: number) => void;
   studio: React.MutableRefObject<StudioApi | null>;
   productRef: string;
+  /** Section the rail has selected. */
+  active?: string;
+  onActive?: (id: string) => void;
+  /** Projection, lens, clipping and object spin. */
+  camera?: CameraSettings;
+  /** Environment, light levels and ground shadow. */
+  lighting?: LightingSettings;
+  onLighting?: (l: LightingSettings) => void;
+  /** The surface the piece stands on. */
+  ground?: GroundSettings;
+  onGround?: (g: GroundSettings) => void;
+  /** Studio branding, burned into every export. */
+  watermark?: WatermarkSettings;
+  onWatermark?: (w: WatermarkSettings) => void;
+  /** Bloom, depth of field and screen-space reflections. */
+  post?: PostSettings;
+  onPost?: (p: PostSettings) => void;
+  onCamera?: (c: CameraSettings) => void;
+  /** The scene backdrop, shown live and baked into every export. */
+  background: Background;
+  onBackground: (bg: Background) => void;
   /** Selectable stone groups in the loaded piece. */
   stones?: StoneGroup[];
   /** Colour chosen per group, keyed by group id. */
@@ -224,6 +321,50 @@ export interface StudioPanelProps {
   onStoneColor?: (id: string, hex: string | null) => void;
   /** Group last tapped on the piece, so the list follows the 3D view. */
   selectedStone?: string | null;
+  /** Every selectable part, and the current selection, for the Materials panel. */
+  parts?: Part[];
+  selectedParts?: ReadonlySet<string>;
+  onSelectParts?: (next: Set<string>) => void;
+  /** Materials chosen per part id. */
+  assignments?: Assignments;
+  onAssignments?: (next: Assignments) => void;
+  /** The material on the brush, and how to load it. Null means not painting. */
+  armed?: string | null;
+  onArm?: (brush: { material: string; kind: PartKind } | null) => void;
+  /** Surface finish per part id. */
+  textures?: Textures;
+  onTextures?: (next: Textures) => void;
+  /** The light rig, and whether to mark each light's position. */
+  lights?: LightDef[];
+  onLights?: (next: LightDef[]) => void;
+  debugLights?: boolean;
+  onDebugLights?: (on: boolean) => void;
+  /** Shadow mechanism and settings. */
+  shadows?: ShadowSettings;
+  onShadows?: (next: ShadowSettings) => void;
+  /**
+   * The piece's bounding radius, which the shadow frustum is relative to.
+   *
+   * Defaults to 1 because that is what it always is: every load path normalises
+   * the piece to a unit sphere, so plumbing the real measurement up from the
+   * viewport would be threading a constant through four components.
+   */
+  pieceRadius?: number;
+  /** Where the camera is right now, so the position fields show real numbers. */
+  livePosition?: [number, number, number];
+  /** The chosen camera move, previewed live and used by the video export. */
+  animation?: string | null;
+  onAnimation?: (id: string | null) => void;
+  animationPlaying?: boolean;
+  onAnimationPlaying?: (on: boolean) => void;
+  animationSeconds?: number;
+  onAnimationSeconds?: (v: number) => void;
+  /** A move applied to the piece rather than the camera. */
+  objectMove?: string;
+  onObjectMove?: (id: string) => void;
+  /** File names, DPI and the turntable sweep. */
+  exportOptions?: ExportOptions;
+  onExportOptions?: (next: ExportOptions) => void;
   onSelectStone?: (id: string | null) => void;
   /** Lets the page curtain the canvas while frames are being rendered. */
   onBusyChange?: (label: string | null) => void;
@@ -240,16 +381,66 @@ export function StudioPanel({
   onRotateSpeed,
   studio,
   productRef,
+  active,
+  onActive,
+  camera = DEFAULT_CAMERA,
+  onCamera,
+  lighting = DEFAULT_LIGHTING,
+  onLighting,
+  ground = DEFAULT_GROUND,
+  onGround,
+  watermark = DEFAULT_WATERMARK,
+  onWatermark,
+  post = DEFAULT_POST,
+  onPost,
+  background,
+  onBackground,
   stones = [],
   stoneColors = {},
   onStoneColor,
   selectedStone = null,
   onSelectStone,
+  parts = [],
+  // An empty set, not undefined: "nothing selected" is a real state that means
+  // "apply to the whole piece", so it must never read as missing.
+  selectedParts = EMPTY_SELECTION,
+  onSelectParts,
+  assignments = {},
+  onAssignments,
+  armed = null,
+  onArm,
+  textures = {},
+  onTextures,
+  lights = DEFAULT_LIGHTS,
+  onLights,
+  debugLights = false,
+  onDebugLights,
+  shadows = DEFAULT_SHADOWS,
+  onShadows,
+  livePosition = [0, 0, 0],
+  animation = null,
+  onAnimation,
+  animationPlaying = false,
+  onAnimationPlaying,
+  animationSeconds = 6,
+  onAnimationSeconds,
+  objectMove = "none",
+  onObjectMove,
+  exportOptions = DEFAULT_EXPORT_OPTIONS,
+  onExportOptions,
+  pieceRadius = 1,
   onBusyChange,
   onClose,
 }: StudioPanelProps) {
   const [theme, setTheme] = useTheme();
-  const [open, setOpen] = useState<string>("photos");
+  /*
+   * Which section is showing. Owned by the shell so the icon rail and the panel
+   * cannot disagree; the internal state is only a fallback for any caller that
+   * still mounts this without a rail.
+   */
+  const [ownOpen, setOwnOpen] = useState<string>("metal");
+  const open = active ?? ownOpen;
+  const setOpen = onActive ?? setOwnOpen;
 
   /*
    * Tapping a stone on the piece opens this section and scrolls it into view.
@@ -258,18 +449,24 @@ export function StudioPanel({
    */
   useEffect(() => {
     if (selectedStone) setOpen("stones");
-  }, [selectedStone]);
-  const toggle = (id: string) => setOpen((cur) => (cur === id ? "" : id));
+  }, [selectedStone, setOpen]);
+  /*
+   * Selecting a section is now idempotent: the rail is the navigation, so
+   * clicking the section you are already in must not close the panel and leave
+   * an empty frame.
+   */
+  const toggle = (id: string) => setOpen(id);
 
+  const [exportTab, setExportTab] = useState<ExportTab>("image");
   const [aspect, setAspect] = useState<AspectPreset>(ASPECTS[0]);
   const [imageQuality, setImageQuality] = useState<number>(1080);
-  const [background, setBackground] = useState<StillBackground>("transparent");
 
   const [videoBase, setVideoBase] = useState<number>(1080);
   const [shot, setShot] = useState<(typeof VIDEO_SHOTS)[number]>(VIDEO_SHOTS[0]);
-  const [videoBg, setVideoBg] = useState<(typeof VIDEO_BACKGROUNDS)[number]>(VIDEO_BACKGROUNDS[0]);
   const [turns, setTurns] = useState<number>(1);
   const [seconds, setSeconds] = useState(4);
+  const [fps, setFps] = useState<number>(30);
+  const [maxFps, setMaxFps] = useState<number>(60);
 
   /*
    * The subject of the shot, shared by Photos and Video.
@@ -294,31 +491,39 @@ export function StudioPanel({
   const [noteKind, setNoteKind] = useState<"ok" | "error">("ok");
   const [format, setFormat] = useState<VideoFormat | null>(null);
   const abort = useRef<AbortController | null>(null);
+  const bgFile = useRef<HTMLInputElement>(null);
   const started = useRef(0);
 
   // A phone cannot hold the biggest frames, nor survive a 900-frame render.
   const [maxBase, setMaxBase] = useState(2160);
   const [maxSeconds, setMaxSeconds] = useState<number>(LENGTHS[LENGTHS.length - 1]);
+  const [coarsePointer, setCoarsePointer] = useState(false);
   useEffect(() => {
     if (!window.matchMedia("(pointer: coarse)").matches) return;
+    setCoarsePointer(true);
     setMaxBase(MOBILE_MAX_BASE);
     setImageQuality((q) => Math.min(q, MOBILE_MAX_BASE));
     setMaxSeconds(MOBILE_MAX_SECONDS);
     setSeconds((s) => Math.min(s, MOBILE_MAX_SECONDS));
+    setMaxFps(MOBILE_MAX_FPS);
+    setFps((f) => Math.min(f, MOBILE_MAX_FPS));
   }, []);
 
   const videoDims = dimensionsFor(aspect, videoBase);
   const imageDims = dimensionsFor(aspect, imageQuality);
-  const frames = Math.round(seconds * FPS);
-  const estMb = ((BITRATE_MBPS * seconds) / 8).toFixed(0);
+  const frames = Math.round(seconds * fps);
+  const estMb = (
+    ((bitrateFor(videoDims.width, videoDims.height, fps) / 1e6) * seconds) /
+    8
+  ).toFixed(0);
 
   useEffect(() => {
     let alive = true;
-    bestAvailableFormat(videoDims.width, videoDims.height).then((f) => alive && setFormat(f));
+    bestAvailableFormat(videoDims.width, videoDims.height, fps).then((f) => alive && setFormat(f));
     return () => {
       alive = false;
     };
-  }, [videoDims.width, videoDims.height]);
+  }, [videoDims.width, videoDims.height, fps]);
 
   /*
    * Saved views.
@@ -328,7 +533,7 @@ export function StudioPanel({
    * user frames it by eye and saves it. Kept per product so a set survives a
    * reload.
    */
-  const storageKey = `starlink.views.${productRef}`;
+  const storageKey = `rendergod.views.${productRef}`;
   const [views, setViews] = useState<SavedView[]>([]);
   useEffect(() => {
     try {
@@ -426,21 +631,52 @@ export function StudioPanel({
     setBusy("Rendering");
     setNote(null);
     try {
-      const ext = background === "transparent" ? "png" : "jpg";
+      const bg = await resolveBackground(background);
+      const ext = bg.kind === "transparent" ? "png" : "jpg";
       // A preset is captured through `captureAngle` so it is re-framed for the
       // chosen shape; a 9:16 crop of a wide necklace would otherwise lose its
       // ends. A saved part keeps exactly the framing the user set.
       const blob = angle
-        ? await api.captureAngle(angle, { ...imageDims, background })
-        : await api.captureView(view, { ...imageDims, background });
-      if (blob) downloadBlob(blob, exportName(productRef, label, imageDims.height, ext));
+        ? await api.captureAngle(angle, { ...imageDims, background: bg, watermark })
+        : await api.captureView(view, { ...imageDims, background: bg, watermark });
+      if (blob) {
+        /*
+         * DPI is written into the encoded bytes rather than re-encoded. Canvas
+         * always says 96, so a 4000px render lands in InDesign at 42 inches
+         * wide and someone retypes the size on every image. The pixels are
+         * already right; only the metadata was wrong.
+         */
+        const tagged = await withDpi(blob, ext, exportOptions.dpi);
+        downloadBlob(
+          tagged,
+          resolveFileName(
+            exportOptions.imageName,
+            exportName(productRef, label, imageDims.height, ext),
+            ext,
+          ),
+        );
+      }
       ok("Saved.");
     } catch (e) {
       fail(e);
     } finally {
       setBusy(null);
     }
-  }, [studio, resolvePart, imageDims, background, productRef, ok, fail, setBusy]);
+  }, [
+    studio,
+    resolvePart,
+    imageDims,
+    background,
+    watermark,
+    productRef,
+    // Read inside, so a name or DPI changed after mount must reach the closure —
+    // omitting these would bake in whatever they were on first render.
+    exportOptions.imageName,
+    exportOptions.dpi,
+    ok,
+    fail,
+    setBusy,
+  ]);
 
   const shootEverything = useCallback(async () => {
     const api = studio.current;
@@ -449,20 +685,21 @@ export function StudioPanel({
     setNote(null);
     setProgress(0);
     try {
-      const ext = background === "transparent" ? "png" : "jpg";
+      const bg = await resolveBackground(background);
+      const ext = bg.kind === "transparent" ? "png" : "jpg";
       const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
       const total = api.angles.length + views.length;
       let done = 0;
 
       for (const angle of api.angles) {
-        const blob = await api.captureAngle(angle, { ...imageDims, background });
+        const blob = await api.captureAngle(angle, { ...imageDims, background: bg, watermark });
         if (blob) zip.file(exportName(productRef, angle.id, imageDims.height, ext), blob);
         setProgress(Math.round((++done / total) * 100));
         await new Promise((r) => setTimeout(r, 0));
       }
       for (const view of views) {
-        const blob = await api.captureView(view, { ...imageDims, background });
+        const blob = await api.captureView(view, { ...imageDims, background: bg, watermark });
         if (blob) zip.file(exportName(productRef, view.label, imageDims.height, ext), blob);
         setProgress(Math.round((++done / total) * 100));
         await new Promise((r) => setTimeout(r, 0));
@@ -478,14 +715,14 @@ export function StudioPanel({
       setBusy(null);
       setProgress(0);
     }
-  }, [studio, imageDims, background, productRef, views, ok, fail, setBusy]);
+  }, [studio, imageDims, background, watermark, productRef, views, ok, fail, setBusy]);
 
   // ── Video ─────────────────────────────────────────────────────────────
   const shootVideo = useCallback(async () => {
     const api = studio.current;
     if (!api) return ok("The piece is still loading.");
     const { width, height } = videoDims;
-    const chosen = format ?? (await bestAvailableFormat(width, height));
+    const chosen = format ?? (await bestAvailableFormat(width, height, fps));
     if (chosen === "png-sequence") {
       fail(new Error("This browser cannot encode video. Use the photo export instead."));
       return;
@@ -500,6 +737,17 @@ export function StudioPanel({
     const part = resolvePart();
     const view = part.angle ? api.angleView(part.angle) : part.view;
 
+    /*
+     * Resolved once, before the run. Painting hundreds of frames cannot await
+     * an image decode per frame, and H.264 carries no alpha — so a transparent
+     * backdrop becomes black rather than silently producing a broken file.
+     */
+    const sceneBg = await resolveBackground(
+      background.kind === "transparent"
+        ? { ...background, kind: "solid", color: "#000000" }
+        : background,
+    );
+
     abort.current = new AbortController();
     setBusy("Rendering frames");
     setNote(null);
@@ -511,7 +759,8 @@ export function StudioPanel({
       width,
       height,
       frames,
-      background: videoBg.css,
+      background: sceneBg,
+      watermark,
       zoom: shot.zoom,
       elevation: shot.elevation,
       elevationSweep: shot.sweep,
@@ -519,6 +768,14 @@ export function StudioPanel({
       view,
       // A tour travels through every saved part; every other move orbits one.
       path: shot.id === "journey" ? views : null,
+      /*
+       * The chosen move, so the download IS the shot that was previewed.
+       *
+       * A saved-part tour still wins: it is a path through points the user
+       * placed by hand, which no preset can express.
+       */
+      preset: shot.id === "journey" ? null : animation ? animationById(animation) : null,
+      objectMove: objectMove === "none" ? null : objectMoveById(objectMove),
     });
 
     try {
@@ -526,7 +783,7 @@ export function StudioPanel({
         width,
         height,
         frameCount: frames,
-        fps: FPS,
+        fps,
         drawFrame: turntable.drawFrame,
         onProgress: (d: number, t: number) => {
           setProgress(Math.round((d / t) * 100));
@@ -538,7 +795,11 @@ export function StudioPanel({
       };
       const blob = chosen === "mp4" ? await encodeMp4(opts) : await encodeWebm(opts);
       const name = shot.id === "journey" ? "tour" : part.label;
-      downloadBlob(blob, exportName(productRef, name, height, chosen === "mp4" ? "mp4" : "webm"));
+      const vext = chosen === "mp4" ? "mp4" : "webm";
+      downloadBlob(
+        blob,
+        resolveFileName(exportOptions.videoName, exportName(productRef, name, height, vext), vext),
+      );
       ok("Saved.");
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") ok("Cancelled.");
@@ -552,9 +813,16 @@ export function StudioPanel({
     }
   }, [
     studio,
+    exportOptions.videoName,
+    // Read inside, so a move chosen after mount reaches the closure — without
+    // these the export would keep rendering whatever was picked on first load.
+    animation,
+    objectMove,
     videoDims,
     frames,
-    videoBg,
+    fps,
+    background,
+    watermark,
     shot,
     turns,
     format,
@@ -571,7 +839,7 @@ export function StudioPanel({
   const partLabel = resolvePart().display;
 
   return (
-    <div className="studio studio-scroll">
+    <div className="studio-sections">
       <div className="studio-head">
         <h2 className="studio-title">Studio</h2>
         <div className="theme-toggle" role="group" aria-label="Theme">
@@ -598,170 +866,477 @@ export function StudioPanel({
           </button>
         )}
       </div>
-
-      {/* ── Stones ────────────────────────────────────────────────── */}
-      {stones.length > 0 && (
-        <Section
-          icon={<Sparkles className="size-4" />}
-          title="Stones"
-          subtitle={
-            stones.length === 1
-              ? stoneColors[stones[0].id]
-                ? "Recoloured"
-                : stones[0].label
-              : `${stones.length} sets`
-          }
-          open={open === "stones"}
-          onToggle={() => toggle("stones")}
-        >
-          <p className="field-hint mb-2">
-            Tap a stone on the piece to pick it, or choose a set below. Stones sharing a colour on
-            one layer are set together, which is how the file is organised.
-          </p>
-
-          <ul className="view-list">
-            {stones.map((g) => {
-              const current = stoneColors[g.id] ?? g.originalHex;
-              const changed = stoneColors[g.id] !== undefined;
-              return (
-                <li
-                  key={g.id}
-                  className={`stone-row ${selectedStone === g.id ? "stone-row-on" : ""}`}
-                >
-                  <button
-                    className="stone-pick"
-                    onClick={() => onSelectStone?.(selectedStone === g.id ? null : g.id)}
-                    aria-pressed={selectedStone === g.id}
-                  >
-                    <span className="swatch-dot swatch-dot-sm" style={{ background: current }} />
-                    <span className="stone-name">{g.label}</span>
-                  </button>
-                  {changed && (
-                    <button
-                      className="chip"
-                      onClick={() => onStoneColor?.(g.id, null)}
-                      title="Back to the colour in the file"
-                      aria-label={`Reset ${g.label}`}
-                    >
-                      <RotateCcw className="size-3" />
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-
-          {selectedStone && (
-            <>
-              <p className="field-label mt-3">
-                Colour for {stones.find((g) => g.id === selectedStone)?.label ?? "this set"}
-              </p>
-              <div className="swatch-grid" role="radiogroup" aria-label="Stone colour">
-                {STONE_PRESETS.map((preset) => {
-                  const active =
-                    (stoneColors[selectedStone] ??
-                      stones.find((g) => g.id === selectedStone)?.originalHex) === preset.hex;
-                  return (
-                    <button
-                      key={preset.id}
-                      role="radio"
-                      aria-checked={active}
-                      aria-label={preset.label}
-                      className="swatch-cell"
-                      onClick={() => onStoneColor?.(selectedStone, preset.hex)}
-                    >
-                      <span className={`swatch ${active ? "swatch-active" : ""}`}>
-                        <span className="swatch-dot" style={{ background: preset.hex }} />
-                      </span>
-                      <span className="swatch-label">{preset.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Anything the presets do not cover — a house colour, a match to
-                  a client's existing piece. */}
-              <label className="field mt-2">
-                <span className="field-label">Any other colour</span>
-                <input
-                  className="stone-colour-input"
-                  type="color"
-                  value={
-                    stoneColors[selectedStone] ??
-                    stones.find((g) => g.id === selectedStone)?.originalHex ??
-                    "#ffffff"
-                  }
-                  onChange={(e) => onStoneColor?.(selectedStone, e.target.value)}
-                  aria-label="Custom stone colour"
-                />
-              </label>
-            </>
-          )}
-        </Section>
-      )}
-
-      {/* ── 1. Metal ──────────────────────────────────────────────── */}
+      {/* ── Post processing ───────────────────────────────────────
+          Was just Glow. Depth of field and screen-space reflections sit
+          alongside it because they are the same kind of thing: a full-screen
+          pass over the finished render, costed the same way. */}
       <Section
-        icon={<Gem className="size-4" />}
-        title="Metal"
+        icon={<Zap className="size-4" />}
+        title="Post Processing"
+        subtitle={
+          [post.bloom.enabled, post.dof.enabled, post.ssr.enabled].filter(Boolean).length === 0
+            ? "Off"
+            : [post.bloom.enabled && "Bloom", post.dof.enabled && "DoF", post.ssr.enabled && "SSR"]
+                .filter(Boolean)
+                .join(" · ")
+        }
+        open={open === "bloom"}
+        onToggle={() => toggle("bloom")}
+      >
+        <PostPanel post={post} onPost={(next) => onPost?.(next)} />
+      </Section>
+      {/* ── Export options ────────────────────────────────────────
+          Image, Video and Watermark: the settings that apply to a DOWNLOAD
+          rather than to the render. They were scattered across three sections,
+          so naming a file, setting its size and finding the mark were three
+          different places. */}
+      <Section
+        icon={<Type className="size-4" />}
+        title="Export Options"
+        subtitle={
+          watermark.enabled
+            ? watermark.logo
+              ? "Logo mark"
+              : watermark.text || "Mark on"
+            : `${exportOptions.dpi} DPI`
+        }
+        open={open === "mark"}
+        onToggle={() => toggle("mark")}
+      >
+        <ExportOptionsPanel
+          tab={exportTab}
+          onTab={setExportTab}
+          options={exportOptions}
+          onOptions={(next) => onExportOptions?.(next)}
+          watermark={watermark}
+          onWatermark={(next) => onWatermark?.(next)}
+          imagePixels={dimensionsFor(aspect, imageQuality).width}
+          turns={turns}
+        />
+      </Section>
+      {/* ── Ground ────────────────────────────────────────────────── */}
+      <Section
+        icon={<Layers className="size-4" />}
+        title="Ground"
+        subtitle={
+          !ground.enabled
+            ? "None"
+            : ground.style === "mirror"
+              ? "Reflector"
+              : ground.kind === "transparent"
+                ? "Transparent"
+                : "Standard"
+        }
+        open={open === "ground"}
+        onToggle={() => toggle("ground")}
+      >
+        <GroundPanel
+          ground={ground}
+          onGround={(next) => onGround?.(next)}
+          radiusXZ={pieceRadius}
+          coarsePointer={coarsePointer}
+        />
+      </Section>
+      {/* ── Lighting ──────────────────────────────────────────────
+          The rig and the overall level, and nothing else. The environment
+          controls that used to be duplicated here belong to Environment, and
+          the key/fill/rim/ambient sliders were driving nothing at all once the
+          rig became a list — four controls that moved and changed no pixel. */}
+      <Section
+        icon={<Lightbulb className="size-4" />}
+        title="Lighting"
+        subtitle={describeLights(lights)}
+        open={open === "light"}
+        onToggle={() => toggle("light")}
+      >
+        <PanelIntro>
+          The lights on the metal. What the STONES see is the environment, in its own section —
+          their shader reads that and nothing here.
+        </PanelIntro>
+
+        <PanelGroup title="Exposure">
+          <NumberField
+            label="Exposure"
+            value={lighting.exposure}
+            min={0.1}
+            max={4}
+            step={0.05}
+            precision={2}
+            hint="Overall brightness, applied after everything else. Reach for this before moving individual lights."
+            onChange={(v) => onLighting?.({ ...lighting, exposure: v })}
+          />
+        </PanelGroup>
+
+        <PanelGroup title="Lights">
+          <LightsPanel
+            lights={lights}
+            onLights={onLights ?? (() => {})}
+            debug={debugLights}
+            onDebug={onDebugLights ?? (() => {})}
+            canCast={shadows.enabled && shadows.mode === "directional"}
+          />
+        </PanelGroup>
+
+        <PanelReset
+          onReset={() => onLighting?.(DEFAULT_LIGHTING)}
+          disabled={JSON.stringify(lighting) === JSON.stringify(DEFAULT_LIGHTING)}
+          label="Reset exposure"
+        />
+      </Section>
+      {/* ── Shadows ───────────────────────────────────────────────── */}
+      <Section
+        icon={<Triangle className="size-4" />}
+        title="Shadows"
+        subtitle={
+          !shadows.enabled ? "Off" : shadows.mode === "contact" ? "Contact pool" : "Shadow camera"
+        }
+        open={open === "shadow"}
+        onToggle={() => toggle("shadow")}
+      >
+        <ShadowsPanel
+          shadows={shadows}
+          onShadows={onShadows ?? (() => {})}
+          radius={pieceRadius}
+          hasCaster={casterOf(lights) !== null}
+        />
+      </Section>
+
+      {/* ── Camera ────────────────────────────────────────────────── */}
+      <Section
+        icon={<Video className="size-4" />}
+        title="Camera"
+        subtitle={
+          camera.projection === "orthographic" ? "Orthographic" : `${Math.round(camera.fov)}mm-ish`
+        }
+        open={open === "camera"}
+        onToggle={() => toggle("camera")}
+      >
+        {/*
+          Where the camera actually is.
+
+          Shown live as it orbits, and typeable. "The same angle across twenty
+          pieces" is a position, not a gesture — reproducing a shot by dragging
+          is guesswork, and a catalogue row shot at slightly different angles
+          reads as sloppy even when nobody can say why.
+        */}
+        <p className="field-label">Position</p>
+        <div className="light-xyz">
+          {(["X", "Y", "Z"] as const).map((axis, i) => (
+            <NumberField
+              key={axis}
+              label={axis}
+              value={Number(((camera.position ?? livePosition)[i] ?? 0).toFixed(2))}
+              min={-500}
+              max={500}
+              step={0.1}
+              precision={2}
+              slider={false}
+              onChange={(v) => {
+                const base = camera.position ?? livePosition;
+                const next: [number, number, number] = [base[0], base[1], base[2]];
+                next[i] = v;
+                onCamera?.({ ...camera, position: next });
+              }}
+            />
+          ))}
+        </div>
+        <p className="field-hint">
+          {isPinned(camera)
+            ? "Pinned. Orbiting still moves the view, but a reset returns here."
+            : "Following the automatic framing. Typing a number pins it."}
+        </p>
+        {isPinned(camera) && (
+          <button className="chip mt-2" onClick={() => onCamera?.({ ...camera, position: null })}>
+            <RotateCcw className="size-3" />
+            Back to auto framing
+          </button>
+        )}
+
+        <Field
+          label="Projection"
+          hint={
+            camera.projection === "orthographic"
+              ? "No perspective distortion — every piece in a catalogue row matches."
+              : "Natural depth, like a real lens."
+          }
+        >
+          <Select
+            value={camera.projection}
+            options={[
+              { value: "perspective", label: "Perspective", hint: "Natural depth" },
+              { value: "orthographic", label: "Orthographic", hint: "Flat, for catalogues" },
+            ]}
+            onChange={(v) =>
+              onCamera?.({ ...camera, projection: v as CameraSettings["projection"] })
+            }
+            disabled={disabled}
+            ariaLabel="Projection"
+          />
+        </Field>
+
+        {camera.projection === "perspective" && (
+          <Field
+            label={`Lens — ${Math.round(camera.fov)}° field of view`}
+            hint="Lower is a longer lens: less distortion, further back."
+          >
+            <input
+              className="studio-slider"
+              type="range"
+              min={10}
+              max={80}
+              step={1}
+              value={camera.fov}
+              onChange={(e) => onCamera?.({ ...camera, fov: Number(e.target.value) })}
+            />
+          </Field>
+        )}
+
+        <Field
+          label="Up axis"
+          hint="CAD files are usually Z-up while the viewer is Y-up, so a piece can arrive on its side."
+        >
+          <Select
+            value={camera.upAxis}
+            options={[
+              { value: "y", label: "Y is up", hint: "Default" },
+              { value: "z", label: "Z is up", hint: "Most CAD exports" },
+              { value: "x", label: "X is up", hint: "Rare" },
+            ]}
+            onChange={(v) => onCamera?.({ ...camera, upAxis: v as CameraSettings["upAxis"] })}
+            disabled={disabled}
+            ariaLabel="Up axis"
+          />
+        </Field>
+
+        <button
+          className={`dock-btn dock-btn-lg w-full ${camera.rawGeometry ? "swatch-active" : ""}`}
+          onClick={() => onCamera?.({ ...camera, rawGeometry: !camera.rawGeometry })}
+          aria-pressed={camera.rawGeometry}
+        >
+          {camera.rawGeometry ? "Showing raw mesh" : "Show raw mesh"}
+        </button>
+        <p className="field-hint mb-1">
+          Strips every material so you can inspect the geometry a file actually contains.
+        </p>
+
+        <Field
+          label={`Near clip — ${(camera.nearFactor * 100).toFixed(1)}%`}
+          hint="Raise it to slice into the front of the piece and see the setting inside."
+        >
+          <input
+            className="studio-slider"
+            type="range"
+            min={0.001}
+            max={0.9}
+            step={0.001}
+            value={camera.nearFactor}
+            onChange={(e) => onCamera?.({ ...camera, nearFactor: Number(e.target.value) })}
+          />
+        </Field>
+
+        <p className="field-label mt-3">Spin the piece</p>
+        <p className="field-hint mb-2">
+          Turns the piece itself under a fixed light. The turntable above orbits the camera instead
+          — different shots.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Axis">
+            <Select
+              value={camera.spinAxis}
+              options={[
+                { value: "none", label: "Not spinning" },
+                { value: "y", label: "Y — upright" },
+                { value: "x", label: "X — tumble" },
+                { value: "z", label: "Z — roll" },
+              ]}
+              onChange={(v) => onCamera?.({ ...camera, spinAxis: v as CameraSettings["spinAxis"] })}
+              disabled={disabled}
+              ariaLabel="Spin axis"
+            />
+          </Field>
+          <Field label={`Speed — ${camera.spinSpeed.toFixed(2)}x`}>
+            <input
+              className="studio-slider"
+              type="range"
+              min={0.05}
+              max={2}
+              step={0.05}
+              value={camera.spinSpeed}
+              onChange={(e) => onCamera?.({ ...camera, spinSpeed: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+
+        <button
+          className="dock-btn dock-btn-lg mt-2 w-full"
+          onClick={() => onCamera?.(DEFAULT_CAMERA)}
+          disabled={disabled}
+        >
+          <RotateCcw className="size-3.5" />
+          Reset camera
+        </button>
+      </Section>
+      {/* ── Environment ───────────────────────────────────────────
+          Three tabs, because they are three different jobs people conflate:
+          what the METAL reflects, what the STONES refract, and what sits
+          BEHIND the piece. Only the last is a backdrop. */}
+      <Section
+        icon={<ImageIcon className="size-4" />}
+        title="Environment"
+        subtitle={BG_KINDS.find((k) => k.value === background.kind)?.label}
+        open={open === "bg"}
+        onToggle={() => toggle("bg")}
+      >
+        <EnvironmentPanel
+          lighting={lighting}
+          onLighting={(next) => onLighting?.(next)}
+          background={background}
+          onBackground={onBackground}
+          onUploadImage={() => bgFile.current?.click()}
+        />
+        {/*
+          The file input stays here rather than inside the panel: the panel is
+          unmounted whenever another tab is showing, and an input that vanishes
+          mid-pick cancels the pick.
+        */}
+        <input
+          ref={bgFile}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            /*
+             * Read to a data URL, not an object URL. The backdrop has to be
+             * drawable into an export canvas without tainting it, and an
+             * object URL dies the moment the page reloads.
+             */
+            const reader = new FileReader();
+            reader.onload = () =>
+              onBackground({ ...background, kind: "image", image: String(reader.result) });
+            reader.readAsDataURL(file);
+            e.target.value = "";
+          }}
+        />
+      </Section>
+      {/* ── 1. Metals ──────────────────────────────────────────────
+          Metals and stones are two sections again, one per rail icon. They
+          share the same panel component and the same assignment state — the
+          duplicate colour state that used to make them disagree is gone — but
+          each shows only its own catalogue, so neither is a tab click away. */}
+      <Section
+        icon={<Palette className="size-4" />}
+        title="Metals"
         subtitle={finish.name}
         open={open === "metal"}
         onToggle={() => toggle("metal")}
       >
-        <div className="swatch-grid" role="radiogroup" aria-label="Metal finish">
-          {finishes.map((f) => (
-            <button
-              key={f.id}
-              role="radio"
-              aria-checked={f.id === finish.id}
-              aria-label={f.name}
-              className="swatch-cell"
-              onClick={() => onSelectFinish(f)}
-            >
-              <span className={`swatch ${f.id === finish.id ? "swatch-active" : ""}`}>
-                <span className="swatch-dot" style={{ background: f.color }} />
-              </span>
-              <span className="swatch-label">{f.name}</span>
-            </button>
-          ))}
-        </div>
+        <MaterialsPanel
+          tab="metals"
+          fallbackMetal={finish.id}
+          onFallbackMetal={(id) =>
+            onSelectFinish({ ...(finishById(id) ?? finish), surface: finish.surface })
+          }
+          parts={parts}
+          selected={selectedParts}
+          assignments={assignments}
+          onAssignments={onAssignments ?? (() => {})}
+          onSelect={onSelectParts}
+          armed={armed}
+          onArm={onArm}
+          surface={
+            <Field label="Surface" hint="A worked finish changes how the metal catches light.">
+              <Select
+                value={finish.surface ?? "none"}
+                options={SURFACE_FINISHES.map((f) => ({
+                  value: f.id,
+                  label: f.label,
+                  hint: f.hint,
+                }))}
+                onChange={(v) => onSelectFinish({ ...finish, surface: v })}
+                disabled={disabled}
+                ariaLabel="Surface finish"
+              />
+            </Field>
+          }
+        />
       </Section>
 
-      {/* ── 2. Turntable ──────────────────────────────────────────── */}
+      {/* ── 1b. Stones ─────────────────────────────────────────────── */}
+      <Section
+        icon={<Gem className="size-4" />}
+        title="Stones"
+        subtitle={stones.length === 1 ? stones[0].label : `${stones.length} sets`}
+        open={open === "stones"}
+        onToggle={() => toggle("stones")}
+      >
+        <MaterialsPanel
+          tab="gems"
+          parts={parts}
+          selected={selectedParts}
+          assignments={assignments}
+          onAssignments={onAssignments ?? (() => {})}
+          onSelect={onSelectParts}
+          armed={armed}
+          onArm={onArm}
+        />
+      </Section>
+      {/* ── 1c. Textures ────────────────────────────────────────────
+          Its own rail section rather than a control inside Materials: a finish
+          is chosen per part, the same way a metal is, and the two lists are
+          long enough that stacking them buries both. */}
+      <Section
+        icon={<Waves className="size-4" />}
+        title="Textures"
+        subtitle={
+          SURFACE_FINISHES.find((f) => f.id === (finish.surface ?? "none"))?.label ?? "Polished"
+        }
+        open={open === "textures"}
+        onToggle={() => toggle("textures")}
+      >
+        <TexturesPanel
+          parts={parts}
+          selected={selectedParts}
+          textures={textures}
+          onTextures={onTextures ?? (() => {})}
+          onSelect={onSelectParts}
+        />
+      </Section>
+
+      {/* ── Animation ─────────────────────────────────────────────
+          Camera turntable and object spin together. They were in two sections,
+          which is the wrong split: they look identical on screen and do
+          completely different things to the lighting. */}
       <Section
         icon={<RotateCcw className="size-4" />}
-        title="Turntable"
-        subtitle={autoRotate ? `Spinning · ${rotateSpeed.toFixed(1)}x` : "Paused"}
+        title="Animation"
+        subtitle={
+          [autoRotate && "Orbiting", camera.spinAxis !== "none" && "Spinning"]
+            .filter(Boolean)
+            .join(" · ") || "Still"
+        }
         open={open === "spin"}
         onToggle={() => toggle("spin")}
       >
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            className="dock-btn dock-btn-lg"
-            onClick={onToggleRotate}
-            aria-pressed={autoRotate}
-          >
-            {autoRotate ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-            {autoRotate ? "Pause" : "Spin"}
-          </button>
-          <button className="dock-btn dock-btn-lg" onClick={onReset}>
-            <RotateCcw className="size-3.5" />
-            Reset
-          </button>
-        </div>
-        <Field label={`Speed · ${rotateSpeed.toFixed(1)}x`}>
-          <input
-            className="studio-slider"
-            type="range"
-            min={0.2}
-            max={4}
-            step={0.1}
-            value={rotateSpeed}
-            onChange={(e) => onRotateSpeed(Number(e.target.value))}
-          />
-        </Field>
+        <AnimationPanel
+          animation={animation}
+          onAnimation={onAnimation}
+          animationPlaying={animationPlaying}
+          onAnimationPlaying={onAnimationPlaying}
+          animationSeconds={animationSeconds}
+          onAnimationSeconds={onAnimationSeconds}
+          objectMove={objectMove}
+          onObjectMove={onObjectMove}
+          autoRotate={autoRotate}
+          onToggleRotate={onToggleRotate}
+          rotateSpeed={rotateSpeed}
+          onRotateSpeed={onRotateSpeed}
+          onReset={onReset}
+          camera={camera}
+          onCamera={onCamera}
+        />
       </Section>
-
       {/* ── 3. Photos ─────────────────────────────────────────────── */}
       <Section
         icon={<ImageIcon className="size-4" />}
@@ -805,15 +1380,6 @@ export function StudioPanel({
               ariaLabel="Quality"
             />
           </Field>
-          <Field label="Background">
-            <Select
-              value={background}
-              options={BACKGROUNDS.map((b) => ({ value: b.id, label: b.label }))}
-              onChange={(v) => setBackground(v as StillBackground)}
-              disabled={disabled}
-              ariaLabel="Background"
-            />
-          </Field>
         </div>
 
         <button className="btn-primary mt-1" onClick={shootPart} disabled={disabled}>
@@ -830,7 +1396,6 @@ export function StudioPanel({
           Every angle as a .zip
         </button>
       </Section>
-
       {/* ── 4. Video ──────────────────────────────────────────────── */}
       <Section
         icon={<Film className="size-4" />}
@@ -839,112 +1404,115 @@ export function StudioPanel({
         open={open === "video"}
         onToggle={() => toggle("video")}
       >
-        <ol className="steps">
-          <li>
-            <span className="steps-n">1</span>
-            On the piece, tap the part you want and pinch or scroll to frame it.
-          </li>
-          <li>
-            <span className="steps-n">2</span>
-            Press the <Camera className="steps-icon size-3" aria-label="camera" /> button below to
-            save that view.
-          </li>
-          <li>
-            <span className="steps-n">3</span>
-            Choose it in <strong>What to circle</strong>, then download. The camera spins around
-            that part.
-          </li>
-        </ol>
+        <PanelIntro>
+          The move you picked in Animation is what downloads. Everything here is the file it becomes
+          — shape, size, frame rate and length.
+        </PanelIntro>
 
-        <PartPicker
-          label="What to circle"
-          hint={
-            shot.id === "journey"
-              ? "A tour visits every saved part, so this is ignored."
-              : PART_HINT
-          }
-          value={partId}
-          onChange={pickPart}
-          angles={angles}
-          views={views}
-          onSave={saveCurrentView}
-          onDelete={deletePart}
-          disabled={disabled || shot.id === "journey"}
-        />
+        {/*
+          The three-step instruction that used to open this section explained
+          how to save a custom view. Useful once, then permanent clutter above
+          the controls it describes — so it lives on the control itself now.
+        */}
+        <PanelGroup title="The shot">
+          <div className="shot-preview">
+            <span className="shot-preview-name">
+              {animation ? animationById(animation).label : "No camera move"}
+            </span>
+            <span className="shot-preview-meta">
+              {objectMove !== "none" && `${objectMoveById(objectMove).label} · `}
+              {seconds}s · {videoDims.width}×{videoDims.height}
+            </span>
+          </div>
+          <p className="field-hint">
+            {animation
+              ? animationById(animation).hint + "."
+              : "Pick a camera move in Animation to change the shot. Without one the camera holds still."}
+          </p>
+        </PanelGroup>
 
-        <Field label="Movement">
-          <Select
-            value={shot.id}
-            options={VIDEO_SHOTS.filter((v) => v.id !== "journey" || views.length >= 2).map(
-              (v) => ({ value: v.id, label: v.label }),
-            )}
-            onChange={(v) => setShot(VIDEO_SHOTS.find((x) => x.id === v) ?? VIDEO_SHOTS[0])}
-            disabled={disabled}
-            ariaLabel="Movement"
+        <PanelGroup title="Framing">
+          <PartPicker
+            label="What to circle"
+            hint={
+              shot.id === "journey"
+                ? "A tour visits every saved part, so this is ignored."
+                : PART_HINT
+            }
+            value={partId}
+            onChange={pickPart}
+            angles={angles}
+            views={views}
+            onSave={saveCurrentView}
+            onDelete={deletePart}
+            disabled={disabled || shot.id === "journey"}
           />
-        </Field>
+        </PanelGroup>
 
-        <Field label="Shape" hint={aspect.hint}>
-          <Select
-            value={aspect.id}
-            options={ASPECTS.map((a) => ({ value: a.id, label: a.label, hint: a.hint }))}
-            onChange={(v) => setAspect(ASPECTS.find((a) => a.id === v) ?? ASPECTS[0])}
-            disabled={disabled}
-            ariaLabel="Shape"
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Quality">
+        <PanelGroup title="The file">
+          <Field label="Shape" hint={aspect.hint}>
             <Select
-              value={String(videoBase)}
-              options={VIDEO_QUALITY.map((q) => ({ value: String(q.base), label: q.label }))}
-              onChange={(v) => setVideoBase(Number(v))}
+              value={aspect.id}
+              options={ASPECTS.map((a) => ({ value: a.id, label: a.label, hint: a.hint }))}
+              onChange={(v) => setAspect(ASPECTS.find((a) => a.id === v) ?? ASPECTS[0])}
               disabled={disabled}
-              ariaLabel="Video quality"
+              ariaLabel="Shape"
             />
           </Field>
-          <Field label="Length">
-            <Select
-              value={String(seconds)}
-              options={LENGTHS.filter((l) => l <= maxSeconds).map((l) => ({
-                value: String(l),
-                label: `${l} seconds`,
-              }))}
-              onChange={(v) => setSeconds(Number(v))}
-              disabled={disabled}
-              ariaLabel="Length"
-            />
-          </Field>
-        </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Background">
-            <Select
-              value={videoBg.id}
-              options={VIDEO_BACKGROUNDS.map((b) => ({ value: b.id, label: b.label }))}
-              onChange={(v) =>
-                setVideoBg(VIDEO_BACKGROUNDS.find((b) => b.id === v) ?? VIDEO_BACKGROUNDS[0])
-              }
-              disabled={disabled}
-              ariaLabel="Video background"
-            />
-          </Field>
-          {shot.id !== "journey" && (
-            <Field label="Spins">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Quality">
               <Select
-                value={String(turns)}
-                options={TURNS.map((n) => ({
-                  value: String(n),
-                  label: `${n} full ${n === 1 ? "turn" : "turns"}`,
-                }))}
-                onChange={(v) => setTurns(Number(v))}
+                value={String(videoBase)}
+                options={VIDEO_QUALITY.map((q) => ({ value: String(q.base), label: q.label }))}
+                onChange={(v) => setVideoBase(Number(v))}
                 disabled={disabled}
-                ariaLabel="Spins"
+                ariaLabel="Video quality"
               />
             </Field>
-          )}
-        </div>
+            <Field label="Frame rate" hint={maxFps < 60 ? "60fps is desktop only." : undefined}>
+              <Select
+                value={String(fps)}
+                options={VIDEO_FPS.filter((f) => f <= maxFps).map((f) => ({
+                  value: String(f),
+                  label: `${f} fps`,
+                }))}
+                onChange={(v) => setFps(Number(v))}
+                disabled={disabled}
+                ariaLabel="Frame rate"
+              />
+            </Field>
+            <Field label="Length">
+              <Select
+                value={String(seconds)}
+                options={LENGTHS.filter((l) => l <= maxSeconds).map((l) => ({
+                  value: String(l),
+                  label: `${l} seconds`,
+                }))}
+                onChange={(v) => setSeconds(Number(v))}
+                disabled={disabled}
+                ariaLabel="Length"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {shot.id !== "journey" && (
+              <Field label="Spins">
+                <Select
+                  value={String(turns)}
+                  options={TURNS.map((n) => ({
+                    value: String(n),
+                    label: `${n} full ${n === 1 ? "turn" : "turns"}`,
+                  }))}
+                  onChange={(v) => setTurns(Number(v))}
+                  disabled={disabled}
+                  ariaLabel="Spins"
+                />
+              </Field>
+            )}
+          </div>
+        </PanelGroup>
 
         <button className="btn-primary mt-1" onClick={() => shootVideo()} disabled={disabled}>
           <Download className="size-3.5" />
@@ -957,7 +1525,6 @@ export function StudioPanel({
             : `${shot.label} · ${shot.id === "journey" ? `${views.length} saved parts` : partLabel} · ${videoDims.width}x${videoDims.height} · ${frames} frames · about ${estMb} MB. Rendered frame by frame, so a slower device just takes longer. Video cannot be transparent.`}
         </p>
       </Section>
-
       {/* ── Progress / result ─────────────────────────────────────── */}
       {busy && (
         <div className="studio-progress" role="status">

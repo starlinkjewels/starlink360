@@ -164,7 +164,7 @@ check(
   "diamond and CZ merged into a single colourless group",
   white ? `${white.position.length / 3} verts (expected 12 = 2 stones)` : "no white group",
 );
-check(!!done.metal, "metal survived");
+check((done.metals ?? []).length > 0, "metal survived");
 check(
   !gems.some((g) => String(g.material).includes("Platinum")),
   "platinum was not tinted as a stone",
