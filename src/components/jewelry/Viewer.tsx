@@ -20,6 +20,7 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { StudioRig, type StudioApi } from "./StudioRig";
 import type { StoneGroup } from "./stones";
 import type { GemOptics } from "./GemRefraction";
+import type { Stamp } from "./stamps";
 import {
   applyClick,
   attachHighlight,
@@ -605,6 +606,23 @@ export interface ViewerProps {
    * piece covered in selection tint after a few stones.
    */
   onPaintPart?: (partId: string, kind: PartKind) => boolean;
+  /**
+   * Striking a hallmark. Returns true when the click was consumed.
+   *
+   * `point` and `normal` are in the part's LOCAL space, because that is the
+   * only frame that survives the recentring, the fit scale and the turntable —
+   * a mark pinned to a world point would slide off the metal as soon as the
+   * piece moved.
+   */
+  onPlaceStamp?: (
+    partId: string,
+    point: [number, number, number],
+    normal: [number, number, number],
+  ) => boolean;
+  /** Hallmarks struck into the metal, rendered as decals on the piece. */
+  stamps?: Stamp[];
+  stampFont?: string;
+  selectedStampId?: string | null;
   onLoadedChange: (loaded: boolean) => void;
   /** Filled with the capture API once a piece is framed; null while loading. */
   studioRef?: React.MutableRefObject<StudioApi | null>;
@@ -640,6 +658,10 @@ export default function Viewer({
   selected,
   onSelected,
   onPaintPart,
+  onPlaceStamp,
+  stamps,
+  stampFont,
+  selectedStampId,
   onLoadedChange,
   studioRef,
 }: ViewerProps) {
@@ -773,6 +795,28 @@ export default function Viewer({
        * intent; requiring a second, invisible mode on top of it is the kind of
        * thing that reads as the feature being broken.
        */
+      /*
+       * Striking a hallmark comes first, because it needs the one thing no
+       * other tool does: WHERE on the surface the click landed, not just which
+       * part it belongs to.
+       *
+       * Both are handed over in the part's own local space. World coordinates
+       * would be wrong within a frame — the piece is recentred and scaled on
+       * load and turned by the turntable — so a mark struck at a world point
+       * would slide off the metal the moment anything moved.
+       */
+      if (group && info?.kind === "metal" && e.face) {
+        const mesh = e.object as THREE.Mesh;
+        const struck = onPlaceStamp?.(
+          group,
+          mesh.worldToLocal(e.point.clone()).toArray(),
+          // `face.normal` is already in the mesh's own space, which is the
+          // space the stamp is stored in.
+          e.face.normal.toArray(),
+        );
+        if (struck) return;
+      }
+
       const painted = part && info?.kind ? onPaintPart?.(part, info.kind) : false;
       if (painted) return;
 
@@ -804,7 +848,7 @@ export default function Viewer({
         dist: Math.min(current, fit.radius * 0.55),
       });
     },
-    [fit, selecting, onStoneTap, selected, onSelected, onPaintPart],
+    [fit, selecting, onStoneTap, selected, onSelected, onPaintPart, onPlaceStamp],
   );
 
   const clearFocus = useCallback(() => setFocus(null), []);
@@ -946,6 +990,9 @@ export default function Viewer({
                 gemOverrides={gemOverrides}
                 onStones={onStones}
                 onParts={handleParts}
+                stamps={stamps}
+                stampFont={stampFont}
+                selectedStampId={selectedStampId}
               />
             )}
             {source === "fallback" && (
@@ -959,6 +1006,9 @@ export default function Viewer({
                 gemOverrides={gemOverrides}
                 onStones={onStones}
                 onParts={handleParts}
+                stamps={stamps}
+                stampFont={stampFont}
+                selectedStampId={selectedStampId}
               />
             )}
             {source === "object" && product.object && (
@@ -974,6 +1024,9 @@ export default function Viewer({
                 gemOverrides={gemOverrides}
                 onStones={onStones}
                 onParts={handleParts}
+                stamps={stamps}
+                stampFont={stampFont}
+                selectedStampId={selectedStampId}
               />
             )}
           </group>

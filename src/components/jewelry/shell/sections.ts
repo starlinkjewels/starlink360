@@ -8,6 +8,7 @@ import {
   Lightbulb,
   Palette,
   Sparkles,
+  Stamp,
   Sun,
   Triangle,
   Type,
@@ -43,6 +44,12 @@ export const SECTIONS: SectionDef[] = [
   { id: "metal", title: "Metals", hint: "Metal for the whole piece or one part", icon: Palette },
   { id: "stones", title: "Stones", hint: "Select one stone or all, and set the gem", icon: Gem },
   { id: "textures", title: "Textures", hint: "Surface finish, per part", icon: Waves },
+  /*
+   * Stamping sits with the material sections rather than near export, because a
+   * hallmark is part of the piece — it is struck into the metal and it travels
+   * into every render — not something added to a photograph of it.
+   */
+  { id: "stamp", title: "Stamping", hint: "Hallmarks struck into the metal", icon: Stamp },
   { id: "bg", title: "Environment", hint: "HDRI, gem HDRI and the backdrop", icon: ImageIcon },
   { id: "light", title: "Lighting", hint: "The light rig", icon: Sun },
   { id: "shadow", title: "Shadows", hint: "Contact pool or a real shadow camera", icon: Triangle },

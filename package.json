@@ -36,6 +36,7 @@
     "test:lights": "tsc src/components/jewelry/lights.ts src/components/jewelry/shadows.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-lights.mjs",
     "test:post": "tsc src/components/jewelry/bloom.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-post.mjs",
     "test:project": "tsc -p tsconfig.suites.json && node scripts/test-export-options.mjs",
+    "test:stamps": "tsc src/components/jewelry/stamps.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-stamps.mjs",
     "test:model": "tsc -p tsconfig.suites.json && node --max-old-space-size=4096 scripts/test-real-model.mjs",
     "test:animation": "tsc src/components/jewelry/animation.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-animation.mjs"
   },

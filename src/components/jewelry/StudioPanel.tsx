@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+// Aliased: `Stamp` is the hallmark type in this codebase.
 import {
   Camera,
   ChevronDown,
+  Stamp as StampIcon,
   Moon,
   Download,
   Film,
@@ -33,6 +35,8 @@ import { NumberField } from "./ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
 import { MaterialsPanel } from "./panels/MaterialsPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
+import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
+import type { Stamp } from "./stamps";
 import { LightsPanel } from "./panels/LightsPanel";
 import { ShadowsPanel } from "./panels/ShadowsPanel";
 import { EnvironmentPanel } from "./panels/EnvironmentPanel";
@@ -327,6 +331,15 @@ export interface StudioPanelProps {
   /** The brush, and how to load it. Null means not painting. */
   armed?: Brush | null;
   onArm?: (brush: Brush | null) => void;
+  /** Hallmarks struck into the metal, and the punch waiting to be struck. */
+  stamps: Stamp[];
+  onStamps?: (next: Stamp[]) => void;
+  stampDraft: StampDraft;
+  onStampDraft?: (next: StampDraft) => void;
+  stampFont: string;
+  onStampFont?: (next: string) => void;
+  selectedStamp: string | null;
+  onSelectStamp?: (id: string | null) => void;
   /** Surface finish per part id. */
   textures?: Textures;
   onTextures?: (next: Textures) => void;
@@ -401,6 +414,14 @@ export function StudioPanel({
   onAssignments,
   armed = null,
   onArm,
+  stamps,
+  onStamps,
+  stampDraft,
+  onStampDraft,
+  stampFont,
+  onStampFont,
+  selectedStamp,
+  onSelectStamp,
   textures = {},
   onTextures,
   lights = DEFAULT_LIGHTS,
@@ -1293,6 +1314,31 @@ export function StudioPanel({
           onFallbackFinish={(id) =>
             onSelectFinish({ ...finish, surface: id === "none" ? undefined : id })
           }
+        />
+      </Section>
+      {/* ── 1d. Stamping ────────────────────────────────────────────
+          Beside the material sections rather than near export, because a
+          hallmark is struck INTO the metal and travels into every render — it
+          is part of the piece, not something added to a photograph of it. */}
+      <Section
+        icon={<StampIcon className="size-4" />}
+        title="Stamping"
+        subtitle={stamps.length ? `${stamps.length} struck` : "None"}
+        open={open === "stamp"}
+        onToggle={() => toggle("stamp")}
+      >
+        <StampsPanel
+          parts={parts}
+          stamps={stamps}
+          onStamps={onStamps ?? (() => {})}
+          draft={stampDraft}
+          onDraft={onStampDraft ?? (() => {})}
+          font={stampFont}
+          onFont={onStampFont ?? (() => {})}
+          selectedId={selectedStamp}
+          onSelect={onSelectStamp ?? (() => {})}
+          armed={armed}
+          onArm={onArm}
         />
       </Section>
 

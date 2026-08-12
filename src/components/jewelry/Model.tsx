@@ -8,6 +8,8 @@ import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materia
 import { GemRefraction, type GemOptics } from "./GemRefraction";
 import { DEFAULT_LIGHTING, environmentById, getLightTent, type LightingSettings } from "./lighting";
 import { collectStoneGroups, type StoneGroup } from "./stones";
+import { StampDecals } from "./StampDecals";
+import type { Stamp } from "./stamps";
 import { collectParts, ensurePart, ensureSolids, parseId, type Part } from "./selection";
 import { assignmentsFor, planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { upAxisRotation, type CameraSettings } from "./camera";
@@ -19,6 +21,15 @@ import {
   type TextureAssignment,
 } from "./textures";
 import { useFallbackScene } from "./FallbackPendant";
+
+/*
+ * A stable empty list.
+ *
+ * The decal effect depends on the stamps array by identity, so a fresh `[]` on
+ * every render would tear down and reproject every hallmark sixty times a
+ * second.
+ */
+const EMPTY_STAMPS: Stamp[] = [];
 
 /** What the camera needs to frame a piece. */
 export interface Fit {
@@ -62,6 +73,12 @@ interface DressedProps {
   onStones?: (groups: StoneGroup[]) => void;
   /** Reports every selectable part — metal and stone alike. */
   onParts?: (parts: Part[]) => void;
+  /** Hallmarks struck into the metal. */
+  stamps?: Stamp[];
+  /** The face they are struck in. */
+  stampFont?: string;
+  /** Lit while its row is focused in the panel, so it can be found. */
+  selectedStampId?: string | null;
   /**
    * True when the caller hands us a scene nobody else holds — an upload or the
    * procedural stand-in. Those we free entirely on unmount, otherwise every
@@ -82,6 +99,9 @@ export function DressedScene({
   gemOverrides,
   onStones,
   onParts,
+  stamps,
+  stampFont = "serif",
+  selectedStampId = null,
   ownsScene = false,
 }: DressedProps) {
   const { object, owned, stones } = useMemo(() => {
@@ -416,6 +436,17 @@ export function DressedScene({
         meshes={stones}
         envMap={envMap}
       />
+      {/*
+        Struck into the dressed scene, so a hallmark rides the piece through the
+        turntable and appears in every still and every frame of video — which is
+        the whole point of it being on the model rather than on the photograph.
+      */}
+      <StampDecals
+        root={object}
+        stamps={stamps ?? EMPTY_STAMPS}
+        font={stampFont}
+        selectedId={selectedStampId}
+      />
     </>
   );
 }
@@ -431,6 +462,9 @@ export function GLBModel({
   gemOverrides,
   onStones,
   onParts,
+  stamps,
+  stampFont,
+  selectedStampId,
 }: {
   url: string;
   finish: Finish;
@@ -442,6 +476,9 @@ export function GLBModel({
   gemOverrides?: DressedProps["gemOverrides"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
+  stamps?: Stamp[];
+  stampFont?: string;
+  selectedStampId?: string | null;
 }) {
   // The shipped GLB is Draco-compressed, so a decoder is required rather than
   // optional. Pin it to the same build UploadPiece prefetches on idle, so the
@@ -459,6 +496,9 @@ export function GLBModel({
       gemOverrides={gemOverrides}
       onStones={onStones}
       onParts={onParts}
+      stamps={stamps}
+      stampFont={stampFont}
+      selectedStampId={selectedStampId}
     />
   );
 }
@@ -473,6 +513,9 @@ export function FallbackModel({
   gemOverrides,
   onStones,
   onParts,
+  stamps,
+  stampFont,
+  selectedStampId,
 }: {
   finish: Finish;
   onFit: (fit: Fit) => void;
@@ -483,6 +526,9 @@ export function FallbackModel({
   gemOverrides?: DressedProps["gemOverrides"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
+  stamps?: Stamp[];
+  stampFont?: string;
+  selectedStampId?: string | null;
 }) {
   const scene = useFallbackScene();
   return (
@@ -497,6 +543,9 @@ export function FallbackModel({
       gemOverrides={gemOverrides}
       onStones={onStones}
       onParts={onParts}
+      stamps={stamps}
+      stampFont={stampFont}
+      selectedStampId={selectedStampId}
       ownsScene
     />
   );
@@ -513,6 +562,9 @@ export function ObjectModel({
   gemOverrides,
   onStones,
   onParts,
+  stamps,
+  stampFont,
+  selectedStampId,
 }: {
   object: THREE.Object3D;
   finish: Finish;
@@ -524,6 +576,9 @@ export function ObjectModel({
   gemOverrides?: DressedProps["gemOverrides"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
+  stamps?: Stamp[];
+  stampFont?: string;
+  selectedStampId?: string | null;
 }) {
   return (
     <DressedScene
@@ -537,6 +592,9 @@ export function ObjectModel({
       gemOverrides={gemOverrides}
       onStones={onStones}
       onParts={onParts}
+      stamps={stamps}
+      stampFont={stampFont}
+      selectedStampId={selectedStampId}
       ownsScene
     />
   );

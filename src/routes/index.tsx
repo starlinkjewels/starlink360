@@ -18,6 +18,16 @@ import {
   type Assignments,
   type Brush,
 } from "@/components/jewelry/assign";
+import {
+  DEFAULT_STAMP,
+  addStamp,
+  nextStampId,
+  pruneStamps,
+  resetStampIds,
+  stampIsEmpty,
+  type Stamp,
+} from "@/components/jewelry/stamps";
+import type { StampDraft } from "@/components/jewelry/panels/StampsPanel";
 import { gemById, metalById, resolveGem, resolveMetal } from "@/components/jewelry/library";
 import type { GemOptics } from "@/components/jewelry/GemRefraction";
 import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
@@ -280,6 +290,40 @@ function Index() {
   const [brush, setBrush] = useState<Brush | null>(null);
 
   /*
+   * Hallmarks, and the punch waiting to be struck.
+   *
+   * The draft is kept beside the placed marks rather than on the brush, because
+   * its fields outlive any one strike: the second hallmark on a piece is almost
+   * always the same size and depth as the first, and reloading them every time
+   * would be work the jeweller already did.
+   */
+  const [stamps, setStamps] = useState<Stamp[]>([]);
+  const [stampDraft, setStampDraft] = useState<StampDraft>({ ...DEFAULT_STAMP });
+  const [stampFont, setStampFont] = useState("serif");
+  const [selectedStamp, setSelectedStamp] = useState<string | null>(null);
+
+  /*
+   * Striking one.
+   *
+   * Returns false when there is nothing loaded, so the click falls through to
+   * selection rather than leaving an invisible mark in the list — the same rule
+   * the paint brushes follow.
+   */
+  const handlePlaceStamp = useCallback(
+    (partId: string, point: [number, number, number], normal: [number, number, number]) => {
+      if (brush?.tool !== "stamp" || stampIsEmpty(stampDraft)) return false;
+      const struck: Stamp = { ...stampDraft, id: nextStampId(), partId, position: point, normal };
+      setStamps((prev) => addStamp(prev, struck));
+      // Focused straight away, so the size and depth fields act on what was
+      // just struck rather than on the next one.
+      setSelectedStamp(struck.id);
+      setBrush(null);
+      return true;
+    },
+    [brush, stampDraft],
+  );
+
+  /*
    * A brush only paints its own kind.
    *
    * Returning false hands the click back to selection, so a metal brush over a
@@ -301,7 +345,7 @@ function Index() {
         setTextures((prev) => finishToPart(prev, partId, brush.finish, DEFAULT_TEXTURE));
         return true;
       }
-      if (!brush.material) return false;
+      if (brush.tool !== "material" || !brush.material) return false;
       setAssignments((prev) => assignToPart(prev, partId, brush.material));
       return true;
     },
@@ -317,6 +361,9 @@ function Index() {
     // Same reasoning for assigned materials — the ids are per piece.
     setAssignments({});
     setTextures({});
+    setStamps([]);
+    resetStampIds();
+    setSelectedStamp(null);
     setBrush(null);
     // A new piece has different parts; carrying ids across would leave a
     // selection pointing at meshes that no longer exist.
@@ -735,6 +782,10 @@ function Index() {
                   animationSeconds={animationSeconds}
                   objectMove={objectMove === "none" ? null : objectMoveById(objectMove)}
                   onPaintPart={handlePaintPart}
+                  onPlaceStamp={handlePlaceStamp}
+                  stamps={stamps}
+                  stampFont={stampFont}
+                  selectedStampId={selectedStamp}
                   onLoadedChange={onLoadedChange}
                   studioRef={studio}
                 />
@@ -898,6 +949,14 @@ function Index() {
             onArm={setBrush}
             textures={textures}
             onTextures={setTextures}
+            stamps={stamps}
+            onStamps={setStamps}
+            stampDraft={stampDraft}
+            onStampDraft={setStampDraft}
+            stampFont={stampFont}
+            onStampFont={setStampFont}
+            selectedStamp={selectedStamp}
+            onSelectStamp={setSelectedStamp}
             selectedStone={selectedStone}
             onSelectStone={setSelectedStone}
           />

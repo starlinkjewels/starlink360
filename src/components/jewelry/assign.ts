@@ -143,7 +143,15 @@ export function assignToPart(
  */
 export type Brush =
   | { tool: "material"; kind: PartKind; material: string }
-  | { tool: "finish"; kind: "metal"; finish: string };
+  | { tool: "finish"; kind: "metal"; finish: string }
+  /*
+   * The stamp brush carries no payload. What gets struck — the mark, its size,
+   * its depth — is a draft held beside the placed stamps, because those fields
+   * outlive any one strike: the second hallmark on a piece is almost always the
+   * same size and depth as the first, and reloading them onto the brush every
+   * time would be work the jeweller already did.
+   */
+  | { tool: "stamp"; kind: "metal" };
 
 /** Puts a surface finish on one part, leaving its other texture settings be. */
 export function finishToPart<T extends { finish: string }>(

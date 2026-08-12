@@ -2944,3 +2944,159 @@ input[type="radio"]:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* --------------------------------------------------------------- stamping --
+ *
+ * A hallmark is chosen the way a jeweller picks a punch: from a tray of marks
+ * shown as the characters they strike, not as names in a list. So the chips
+ * carry the mark itself, monospaced and letter-spaced, which is also what makes
+ * 750 and 585 tellable apart at a glance.
+ */
+
+/* A row of exclusive choices, sized for three or four. */
+@utility seg {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-foreground) 3%, transparent);
+}
+
+@utility seg-btn {
+  flex: 1 1 0;
+  /* Grid and flex children default to min-width:auto, so a long label would
+   * push the row wider than the panel instead of shrinking. */
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.35rem;
+  font-size: 0.62rem;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    color: var(--color-foreground);
+  }
+}
+
+@utility seg-btn-on {
+  background: color-mix(in oklab, var(--gold) 16%, transparent);
+  color: var(--gold);
+}
+
+@utility text-field {
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  font-size: 0.7rem;
+  color: var(--color-foreground);
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  }
+
+  &::placeholder {
+    color: color-mix(in oklab, var(--color-muted-foreground) 70%, transparent);
+  }
+}
+
+@utility stamp-marks {
+  display: grid;
+  gap: 0.5rem;
+}
+
+@utility stamp-grid {
+  display: grid;
+  /* Wide enough for STERLING without wrapping, and minmax(0,·) so a long mark
+   * shrinks rather than overflowing the panel. */
+  grid-template-columns: repeat(auto-fill, minmax(3.4rem, 1fr));
+  gap: 0.25rem;
+}
+
+@utility stamp-chip {
+  min-height: 1.9rem;
+  padding: 0 0.35rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--color-border);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+    color: var(--color-foreground);
+  }
+}
+
+@utility stamp-chip-on {
+  border-color: color-mix(in oklab, var(--gold) 70%, transparent);
+  background: color-mix(in oklab, var(--gold) 14%, transparent);
+  color: var(--gold);
+}
+
+@utility stamp-list {
+  display: grid;
+  gap: 0.2rem;
+}
+
+@utility stamp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
+
+  &:hover {
+    border-color: var(--color-border);
+  }
+}
+
+@utility stamp-row-on {
+  border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  background: color-mix(in oklab, var(--gold) 10%, transparent);
+}
+
+@utility stamp-row-pick {
+  display: flex;
+  flex: 1 1 auto;
+  /* Without this the meta column pushes the row wider than the panel on a
+   * phone rather than the mark truncating. */
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.35rem 0.4rem;
+  text-align: left;
+}
+
+@utility stamp-row-mark {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  color: var(--color-foreground);
+}
+
+@utility stamp-row-meta {
+  flex: none;
+  font-size: 0.58rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility stamp-row-x {
+  flex: none;
+  padding: 0.35rem;
+  border-radius: 0.35rem;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: #ef4444;
+  }
+}
