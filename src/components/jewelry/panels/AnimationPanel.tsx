@@ -97,10 +97,6 @@ function ObjectPath({ move }: { move: ObjectMove }) {
 }
 
 export function AnimationPanel({
-  autoRotate,
-  onToggleRotate,
-  rotateSpeed,
-  onRotateSpeed,
   onReset,
   camera,
   onCamera,
@@ -113,10 +109,6 @@ export function AnimationPanel({
   objectMove = "none",
   onObjectMove,
 }: {
-  autoRotate: boolean;
-  onToggleRotate: () => void;
-  rotateSpeed: number;
-  onRotateSpeed: (v: number) => void;
   onReset: () => void;
   camera: CameraSettings;
   onCamera?: (next: CameraSettings) => void;
@@ -268,10 +260,15 @@ export function AnimationPanel({
           />
         )}
 
-        {autoRotate && spinning && (
+        {/*
+          A camera move and a constant spin at the same time compound into a
+          drift rather than a clean turn. Worth saying, because each looks
+          correct on its own and only the combination is wrong.
+        */}
+        {preset && spinning && (
           <p className="field-hint field-warn">
-            Both are running. The two rotations compound, so the piece will appear to drift rather
-            than turn cleanly — usually one or the other is what was meant.
+            A camera move and a constant spin are both running. The two rotations compound, so the
+            piece will drift rather than turn cleanly — usually one or the other was meant.
           </p>
         )}
       </PanelGroup>

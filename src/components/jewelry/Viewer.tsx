@@ -536,9 +536,9 @@ function FocusRig({
 export interface ViewerProps {
   product: Product;
   finish: Finish;
-  autoRotate: boolean;
+
   /** Turntable speed multiplier, 1 = the original pace. */
-  rotateSpeed?: number;
+
   resetSignal: number;
   /**
    * Set while the page is already showing its own loading state.
@@ -613,8 +613,6 @@ export interface ViewerProps {
 export default function Viewer({
   product,
   finish,
-  autoRotate,
-  rotateSpeed = 1,
   resetSignal,
   hideLoader = false,
   camera: cameraSettings = DEFAULT_CAMERA,
@@ -1054,14 +1052,22 @@ export default function Viewer({
           <GizmoViewport axisColors={["#d15b5b", "#7bbd6a", "#5b83d1"]} labelColor="#ffffff" />
         </GizmoHelper>
 
+        {/*
+          No `autoRotate`.
+          
+          The viewer used to open spinning, with no way to stop it once the
+          duplicate Pause button was removed — and a piece that turns the moment
+          it loads is a demo, not a tool: it moves while you are trying to read
+          a setting. Spinning is a deliberate choice now, made by picking the
+          Turntable move in Animation, which drives the camera along the same
+          path the video export renders.
+        */}
         <OrbitControls
           ref={controlsRef}
           enabled={!locked}
           enableDamping
           dampingFactor={0.06}
           enablePan
-          autoRotate={autoRotate}
-          autoRotateSpeed={2.4 * rotateSpeed}
           zoomToCursor
           makeDefault
         />

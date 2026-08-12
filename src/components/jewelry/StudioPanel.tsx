@@ -286,11 +286,7 @@ function Field({
 export interface StudioPanelProps {
   finish: Finish;
   onSelectFinish: (f: Finish) => void;
-  autoRotate: boolean;
-  onToggleRotate: () => void;
   onReset: () => void;
-  rotateSpeed: number;
-  onRotateSpeed: (v: number) => void;
   studio: React.MutableRefObject<StudioApi | null>;
   productRef: string;
   /** Section the rail has selected. */
@@ -374,11 +370,7 @@ export interface StudioPanelProps {
 export function StudioPanel({
   finish,
   onSelectFinish,
-  autoRotate,
-  onToggleRotate,
   onReset,
-  rotateSpeed,
-  onRotateSpeed,
   studio,
   productRef,
   active,
@@ -1310,7 +1302,7 @@ export function StudioPanel({
         icon={<RotateCcw className="size-4" />}
         title="Animation"
         subtitle={
-          [autoRotate && "Orbiting", camera.spinAxis !== "none" && "Spinning"]
+          [animation && animationById(animation).label, camera.spinAxis !== "none" && "Spinning"]
             .filter(Boolean)
             .join(" · ") || "Still"
         }
@@ -1326,10 +1318,6 @@ export function StudioPanel({
           onAnimationSeconds={onAnimationSeconds}
           objectMove={objectMove}
           onObjectMove={onObjectMove}
-          autoRotate={autoRotate}
-          onToggleRotate={onToggleRotate}
-          rotateSpeed={rotateSpeed}
-          onRotateSpeed={onRotateSpeed}
           onReset={onReset}
           camera={camera}
           onCamera={onCamera}

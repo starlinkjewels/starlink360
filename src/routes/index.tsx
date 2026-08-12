@@ -145,8 +145,6 @@ export const Route = createFileRoute("/")({
 function Index() {
   const [product, setProduct] = useState<Product>(products[0]);
   const [finish, setFinish] = useState<Finish>(finishes[0]);
-  const [autoRotate, setAutoRotate] = useState(true);
-  const [rotateSpeed, setRotateSpeed] = useState(1);
   const [resetSignal, setResetSignal] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -394,8 +392,6 @@ function Index() {
 
   useEffect(() => {
     setMounted(true);
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (mq.matches) setAutoRotate(false);
   }, []);
 
   // Close upload popover on outside click
@@ -455,7 +451,7 @@ function Index() {
         background,
         post,
         watermark,
-        animation: { autoRotate, rotateSpeed },
+        animation: { move: animation, objectMove, seconds: animationSeconds },
       },
       new Date().toISOString(),
     );
@@ -474,8 +470,9 @@ function Index() {
     background,
     post,
     watermark,
-    autoRotate,
-    rotateSpeed,
+    animation,
+    objectMove,
+    animationSeconds,
   ]);
 
   const handleOpenProject = useCallback(
@@ -509,8 +506,12 @@ function Index() {
       setBackground(project.background);
       setPost(project.post);
       setWatermark(project.watermark);
-      setAutoRotate(project.animation.autoRotate);
-      setRotateSpeed(project.animation.rotateSpeed);
+      setAnimation(project.animation.move);
+      setObjectMove(project.animation.objectMove);
+      setAnimationSeconds(project.animation.seconds);
+      // A loaded project does not start playing: a scene that begins moving the
+      // moment it opens is a demo, not somebody's saved setup.
+      setAnimationPlaying(false);
 
       const mismatch = pieceMismatch(project, product.ref);
       const all = [...notices, ...(mismatch ? [mismatch] : [])];
@@ -686,8 +687,6 @@ function Index() {
                 <Viewer
                   product={product}
                   finish={finish}
-                  autoRotate={autoRotate}
-                  rotateSpeed={rotateSpeed}
                   resetSignal={resetSignal}
                   hideLoader={upload !== null}
                   camera={cameraSettings}
@@ -820,11 +819,7 @@ function Index() {
             onActive={setSection}
             finish={finish}
             onSelectFinish={setFinish}
-            autoRotate={autoRotate}
-            onToggleRotate={() => setAutoRotate((v) => !v)}
             onReset={() => setResetSignal((n) => n + 1)}
-            rotateSpeed={rotateSpeed}
-            onRotateSpeed={setRotateSpeed}
             studio={studio}
             onBusyChange={setExporting}
             productRef={product.ref}

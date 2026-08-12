@@ -232,7 +232,7 @@ const INPUT = {
   background: DEFAULT_BACKGROUND,
   post: DEFAULT_POST,
   watermark: DEFAULT_WATERMARK,
-  animation: { autoRotate: true, rotateSpeed: 1 },
+  animation: { move: "turntable", objectMove: "drop", seconds: 8 },
 };
 {
   const saved = saveProject(INPUT, "2026-08-12T10:00:00Z");
@@ -251,6 +251,13 @@ const INPUT = {
   check(
     JSON.stringify(round.project.camera) === JSON.stringify(DEFAULT_CAMERA),
     "settings round-trip exactly",
+  );
+  check(
+    round.project.animation.move === "turntable" &&
+      round.project.animation.objectMove === "drop" &&
+      round.project.animation.seconds === 8,
+    "and so does the chosen shot",
+    JSON.stringify(round.project.animation),
   );
 }
 
@@ -271,6 +278,22 @@ console.log("\n=== a project file is never trusted ===");
     newer.notices.some((n) => /newer/.test(n)),
     "and says so",
   );
+
+  /*
+   * A project saved with the old `{ autoRotate, rotateSpeed }` animation shape.
+   * Those fields described an OrbitControls spin that no longer exists, so they
+   * must contribute nothing rather than being coerced into the new shape — the
+   * file should open with no move, not with a move invented from a boolean.
+   */
+  const legacySpin = loadProject(
+    JSON.stringify({ version: 1, piece: {}, animation: { autoRotate: true, rotateSpeed: 2 } }),
+  );
+  check(
+    legacySpin.project.animation.move === null,
+    "a project from before the move library opens with no move",
+  );
+  check(legacySpin.project.animation.objectMove === "none", "and the piece at rest");
+  check(legacySpin.project.animation.seconds === 6, "with a usable default length");
 
   // Older files simply lack fields, which must fall back rather than break.
   const older = loadProject(JSON.stringify({ version: 1, piece: { ref: "X" } }));

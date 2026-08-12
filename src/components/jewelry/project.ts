@@ -67,7 +67,15 @@ export interface Project {
   background: Background;
   post: PostSettings;
   watermark: WatermarkSettings;
-  animation: { autoRotate: boolean; rotateSpeed: number };
+  /**
+   * The chosen shot.
+   *
+   * Was `{ autoRotate, rotateSpeed }`, from when the only movement was an
+   * OrbitControls spin. That spin is gone — it opened the viewer already
+   * turning with no way to stop it — and the moves it became are a camera
+   * preset, an object move and a length.
+   */
+  animation: { move: string | null; objectMove: string; seconds: number };
 }
 
 export interface ProjectInput {
@@ -83,7 +91,7 @@ export interface ProjectInput {
   background: Background;
   post: PostSettings;
   watermark: WatermarkSettings;
-  animation: { autoRotate: boolean; rotateSpeed: number };
+  animation: { move: string | null; objectMove: string; seconds: number };
 }
 
 /**
@@ -241,7 +249,16 @@ export function loadProject(text: string): LoadResult {
     background: merge(DEFAULT_BACKGROUND, raw.background),
     post: merge(DEFAULT_POST, raw.post),
     watermark: merge(DEFAULT_WATERMARK, raw.watermark),
-    animation: merge({ autoRotate: true, rotateSpeed: 1 }, raw.animation),
+    /*
+     * `merge` copies field by field from the fallback, so a project saved with
+     * the old `{ autoRotate, rotateSpeed }` shape simply contributes nothing
+     * here and opens with no move — which is the right outcome: the spin those
+     * fields described no longer exists.
+     */
+    animation: merge(
+      { move: null as string | null, objectMove: "none", seconds: 6 },
+      raw.animation,
+    ),
   };
 
   return { project, notices };
