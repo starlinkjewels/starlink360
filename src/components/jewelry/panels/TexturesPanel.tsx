@@ -53,22 +53,51 @@ export function TexturesPanel({
   textures,
   onTextures,
   onSelect,
+  fallbackFinish = "none",
+  onFallbackFinish,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
   textures: Textures;
   onTextures: (next: Textures) => void;
   onSelect?: (next: Set<string>) => void;
+  /** The finish a part wears when nothing is assigned to it. */
+  fallbackFinish?: string;
+  onFallbackFinish?: (id: string) => void;
 }) {
   const [layout, setLayout] = useState<"grid" | "list">("grid");
 
   const ids = targetIds(parts, selected, "metal");
   const scope = describeTargets(parts, selected, "metal");
   const whole = targetsEverything(parts, selected, "metal");
-  const current = common(textures, ids);
+  const assigned = common(textures, ids);
+  /*
+   * With nothing assigned, the grid shows the piece's own finish — it IS
+   * wearing that, so lighting nothing would be the panel disagreeing with the
+   * render. Same rule the Materials grid follows for metal.
+   */
+  const current =
+    assigned.finish === "none" && whole ? { ...assigned, finish: fallbackFinish } : assigned;
   const ofKind = parts.filter((p) => p.kind === "metal");
 
   const write = (patch: Partial<TextureAssignment>) => {
+    /*
+     * A finish meant for the WHOLE piece sets the global one rather than
+     * stamping an assignment onto every part — so it also covers parts that do
+     * not exist yet, and the two cannot drift apart.
+     */
+    if (
+      whole &&
+      onFallbackFinish &&
+      patch.finish !== undefined &&
+      Object.keys(patch).length === 1
+    ) {
+      onFallbackFinish(patch.finish);
+      const cleared = { ...textures };
+      for (const id of ids) delete cleared[id];
+      onTextures(cleared);
+      return;
+    }
     const next = { ...textures };
     for (const id of ids) next[id] = { ...(next[id] ?? DEFAULT_TEXTURE), ...patch };
     onTextures(next);

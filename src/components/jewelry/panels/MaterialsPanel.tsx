@@ -99,7 +99,6 @@ export function MaterialsPanel({
   onArm,
   fallbackMetal,
   onFallbackMetal,
-  surface,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
@@ -126,8 +125,6 @@ export function MaterialsPanel({
   fallbackMetal?: string;
   /** Sets that global metal, when a choice is meant for the whole piece. */
   onFallbackMetal?: (id: string) => void;
-  /** The surface-finish control, which is global and belongs above the tabs. */
-  surface?: React.ReactNode;
 }) {
   const [layout, setLayout] = useState<Layout>("grid");
   const [editing, setEditing] = useState(false);
@@ -208,8 +205,6 @@ export function MaterialsPanel({
 
   return (
     <>
-      {surface}
-
       {/* What a click is about to change, always visible, never implied. */}
       <div className="mat-scope">
         <span className={`mat-scope-text ${whole && !painting ? "" : "mat-scope-narrow"}`}>

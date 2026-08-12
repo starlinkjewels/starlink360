@@ -1245,21 +1245,6 @@ export function StudioPanel({
           onSelect={onSelectParts}
           armed={armed}
           onArm={onArm}
-          surface={
-            <Field label="Surface" hint="A worked finish changes how the metal catches light.">
-              <Select
-                value={finish.surface ?? "none"}
-                options={SURFACE_FINISHES.map((f) => ({
-                  value: f.id,
-                  label: f.label,
-                  hint: f.hint,
-                }))}
-                onChange={(v) => onSelectFinish({ ...finish, surface: v })}
-                disabled={disabled}
-                ariaLabel="Surface finish"
-              />
-            </Field>
-          }
         />
       </Section>
 
@@ -1301,6 +1286,19 @@ export function StudioPanel({
           textures={textures}
           onTextures={onTextures ?? (() => {})}
           onSelect={onSelectParts}
+          /*
+           * The finish a part wears when nothing is assigned to it.
+           *
+           * Surface used to ALSO be a select in the Materials section, writing
+           * to this while Textures wrote per part — two controls for one thing,
+           * in two sections, with the per-part one silently winning. Textures
+           * owns it now, and a choice meant for the whole piece sets this
+           * rather than stamping an assignment onto every part.
+           */
+          fallbackFinish={finish.surface ?? "none"}
+          onFallbackFinish={(id) =>
+            onSelectFinish({ ...finish, surface: id === "none" ? undefined : id })
+          }
         />
       </Section>
 
