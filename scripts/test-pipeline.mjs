@@ -20,7 +20,12 @@ import * as THREE from "three";
 import rhino3dm from "rhino3dm";
 import { WORKER_SOURCE } from "../.tmp-suite/lib/rhinoDecode.js";
 import { facetGeometry } from "../.tmp-suite/components/jewelry/materials.js";
-import { parseId, solidAt, solidId } from "../.tmp-suite/components/jewelry/selection.js";
+import {
+  parseId,
+  solidAt,
+  solidId,
+  splitSolids,
+} from "../.tmp-suite/components/jewelry/selection.js";
 import {
   assignmentsFor,
   drawableCount,
@@ -264,6 +269,69 @@ console.log("\n=== a material lands on that stone alone ===");
   );
   for (const other of [0, 1, 3]) {
     check(colorAt(other) === "#ffffff", `stone ${other} is untouched`, colorAt(other));
+  }
+}
+
+console.log();
+console.log("=== the GLB path: split here, facet, then click ===");
+{
+  /*
+   * The .3dm worker splits groups at decode. A GLB has nobody to do it, so the
+   * viewer does — and that path runs the split, THEN faceting, then a raycast.
+   * Faceting de-indexes, which is where an offset scheme quietly stops lining
+   * up with the triangles it describes.
+   *
+   * Run at three scales, because the weld tolerance used to be an absolute
+   * 1e-4. That is a guess about the unit a file was exported in: too coarse and
+   * neighbouring stones fuse into one solid, too fine and one stone splits into
+   * fragments. Either way the click lands on the wrong stone, which is exactly
+   * how it looked.
+   */
+  for (const scale of [0.01, 1, 100]) {
+    const gap = 3 * scale;
+    const size = scale;
+    const pos = [];
+    const idx = [];
+    for (let i = 0; i < 4; i++) {
+      const base = pos.length / 3;
+      const b = new THREE.BoxGeometry(size, size, size).toNonIndexed();
+      const p = b.getAttribute("position");
+      for (let v = 0; v < p.count; v++) {
+        pos.push(p.getX(v) + i * gap, p.getY(v), p.getZ(v));
+      }
+      for (let v = 0; v < p.count; v++) idx.push(base + v);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+
+    const solids = splitSolids(geo);
+    const found = solids ? solids.length - 1 : 0;
+    check(found === 4, `scale ${scale}: four cubes are four solids`, `${found}`);
+    if (found !== 4) continue;
+
+    // Exactly the order the viewer uses: split, then facet.
+    const mesh = new THREE.Mesh(facetGeometry(geo));
+    mesh.userData.solids = solids;
+
+    check(
+      drawableCount(mesh.geometry) === solids[solids.length - 1],
+      `scale ${scale}: the offsets still describe the faceted geometry`,
+      `${drawableCount(mesh.geometry)} vs ${solids[solids.length - 1]}`,
+    );
+
+    let wrong = 0;
+    for (let i = 0; i < 4; i++) {
+      const ray = new THREE.Raycaster();
+      ray.set(new THREE.Vector3(i * gap, 0, 10 * scale), new THREE.Vector3(0, 0, -1));
+      const hit = ray.intersectObject(mesh, false)[0];
+      if (!hit || solidAt(mesh.userData.solids, hit.faceIndex) !== i) wrong++;
+    }
+    check(
+      wrong === 0,
+      `scale ${scale}: every click lands on the cube it was aimed at`,
+      `${wrong} wrong`,
+    );
   }
 }
 

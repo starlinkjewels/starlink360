@@ -701,6 +701,22 @@ export default function Viewer({
     downAt.current = { x: e.clientX, y: e.clientY };
   }, []);
 
+  /*
+   * The last browser click already dealt with.
+   *
+   * R3F dispatches a click once per INTERSECTED OBJECT, and a ray through a
+   * pave passes clean through several transparent stones — so one physical
+   * click arrives here repeatedly, each time resolving to whatever it hit next.
+   * `stopPropagation` is meant to end that, but it cannot run before the drag
+   * guard above, and any dispatch that guard rejects leaves the rest of the
+   * queue live. The result is one click painting the stone you aimed at AND
+   * another one behind it, which is exactly the reported fault.
+   *
+   * Keyed on the native event, because that is the one thing every dispatch of
+   * a single physical click genuinely shares.
+   */
+  const handledTap = useRef<MouseEvent | null>(null);
+
   const handleModelTap = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       if (!fit) return;
@@ -711,6 +727,11 @@ export default function Viewer({
         ? Math.hypot(e.nativeEvent.clientX - from.x, e.nativeEvent.clientY - from.y)
         : 0;
       if (moved > 8) return;
+
+      // One physical click, one stone. Before stopPropagation, which by itself
+      // is too late to catch every dispatch.
+      if (handledTap.current === e.nativeEvent) return;
+      handledTap.current = e.nativeEvent;
 
       e.stopPropagation();
 
@@ -743,6 +764,19 @@ export default function Viewer({
       const part = group === undefined ? undefined : hit === null ? group : solidId(group, hit);
 
       /*
+       * Painting is tried first, in ANY mode.
+       *
+       * It used to sit inside the Select branch, so with the brush armed and
+       * the View tool active — which is the default, and what anyone browsing
+       * is in — clicking a stone did nothing at all while the panel said
+       * "click any stone to paint Garnet". Arming a brush IS the statement of
+       * intent; requiring a second, invisible mode on top of it is the kind of
+       * thing that reads as the feature being broken.
+       */
+      const painted = part && info?.kind ? onPaintPart?.(part, info.kind) : false;
+      if (painted) return;
+
+      /*
        * One gesture, one intention.
        *
        * Selecting used to happen on every click alongside the zoom, so looking
@@ -751,10 +785,7 @@ export default function Viewer({
        * In Select the camera holds still; in View nothing is picked.
        */
       if (selecting) {
-        // Painting takes the click whole: the material lands on what was
-        // clicked and the selection is left exactly as it was.
-        const painted = part && info?.kind ? onPaintPart?.(part, info.kind) : false;
-        if (part && !painted && selected && onSelected) {
+        if (part && selected && onSelected) {
           const additive = e.nativeEvent.ctrlKey || e.nativeEvent.shiftKey || e.nativeEvent.metaKey;
           onSelected(applyClick(selected, part, additive));
         }

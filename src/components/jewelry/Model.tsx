@@ -8,7 +8,7 @@ import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materia
 import { GemRefraction, type GemOptics } from "./GemRefraction";
 import { DEFAULT_LIGHTING, environmentById, getLightTent, type LightingSettings } from "./lighting";
 import { collectStoneGroups, type StoneGroup } from "./stones";
-import { collectParts, ensurePart, parseId, type Part } from "./selection";
+import { collectParts, ensurePart, ensureSolids, parseId, type Part } from "./selection";
 import { assignmentsFor, planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { upAxisRotation, type CameraSettings } from "./camera";
 import {
@@ -126,7 +126,21 @@ export function DressedScene({
           metalness: 0,
         });
       } else if (isStone) {
+        /*
+         * Find the individual stones, for any file that did not arrive with
+         * them already found.
+         *
+         * The .3dm worker does this at decode; a GLB has nobody to do it, so
+         * the whole pave was one part and clicking one stone painted all 140.
+         * Before faceting, because this reorders the index buffer and
+         * `toNonIndexed` preserves triangle order — so the offsets survive it.
+         */
+        if (!mesh.userData.solids) {
+          const solids = ensureSolids(mesh.geometry);
+          if (solids) mesh.userData.solids = solids;
+        }
         // Faceting rewrites the geometry, so this one really is a new buffer.
+        // Cloned after the split, so it inherits the reordered index.
         mesh.geometry = facetGeometry(mesh.geometry.clone());
         owned.add(mesh.geometry);
         // Fallback only; GemRefraction replaces this once the env map is ready.
@@ -141,6 +155,16 @@ export function DressedScene({
           geo.computeVertexNormals();
           mesh.geometry = geo;
           owned.add(geo);
+        }
+        /*
+         * Metal too — a shank and its prongs are separate solids and should be
+         * separately paintable whatever file they arrived in. The shipped
+         * model's metal is one mesh of 675 of them, so without this, clicking a
+         * single prong repaints the whole piece.
+         */
+        if (!mesh.userData.solids) {
+          const solids = ensureSolids(mesh.geometry);
+          if (solids) mesh.userData.solids = solids;
         }
         mesh.material = createMetalMaterial(finish);
         /*

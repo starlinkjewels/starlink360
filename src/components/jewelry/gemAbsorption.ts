@@ -76,16 +76,93 @@ function anchors(reference: number): Anchor[] {
      * Apply it after the environment sample and before the fresnel rim, so the
      * rim stays white — on a real stone that edge is a surface reflection and
      * never picks up body colour.
+     *
+     * The highlight compression in the middle is what makes a coloured stone
+     * actually read as its colour. `diffuseColor` at this point is the raw HDR
+     * environment sample, and a studio map peaks well above 50. Multiplying
+     * that by an absorption of 0.12 still leaves 6, so the channel clips to
+     * white in tone mapping and the stone shows its colour only on the facets
+     * that happen to be looking at something dark — one stone, part coloured
+     * and part white, which is exactly the fault this fixes.
+     *
+     * Reinhard with the CHROMA of the absorption as its knee — `e / (1 + k*e)`
+     * rather than a blend toward `e / (1 + e)`. A blend was tried first and is
+     * far too weak: interpolating 79% of the way from 50 toward 0.98 still
+     * leaves 11, which clips just the same. As a knee, k=0 passes the value
+     * through untouched and any k>0 bounds the result at 1/k.
+     *
+     * So a colourless diamond is not compressed at all and keeps every bit of
+     * its HDR sparkle; the more colour a stone carries, the harder its
+     * highlights are pulled into range so the hue survives them. Chroma rather
+     * than darkness, so a smoky grey stone stays uncompressed too — it has no
+     * hue to protect.
      */
     {
       find: "vec3 viewDirection = normalize(vWorldPosition - cameraPosition);",
       replace:
-        "diffuseColor.rgb *= pow(max(color, vec3(1e-4)), vec3(clamp(gPathLength / " +
+        "vec3 gAbsorb = pow(max(color, vec3(1e-4)), vec3(clamp(gPathLength / " +
         `${ref}, ${MIN_EXPONENT.toFixed(2)}, ${MAX_EXPONENT.toFixed(2)})));\n    ` +
+        "float gAbsMax = max(max(gAbsorb.r, gAbsorb.g), gAbsorb.b);\n    " +
+        "float gAbsMin = min(min(gAbsorb.r, gAbsorb.g), gAbsorb.b);\n    " +
+        "float gTint = gAbsMax > 1e-4 ? (gAbsMax - gAbsMin) / gAbsMax : 0.0;\n    " +
+        "diffuseColor.rgb = diffuseColor.rgb / (1.0 + gTint * diffuseColor.rgb);\n    " +
+        "diffuseColor.rgb *= gAbsorb;\n    " +
         "vec3 viewDirection = normalize(vWorldPosition - cameraPosition);",
+    },
+    /*
+     * The body colour again, once more, after tone mapping — and this is the
+     * one that cannot fail.
+     *
+     * Everything above applies colour to an UNBOUNDED value. The environment
+     * sample runs past 50 on a bright facet, so any colour multiplied into it
+     * is still far above 1 and tone mapping flattens it to white; the hue
+     * survives only where the environment happened to be dim. Compression and
+     * normalisation each shrink that problem without removing it, because the
+     * ceiling they are fighting moves with the environment.
+     *
+     * After `tonemapping_fragment` the value is bounded to 0..1, and there is
+     * no headroom left for a highlight to hide in. White times a normalised
+     * sapphire is exactly sapphire. Normalised, so the stone is tinted rather
+     * than darkened — dividing by the strongest channel keeps the hue and the
+     * brightness, and leaves a colourless stone multiplied by exactly 1, which
+     * is why the diamond look is untouched to the last bit.
+     */
+    {
+      find: "#include <tonemapping_fragment>",
+      replace:
+        "#include <tonemapping_fragment>\n    " +
+        "gl_FragColor.rgb *= max(color, vec3(1e-4)) / " +
+        "max(max(color.r, max(color.g, color.b)), 1e-4);",
     },
   ];
 }
+
+/**
+ * Identifies the CONTENT of this patch, for the program cache key.
+ *
+ * three caches compiled programs by `customProgramCacheKey()`, and that cache
+ * lives on the renderer — which survives a Vite hot update. So when the patch
+ * below changes but the key does not, three finds the program it compiled from
+ * the OLD shader text and reuses it: the edit appears to do nothing, however
+ * many times the page is refreshed, and only a hard reload that tears down the
+ * renderer shows the new code.
+ *
+ * That cost this project an entire debugging session. Deriving the key from the
+ * patch text means it cannot happen again — change any replacement here and the
+ * key changes with it.
+ */
+export const PATCH_ID = (() => {
+  const text = anchors(1)
+    .map((a) => a.replace)
+    .join("|");
+  // FNV-1a, which is plenty to notice an edit and is not a security boundary.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+})();
 
 /**
  * Rewrites the fragment shader to absorb by path length.

@@ -16,6 +16,7 @@ import {
   commonMaterial,
   commonPatch,
   describeTargets,
+  finishToPart,
   targetIds,
   targetsEverything,
 } from "../.tmp-jewelry/assign.js";
@@ -246,6 +247,58 @@ check(
   describeTargets([], set(), "stone") === "no stones in this piece",
   "a piece with no stones says so instead of offering to recolour nothing",
 );
+
+/*
+ * The finish brush.
+ *
+ * Textures and Materials share one brush slot, so arming one disarms the other
+ * — a click can only mean one thing. Both tools carry `kind: "metal"`, so the
+ * panels tell themselves apart by `tool` and not by kind; without that the
+ * Materials grid lights up whenever the finish brush is armed and both panels
+ * claim the same click.
+ */
+console.log("\n=== the finish brush ===");
+{
+  const material = { tool: "material", kind: "metal", material: "gold-18k" };
+  const finish = { tool: "finish", kind: "metal", finish: "hammered" };
+
+  check(material.tool !== finish.tool, "the two tools are distinguishable by tool alone");
+  check(
+    material.kind === finish.kind,
+    "which matters, because they share a kind and could not be told apart by it",
+  );
+
+  check(canPaint("metal", finish.kind), "a finish brush may paint metal");
+  check(!canPaint("stone", finish.kind), "and must not paint a stone — a diamond is not hammered");
+}
+
+console.log("\n=== painting a finish onto one part ===");
+{
+  const DEFAULT = { finish: "none", enabled: true, scale: 8, strength: 1, channels: {} };
+  const before = { m1: { ...DEFAULT, finish: "brushed", scale: 20, strength: 0.4 } };
+
+  const next = finishToPart(before, "m1", "hammered", DEFAULT);
+  check(next.m1.finish === "hammered", "the finish changes", next.m1.finish);
+  check(
+    next.m1.scale === 20 && next.m1.strength === 0.4,
+    "and the scale and strength already tuned for that part survive",
+    `scale ${next.m1.scale}, strength ${next.m1.strength}`,
+  );
+  check(before.m1.finish === "brushed", "the input is not mutated, so React sees a change");
+
+  // A part with nothing assigned starts from the defaults, not undefined.
+  const fresh = finishToPart({}, "Metal 01#solid7", "florentine", DEFAULT);
+  check(
+    fresh["Metal 01#solid7"].finish === "florentine" &&
+      fresh["Metal 01#solid7"].scale === DEFAULT.scale,
+    "a part with no texture yet picks up the defaults around the new finish",
+  );
+
+  check(
+    Object.keys(finishToPart(before, "m2", "hammered", DEFAULT)).length === 2,
+    "and painting a second part leaves the first alone",
+  );
+}
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);
 process.exit(fail ? 1 : 0);

@@ -28,7 +28,7 @@ import { Select } from "./Select";
 import { useTheme } from "@/hooks/useTheme";
 import type { StoneGroup } from "./stones";
 import type { Part, PartKind } from "./selection";
-import type { Assignments } from "./assign";
+import type { Assignments, Brush } from "./assign";
 import { NumberField } from "./ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
 import { MaterialsPanel } from "./panels/MaterialsPanel";
@@ -324,9 +324,9 @@ export interface StudioPanelProps {
   /** Materials chosen per part id. */
   assignments?: Assignments;
   onAssignments?: (next: Assignments) => void;
-  /** The material on the brush, and how to load it. Null means not painting. */
-  armed?: string | null;
-  onArm?: (brush: { material: string; kind: PartKind } | null) => void;
+  /** The brush, and how to load it. Null means not painting. */
+  armed?: Brush | null;
+  onArm?: (brush: Brush | null) => void;
   /** Surface finish per part id. */
   textures?: Textures;
   onTextures?: (next: Textures) => void;
@@ -1278,6 +1278,8 @@ export function StudioPanel({
           textures={textures}
           onTextures={onTextures ?? (() => {})}
           onSelect={onSelectParts}
+          armed={armed}
+          onArm={onArm}
           /*
            * The finish a part wears when nothing is assigned to it.
            *

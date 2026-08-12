@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="RenderGod">
+  <!--
+    A round brilliant seen from the side: table, crown, girdle, pavilion.
+
+    Drawn side-on rather than from above because that silhouette survives 16px —
+    the top view of a brilliant collapses into a featureless octagon at tab size,
+    while this keeps a recognisable gem outline. Facet lines are kept to the four
+    that read at that size; more of them turn to mud.
+
+    Gold is the brand colour, and it holds against both a light and a dark tab
+    strip, so one icon covers both themes.
+  -->
+  <defs>
+    <linearGradient id="crown" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4e2bb" />
+      <stop offset="1" stop-color="#d9b26a" />
+    </linearGradient>
+    <linearGradient id="pavilion" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9b26a" />
+      <stop offset="1" stop-color="#9a7530" />
+    </linearGradient>
+  </defs>
+
+  <path d="M10.5 10.5h11l5 4.5h-21z" fill="url(#crown)" />
+  <path d="M5.5 15h21L16 28.5z" fill="url(#pavilion)" />
+
+  <g fill="none" stroke="#4a3413" stroke-linejoin="round" stroke-linecap="round">
+    <g stroke-width="1" opacity=".5">
+      <path d="M10.5 10.5 8 15M21.5 10.5 24 15M8 15 16 28.5M24 15 16 28.5" />
+    </g>
+    <path d="M10.5 10.5h11l5 4.5h-21z" stroke-width="1.5" />
+    <path d="M5.5 15h21L16 28.5z" stroke-width="1.5" />
+  </g>
+</svg>

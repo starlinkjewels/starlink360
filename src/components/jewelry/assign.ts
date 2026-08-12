@@ -127,6 +127,35 @@ export function assignToPart(
 }
 
 /**
+ * What is loaded onto the brush.
+ *
+ * Two tools share one piece of state, deliberately: arming the finish brush has
+ * to disarm the material brush, because a click can only mean one thing. A
+ * single slot makes that impossible to get wrong, where two booleans would
+ * eventually both be true.
+ *
+ * `tool` rather than sniffing which field is set. Both tools can carry
+ * `kind: "metal"`, so without it the Materials panel lights up when the
+ * Textures brush is armed and both panels claim the same click.
+ *
+ * The payload is empty until a swatch is chosen — arming the brush and picking
+ * what it holds are two separate steps, and the panel says which one you are on.
+ */
+export type Brush =
+  | { tool: "material"; kind: PartKind; material: string }
+  | { tool: "finish"; kind: "metal"; finish: string };
+
+/** Puts a surface finish on one part, leaving its other texture settings be. */
+export function finishToPart<T extends { finish: string }>(
+  current: Record<string, T>,
+  partId: string,
+  finish: string,
+  fallback: T,
+): Record<string, T> {
+  return { ...current, [partId]: { ...(current[partId] ?? fallback), finish } };
+}
+
+/**
  * Whether a brush may paint a part.
  *
  * A metal brush must not paint a stone and a gem brush must not paint metal.

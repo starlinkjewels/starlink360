@@ -9,7 +9,8 @@
  * Stones are excluded. A diamond is not hammered, and offering it would be a
  * control that cannot do anything.
  */
-import { LayoutGrid, List, RotateCcw } from "lucide-react";
+// Aliased: `Brush` is the armed-brush state type in this codebase.
+import { Brush as BrushIcon, LayoutGrid, List, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   DEFAULT_TEXTURE,
@@ -20,11 +21,16 @@ import {
   type TextureChannels,
 } from "../textures";
 import { applyClick, type Part } from "../selection";
-import { describeTargets, targetIds, targetsEverything } from "../assign";
+import { describeTargets, targetIds, targetsEverything, type Brush } from "../assign";
 import { NumberField } from "../ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "../ui/Panel";
 
 export type Textures = Record<string, TextureAssignment>;
+
+/** The name of a finish, for the brush readout. */
+function finishLabel(id: string): string {
+  return SURFACE_FINISHES.find((f) => f.id === id)?.label ?? id;
+}
 
 /** The one setting shown, when every target agrees on it. */
 function common(textures: Textures, ids: string[]): TextureAssignment {
@@ -55,6 +61,8 @@ export function TexturesPanel({
   onSelect,
   fallbackFinish = "none",
   onFallbackFinish,
+  armed = null,
+  onArm,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
@@ -64,8 +72,21 @@ export function TexturesPanel({
   /** The finish a part wears when nothing is assigned to it. */
   fallbackFinish?: string;
   onFallbackFinish?: (id: string) => void;
+  /**
+   * The shared brush. Same slot the Materials panel uses, so arming one
+   * disarms the other — a click can only mean one thing.
+   */
+  armed?: Brush | null;
+  onArm?: (brush: Brush | null) => void;
 }) {
   const [layout, setLayout] = useState<"grid" | "list">("grid");
+
+  /*
+   * Armed for THIS tool. The material brush also carries `kind: "metal"`, so
+   * testing the kind alone would light both panels at once.
+   */
+  const painting = armed?.tool === "finish";
+  const brushFinish = painting ? armed.finish : "";
 
   const ids = targetIds(parts, selected, "metal");
   const scope = describeTargets(parts, selected, "metal");
@@ -122,9 +143,24 @@ export function TexturesPanel({
         piece. Stones are not offered: a diamond is not hammered.
       </PanelIntro>
 
+      {/* What a click is about to change, always visible, never implied. */}
       <div className="mat-scope">
-        <span className={`mat-scope-text ${whole ? "" : "mat-scope-narrow"}`}>
-          Applies to <strong>{scope}</strong>
+        <span className={`mat-scope-text ${whole && !painting ? "" : "mat-scope-narrow"}`}>
+          {painting ? (
+            brushFinish && brushFinish !== "none" ? (
+              <>
+                Click any metal to apply <strong>{finishLabel(brushFinish)}</strong>
+              </>
+            ) : (
+              <>
+                Painting — <strong>pick a finish below</strong>
+              </>
+            )
+          ) : (
+            <>
+              Applies to <strong>{scope}</strong>
+            </>
+          )}
         </span>
         <span className="mat-scope-actions">
           <button
@@ -143,6 +179,22 @@ export function TexturesPanel({
           >
             <List className="size-3.5" />
           </button>
+          {/*
+           * The brush, matching Materials exactly. Without it the only way to
+           * finish one prong was to select it in the viewport first and then
+           * come back here, which is two tools and a round trip for what reads
+           * as one action.
+           */}
+          <button
+            className={`icon-toggle ${painting ? "icon-toggle-on" : ""}`}
+            onClick={() => onArm?.(painting ? null : { tool: "finish", kind: "metal", finish: "" })}
+            aria-label="Paint a finish onto the piece"
+            aria-pressed={painting}
+            title="Paint a finish onto the piece"
+            disabled={!onArm || !ofKind.length}
+          >
+            <BrushIcon className="size-3.5" />
+          </button>
         </span>
       </div>
 
@@ -150,6 +202,22 @@ export function TexturesPanel({
         <p className="field-hint mb-2">
           This piece has no metal, so there is nothing to texture. Stones are not offered here — a
           diamond is not hammered.
+        </p>
+      )}
+
+      {/*
+       * How to reach a single object, said once, where it is needed.
+       *
+       * A finish can be given to one prong or one bead — the renderer splits the
+       * metal into its 675 separate objects and gives each its own draw run. But
+       * a piece whose metal is a single group shows no part chips, so there is
+       * nothing on screen to suggest that anything narrower than "all of it" is
+       * possible. Shown only while the choice would apply to everything, since
+       * once something IS selected the scope line above already says so.
+       */}
+      {whole && !painting && ofKind.length > 0 && (
+        <p className="field-hint mb-2">
+          Pick a part in the viewport with the Select tool to give just that one its own finish.
         </p>
       )}
 
@@ -190,7 +258,9 @@ export function TexturesPanel({
         aria-label="Surface finish"
       >
         {SURFACE_FINISHES.map((f) => {
-          const on = f.id === current.finish;
+          // While painting, the grid lights what is ON THE BRUSH rather than
+          // what the selection happens to be wearing.
+          const on = f.id === (painting ? brushFinish : current.finish);
           return (
             <button
               key={f.id}
@@ -199,7 +269,17 @@ export function TexturesPanel({
               aria-label={f.label}
               title={f.hint}
               className={layout === "grid" ? "mat-cell" : "mat-row"}
-              onClick={() => write({ finish: f.id })}
+              onClick={() =>
+                painting
+                  ? // Clicking the loaded finish again unloads it, so the brush
+                    // can be emptied without leaving paint mode.
+                    onArm?.({
+                      tool: "finish",
+                      kind: "metal",
+                      finish: brushFinish === f.id ? "" : f.id,
+                    })
+                  : write({ finish: f.id })
+              }
             >
               <span className={`mat-orb-ring tex-ring ${on ? "mat-orb-on" : ""}`}>
                 {f.id === "none" ? (

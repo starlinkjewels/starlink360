@@ -111,7 +111,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500&display=swap",
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      /*
+       * SVG first, .ico only as the fallback. A browser that understands SVG
+       * takes it and renders the mark crisply at every size a tab, a bookmark
+       * bar or a pinned shortcut asks for; everything else drops through to the
+       * raster file. Ordering matters — the last understood `icon` link wins in
+       * most browsers, so the fallback has to come first.
+       */
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
     ],
   }),
   shellComponent: RootShell,

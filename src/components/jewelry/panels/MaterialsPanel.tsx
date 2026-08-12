@@ -11,7 +11,8 @@
  * about and undo; an anonymous set of five numbers is not.
  */
 import { useMemo, useState } from "react";
-import { RotateCcw, Sliders, LayoutGrid, List, Brush } from "lucide-react";
+// Aliased: `Brush` is the armed-brush state type in this codebase.
+import { RotateCcw, Sliders, LayoutGrid, List, Brush as BrushIcon } from "lucide-react";
 import {
   GEMS,
   METALS,
@@ -33,6 +34,7 @@ import {
   patchMaterial,
   targetsEverything,
   type Assignments,
+  type Brush,
 } from "../assign";
 import { applyClick, type Part, type PartKind } from "../selection";
 import { NumberField } from "../ui/NumberField";
@@ -110,11 +112,16 @@ export function MaterialsPanel({
   /** Lets a part be selected by name, for anything hard to hit on screen. */
   onSelect?: (next: Set<string>) => void;
   /**
-   * The material armed for painting, or null when off. While armed, clicking
-   * the piece applies it to whatever was clicked instead of selecting.
+   * The brush, or null when off. While armed, clicking the piece applies the
+   * material to whatever was clicked instead of selecting it.
+   *
+   * Carries its KIND, and this panel only considers itself armed when that
+   * kind is its own. The brush is one piece of state shared by the Metals and
+   * Stones sections, so a bare id lit the brush in both at once — arm it in
+   * Stones and Metals claimed to be painting too.
    */
-  armed?: string | null;
-  onArm?: (brush: { material: string; kind: PartKind } | null) => void;
+  armed?: Brush | null;
+  onArm?: (brush: Brush | null) => void;
   /**
    * The metal the piece wears where nothing is assigned.
    *
@@ -155,10 +162,22 @@ export function MaterialsPanel({
    * the piece is clicked — which is the workflow for setting a halo stone by
    * stone, where select-then-apply is two steps per stone.
    */
-  const painting = armed !== null;
+  /*
+   * Armed for THIS panel's tool, not merely armed.
+   *
+   * The finish brush in Textures also carries `kind: "metal"`, so testing the
+   * kind alone lit this panel up whenever that one was armed and both claimed
+   * the same click.
+   */
+  const painting = armed?.tool === "material" && armed.kind === kind;
+  const brushMaterial = painting ? armed.material : "";
   const choose = (id: string) => {
     if (painting) {
-      onArm?.(armed === id ? { material: "", kind } : { material: id, kind });
+      onArm?.(
+        brushMaterial === id
+          ? { tool: "material", kind, material: "" }
+          : { tool: "material", kind, material: id },
+      );
       return;
     }
     /*
@@ -199,9 +218,10 @@ export function MaterialsPanel({
   const chosen = tab === "metals" ? metalById(active ?? undefined) : gemById(active ?? undefined);
   // While painting, the grid highlights what is on the brush, not what the
   // selection happens to be wearing.
-  const lit = painting ? armed : active;
+  const lit = painting ? brushMaterial : active;
   const brushName =
-    (metalById(armed ?? undefined) ?? gemById(armed ?? undefined))?.name ?? "nothing";
+    (metalById(brushMaterial || undefined) ?? gemById(brushMaterial || undefined))?.name ??
+    "nothing";
 
   return (
     <>
@@ -209,7 +229,7 @@ export function MaterialsPanel({
       <div className="mat-scope">
         <span className={`mat-scope-text ${whole && !painting ? "" : "mat-scope-narrow"}`}>
           {painting ? (
-            armed ? (
+            brushMaterial ? (
               <>
                 Click {kind === "metal" ? "any metal" : "any stone"} to paint{" "}
                 <strong>{brushName}</strong>
@@ -246,13 +266,13 @@ export function MaterialsPanel({
           </button>
           <button
             className={`icon-toggle ${painting ? "icon-toggle-on" : ""}`}
-            onClick={() => onArm?.(painting ? null : { material: "", kind })}
+            onClick={() => onArm?.(painting ? null : { tool: "material", kind, material: "" })}
             aria-label="Paint onto the piece"
             aria-pressed={painting}
             title="Paint onto the piece"
             disabled={!onArm}
           >
-            <Brush className="size-3.5" />
+            <BrushIcon className="size-3.5" />
           </button>
           <button
             className={`icon-toggle ${editing ? "icon-toggle-on" : ""}`}

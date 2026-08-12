@@ -5,7 +5,8 @@ import { MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
 import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { MeshRefractionMaterial } from "@react-three/drei/materials/MeshRefractionMaterial";
-import { withPathAbsorption } from "./gemAbsorption";
+import { PATCH_ID, withPathAbsorption } from "./gemAbsorption";
+import { gemFresnel, gemTint } from "./materials";
 
 /*
  * A real diamond, rather than a transmissive approximation of one.
@@ -112,6 +113,34 @@ function envDefines(envMap: THREE.Texture): Record<string, string> {
   return defines;
 }
 
+/**
+ * Geometry to hand MeshBVH, which must never be the geometry we draw.
+ *
+ * Building a BVH REORDERS the index buffer — that is how the tree groups
+ * triangles into spatially coherent nodes. On an indexed geometry
+ * `toNonIndexed()` already returns a fresh copy, so the original is safe. On a
+ * NON-indexed one, three-mesh-bvh creates an index on whatever it is given and
+ * then reorders that, so passing the render geometry directly rewrites the
+ * triangle order underneath us.
+ *
+ * Stones are non-indexed — faceting de-indexes them for flat shading — so that
+ * is exactly the path this took. The damage is quiet and specific: the solid
+ * offsets in `userData.solids` still describe the ORIGINAL order, the element
+ * count is unchanged so nothing looks wrong, but every draw run now points at a
+ * spatially clustered set of triangles instead of one stone. Painting a stone
+ * coloured a blob spanning it and its neighbour, right where the click landed.
+ *
+ * A wrapper sharing the position attribute is enough. MeshBVH reorders the
+ * index it builds, never the vertex data, so the buffer can be shared and only
+ * the throwaway index is rewritten.
+ */
+function bvhSource(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  if (geo.index) return geo.toNonIndexed();
+  const shared = new THREE.BufferGeometry();
+  shared.setAttribute("position", geo.getAttribute("position"));
+  return shared;
+}
+
 interface RefractionMaterialLike extends THREE.ShaderMaterial {
   envMap: THREE.Texture;
   bounces: number;
@@ -174,7 +203,7 @@ export function GemRefraction({
       const geo = mesh.geometry;
       if (cache.has(geo.uuid)) continue;
       const bvh = new MeshBVHUniformStruct();
-      bvh.updateFrom(new MeshBVH(geo.index ? geo.toNonIndexed() : geo, { strategy: SAH }));
+      bvh.updateFrom(new MeshBVH(bvhSource(geo), { strategy: SAH }));
       cache.set(geo.uuid, bvh);
     }
     return () => cache.clear();
@@ -295,9 +324,14 @@ export function GemRefraction({
         material.envMap = envMap;
         material.bounces = BOUNCES;
         material.ior = s.ior;
-        material.fresnel = FRESNEL;
+        // Scaled by how coloured the stone is. At full strength the shader
+        // blends every grazing facet to pure white, which is the diamond look
+        // on a colourless stone and erases the colour on a painted one.
+        material.fresnel = gemFresnel(s.color, FRESNEL);
         material.aberrationStrength = s.aberration;
-        material.color = new THREE.Color(s.color);
+        // Normalised so the shader's HDR environment multiply keeps the hue
+        // instead of clipping the bright facets to white.
+        material.color = new THREE.Color(gemTint(s.color));
         material.resolution = new THREE.Vector2(size.width, size.height);
         if (bvh) material.bvh = bvh;
 
@@ -312,14 +346,39 @@ export function GemRefraction({
           // Null means drei's shader is not the one this was written against.
           // Keeping the original flat tint is correct; a partial patch is not.
           if (patched) shader.fragmentShader = patched;
+          /*
+           * Say so, loudly, either way.
+           *
+           * Falling back to drei's flat tint is the safe choice but it is also
+           * indistinguishable from the colour feature being broken: the stone
+           * shows its colour only where the environment is dim, so a painted
+           * stone comes out part coloured and part white. Failing silently
+           * turned that into a long hunt through geometry that was never at
+           * fault. This runs once per program, not per frame.
+           */
+          if (import.meta.env.DEV) {
+            if (patched) console.log(`[gem] absorption patch ${PATCH_ID} compiled`);
+            else
+              console.error(
+                "[gem] absorption patch REJECTED — drei's shader has changed shape, so " +
+                  "stones fall back to a flat tint that washes out against a bright " +
+                  "environment. Run `npm run test:gem` to see which anchor no longer matches.",
+              );
+          }
         };
         /*
          * The reference length is baked into the shader text, so two stones of
          * different sizes need different programs. Without this three reuses
          * the first compiled program for all of them and every stone absorbs as
          * if it were the size of whichever compiled first.
+         *
+         * PATCH_ID covers the other half of the same hazard. This cache lives on
+         * the renderer, which survives a Vite hot update — so a key that does
+         * not move when the shader text does means three keeps serving the
+         * program it compiled from the previous version of the patch, and every
+         * edit to it silently does nothing until the renderer is torn down.
          */
-        material.customProgramCacheKey = () => `gem-absorb-${reference.toPrecision(8)}`;
+        material.customProgramCacheKey = () => `gem-absorb-${reference.toPrecision(8)}-${PATCH_ID}`;
         material.needsUpdate = true;
 
         created.push(material);

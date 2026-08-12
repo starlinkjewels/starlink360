@@ -1,4 +1,4 @@
-import { ChevronDown, FolderOpen, RotateCcw, Save, Upload, User, X } from "lucide-react";
+import { FolderOpen, RotateCcw, Save, Upload, X } from "lucide-react";
 import { SECTIONS, sectionById } from "./sections";
 
 /*
@@ -70,11 +70,6 @@ export function TopBar({
             <span className="tb-label">Upload</span>
           </button>
         )}
-
-        <button className="tb-avatar" title="Account" aria-label="Account">
-          <User className="size-3.5" />
-          <ChevronDown className="size-3" />
-        </button>
       </div>
     </header>
   );

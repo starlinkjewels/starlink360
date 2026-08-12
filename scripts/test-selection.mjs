@@ -21,6 +21,9 @@ import {
   solidAt,
   solidId,
   solidRange,
+  splitSolids,
+  MAX_SPLIT_VERTICES,
+  ensureSolids,
   synthLabel,
   uniqueLabel,
 } from "../.tmp-jewelry/selection.js";
@@ -369,6 +372,116 @@ console.log("\n=== the highlight lights one solid ===");
   );
   two();
   check(mesh.children.length === 0, "and both are removed again");
+}
+
+console.log();
+console.log("=== finding solids in a file that arrived without them ===");
+{
+  /*
+   * The .3dm worker splits groups at decode; a GLB has nobody to do it. That
+   * asymmetry meant the whole pave was ONE part on the default piece, so
+   * clicking a single stone painted all hundred and forty of them — per-solid
+   * picking silently worked on one file format only.
+   */
+  const merge = (boxes) => {
+    const geo = new THREE.BufferGeometry();
+    const pos = [];
+    const idx = [];
+    for (const [ox, oy, oz] of boxes) {
+      const base = pos.length / 3;
+      const b = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+      const p = b.getAttribute("position");
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i) + ox, p.getY(i) + oy, p.getZ(i) + oz);
+      }
+      for (let i = 0; i < p.count; i++) idx.push(base + i);
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    return geo;
+  };
+
+  // Three cubes, far enough apart that nothing welds between them.
+  const three = merge([
+    [0, 0, 0],
+    [10, 0, 0],
+    [20, 0, 0],
+  ]);
+  const solids = splitSolids(three);
+  check(Array.isArray(solids), "a merged mesh is split");
+  check(solids.length - 1 === 3, "into one solid per cube", `${solids.length - 1}`);
+  check(solids[0] === 0, "starting at the beginning of the buffer");
+  check(
+    solids[solids.length - 1] === three.getIndex().count,
+    "and covering all of it, so no triangle belongs to nothing",
+  );
+  check(
+    solids.every((v, i) => i === 0 || v > solids[i - 1]),
+    "with the offsets ascending",
+  );
+
+  /*
+   * Every triangle must resolve to the solid whose cube it belongs to. This is
+   * the property the click depends on: the reorder is worthless if `solidAt`
+   * disagrees with where the geometry actually is.
+   */
+  const idx = three.getIndex();
+  const pos = three.getAttribute("position");
+  let misplaced = 0;
+  for (let t = 0; t < idx.count / 3; t++) {
+    const x = pos.getX(idx.getX(t * 3));
+    const expected = Math.round(x / 10);
+    if (solidAt(solids, t) !== expected) misplaced++;
+  }
+  check(misplaced === 0, "and every triangle resolves to its own cube", `${misplaced} misplaced`);
+
+  // A plain array, because Object3D.clone round-trips userData through JSON.
+  check(
+    JSON.parse(JSON.stringify({ s: solids })).s.length === solids.length,
+    "the offsets survive a scene clone",
+  );
+
+  const one = splitSolids(merge([[0, 0, 0]]));
+  check(one === null, "a single solid is not a split worth having");
+
+  const noIndex = new THREE.BufferGeometry();
+  noIndex.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  check(splitSolids(noIndex) === null, "geometry with no index declines rather than throwing");
+
+  /*
+   * The cap has to clear the real files and still stop somewhere. This is
+   * union-find on the main thread and the shipped model's metal is 972k
+   * vertices at about two seconds — paid once at load, because `ensureSolids`
+   * caches on the source geometry. A cap below that is worse than no cap: it
+   * declines silently, and a group that never splits means clicking one prong
+   * repaints the whole piece, which reads as the feature being broken.
+   */
+  check(
+    MAX_SPLIT_VERTICES > 1_000_000 && MAX_SPLIT_VERTICES < 3_000_000,
+    "the cap clears a real metal group without being unbounded",
+    `${MAX_SPLIT_VERTICES}`,
+  );
+
+  /*
+   * Cached per source geometry, not per mount. DressedScene re-clones the scene
+   * on every finish and lighting change, so an uncached split would spend those
+   * two seconds again on each swatch click.
+   */
+  const shared = merge([
+    [0, 0, 0],
+    [4, 0, 0],
+  ]);
+  const first = ensureSolids(shared);
+  check(
+    first !== null && first.length === 3,
+    "ensureSolids splits on the first call",
+    `${first?.length}`,
+  );
+  check(ensureSolids(shared) === first, "and returns the same offsets without recomputing");
+
+  const single = merge([[0, 0, 0]]);
+  check(ensureSolids(single) === null, "a geometry that declines is remembered as declining");
+  check(single.userData.solidsChecked === true, "so the rejected attempt is not paid again");
 }
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);

@@ -11,11 +11,17 @@ import { StudioPanel } from "@/components/jewelry/StudioPanel";
 import type { StudioApi } from "@/components/jewelry/StudioRig";
 import type { StoneGroup } from "@/components/jewelry/stones";
 import { describeSelection, type Part, type PartKind } from "@/components/jewelry/selection";
-import { assignToPart, canPaint, type Assignments } from "@/components/jewelry/assign";
+import {
+  assignToPart,
+  canPaint,
+  finishToPart,
+  type Assignments,
+  type Brush,
+} from "@/components/jewelry/assign";
 import { gemById, metalById, resolveGem, resolveMetal } from "@/components/jewelry/library";
 import type { GemOptics } from "@/components/jewelry/GemRefraction";
 import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
-import type { TextureAssignment } from "@/components/jewelry/textures";
+import { DEFAULT_TEXTURE, type TextureAssignment } from "@/components/jewelry/textures";
 import { DEFAULT_CAMERA, guessUpAxis, type CameraSettings } from "@/components/jewelry/camera";
 import { ImportOrientation } from "@/components/jewelry/ImportOrientation";
 import { DEFAULT_LIGHTING, type LightingSettings } from "@/components/jewelry/lighting";
@@ -264,8 +270,14 @@ function Index() {
    */
   /** Surface finish per part id, the same shape as the material assignments. */
   const [textures, setTextures] = useState<Textures>({});
-  const [brush, setBrush] = useState<{ material: string; kind: PartKind } | null>(null);
-  const armed = brush?.material ?? null;
+  /*
+   * One brush, carrying which kind of part it paints.
+   *
+   * Both Materials sections read it, and each shows itself as armed only when
+   * the kind matches — a bare material id lit the brush in Metals the moment
+   * one was armed in Stones.
+   */
+  const [brush, setBrush] = useState<Brush | null>(null);
 
   /*
    * A brush only paints its own kind.
@@ -277,7 +289,19 @@ function Index() {
    */
   const handlePaintPart = useCallback(
     (partId: string, kind: PartKind) => {
-      if (!brush?.material || !canPaint(kind, brush.kind)) return false;
+      if (!brush || !canPaint(kind, brush.kind)) return false;
+      /*
+       * An armed brush with nothing on it hands the click back rather than
+       * writing an empty assignment. Arming and loading are two steps, and
+       * between them a click should still select — silently doing nothing is
+       * how the paint feature read as broken the first time round.
+       */
+      if (brush.tool === "finish") {
+        if (!brush.finish) return false;
+        setTextures((prev) => finishToPart(prev, partId, brush.finish, DEFAULT_TEXTURE));
+        return true;
+      }
+      if (!brush.material) return false;
       setAssignments((prev) => assignToPart(prev, partId, brush.material));
       return true;
     },
@@ -870,7 +894,7 @@ function Index() {
             onSelectParts={setSelected}
             assignments={assignments}
             onAssignments={setAssignments}
-            armed={armed}
+            armed={brush}
             onArm={setBrush}
             textures={textures}
             onTextures={setTextures}

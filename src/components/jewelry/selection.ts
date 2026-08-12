@@ -417,3 +417,163 @@ export function describeSelection(parts: Part[], selected: ReadonlySet<string>):
   }
   return `${names.length} parts`;
 }
+
+/*
+ * ── Finding solids in a scene that did not come with them ───────────────────
+ *
+ * The .3dm worker splits every group into its separate solids, because it has
+ * the whole file open and a thread to do it on. Nothing else did — so on a GLB
+ * the entire pavé was one part, and clicking one stone painted all hundred and
+ * forty of them. Per-solid picking silently worked on one file format only.
+ *
+ * This is the same union-find, run on a THREE geometry, so the capability
+ * belongs to the viewer rather than to the importer.
+ */
+
+/**
+ * Above this, the split is skipped and the group stays the unit.
+ *
+ * The cost is linear but the constant is real: the client's 740k-vertex metal
+ * group takes about 1.4 seconds. That is fine in a worker at load and not fine
+ * on the main thread, and metal from a .3dm already arrives split. A pavé — the
+ * case that actually needs this — is well under it, at around 80k.
+ */
+export const MAX_SPLIT_VERTICES = 1_200_000;
+
+/**
+ * Splits a geometry into its connected solids, reordering the index buffer so
+ * each one is contiguous. Returns the offsets, or null when it declined.
+ *
+ * MUTATES the index buffer, so the caller must own the geometry — a GLB's is
+ * shared with the useGLTF cache and reordering it in place would reorder it for
+ * every other mount too.
+ */
+export function splitSolids(geometry: THREE.BufferGeometry): number[] | null {
+  const index = geometry.getIndex();
+  const position = geometry.getAttribute("position");
+  if (!index || !position) return null;
+
+  const vertCount = position.count;
+  if (vertCount > MAX_SPLIT_VERTICES) return null;
+
+  const parent = new Int32Array(vertCount);
+  for (let i = 0; i < vertCount; i++) parent[i] = i;
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  /*
+   * Welded by position, not by index. Separate solids in a merged mesh each
+   * carry their own copy of the vertices along their seams, so index sharing
+   * alone would cut a single stone into several pieces.
+   *
+   * The tolerance is RELATIVE to the piece, which matters more than it looks.
+   * A fixed 1e-4 assumes a scale: the .3dm path normalises to a unit sphere, a
+   * GLB arrives in whatever unit it was exported in. Too coarse for the scale
+   * and neighbouring stones fuse into one solid; too fine and a single stone
+   * splits into fragments along its own seams. Either way a click lands on
+   * something other than the stone under the cursor, which is precisely how it
+   * looks when the wrong stones change colour.
+   */
+  geometry.computeBoundingBox();
+  const span = geometry.boundingBox
+    ? Math.max(
+        geometry.boundingBox.max.x - geometry.boundingBox.min.x,
+        geometry.boundingBox.max.y - geometry.boundingBox.min.y,
+        geometry.boundingBox.max.z - geometry.boundingBox.min.z,
+      )
+    : 1;
+  // A hundred-thousandth of the piece: far below any real gap between stones,
+  // far above the float error along a shared seam.
+  const quantum = Math.max(span, 1e-6) * 1e-5;
+
+  const byPos = new Map<string, number>();
+  for (let v = 0; v < vertCount; v++) {
+    const key = `${Math.round(position.getX(v) / quantum)},${Math.round(
+      position.getY(v) / quantum,
+    )},${Math.round(position.getZ(v) / quantum)}`;
+    const seen = byPos.get(key);
+    if (seen === undefined) byPos.set(key, v);
+    else union(v, seen);
+  }
+
+  const triCount = index.count / 3;
+  for (let t = 0; t < triCount; t++) {
+    union(index.getX(t * 3), index.getX(t * 3 + 1));
+    union(index.getX(t * 3 + 1), index.getX(t * 3 + 2));
+  }
+
+  // First-seen order, so the numbering is stable across loads and a saved
+  // assignment lands on the same stone next time.
+  const order = new Map<number, number>();
+  const triRoot = new Int32Array(triCount);
+  for (let t = 0; t < triCount; t++) {
+    const root = find(index.getX(t * 3));
+    triRoot[t] = root;
+    if (!order.has(root)) order.set(root, order.size);
+  }
+
+  // One solid is not a split worth having.
+  if (order.size < 2) return null;
+
+  const counts = new Uint32Array(order.size);
+  for (let t = 0; t < triCount; t++) counts[order.get(triRoot[t])!]++;
+
+  const starts = new Uint32Array(order.size + 1);
+  for (let i = 0; i < order.size; i++) starts[i + 1] = starts[i] + counts[i] * 3;
+
+  const cursor = starts.slice(0, order.size);
+  const sorted = new Uint32Array(index.count);
+  for (let t = 0; t < triCount; t++) {
+    const slot = order.get(triRoot[t])!;
+    const to = cursor[slot];
+    sorted[to] = index.getX(t * 3);
+    sorted[to + 1] = index.getX(t * 3 + 1);
+    sorted[to + 2] = index.getX(t * 3 + 2);
+    cursor[slot] = to + 3;
+  }
+  geometry.setIndex(Array.from(sorted));
+
+  // A plain array, because `Object3D.clone` round-trips userData through JSON
+  // and a typed array comes back as an object with no length.
+  return Array.from(starts);
+}
+
+/**
+ * The solids of a geometry, computed at most once for it.
+ *
+ * `splitSolids` is linear but not cheap — the shipped model's metal is 972k
+ * vertices and takes about two seconds. DressedScene re-clones the scene
+ * whenever the finish or the lighting changes, and a clone's userData is a copy,
+ * so caching the result per mount means paying that two seconds again on every
+ * swatch click.
+ *
+ * So the cache lives on the SOURCE geometry, which is the one thing that
+ * outlives the clones: it is held by the useGLTF cache for as long as the file
+ * is loaded. That means reordering the source's index buffer in place rather
+ * than a clone's. Safe, and deliberately so — triangle order in a render mesh
+ * carries no meaning, and every mount now reads the same order with the same
+ * offsets describing it, which is the property that was missing when each mount
+ * reordered a private copy.
+ *
+ * A geometry that declines the split is remembered too, or a mesh over the cap
+ * would pay the rejected attempt on every re-clone.
+ */
+export function ensureSolids(source: THREE.BufferGeometry): number[] | null {
+  const cached = source.userData.solids as number[] | undefined;
+  if (cached) return cached;
+  if (source.userData.solidsChecked) return null;
+  source.userData.solidsChecked = true;
+  const solids = splitSolids(source);
+  if (solids) source.userData.solids = solids;
+  return solids;
+}
