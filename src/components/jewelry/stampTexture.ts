@@ -16,6 +16,19 @@ import { STAMP_MAP_SIZE, fontCss, stampText, type Stamp } from "./stamps";
  */
 
 export interface StampMaps {
+  /**
+   * How much of the map's height the lettering actually fills, 0..1.
+   *
+   * The map is square and the text is fitted inside it, so an eight-character
+   * word is width-limited and its capitals end up occupying an eighth of the
+   * height. Sizing the decal to the MAP then gives a cap height eight times
+   * smaller than the panel promised — which is why "@bkpatel" at 1.2mm rendered
+   * as an illegible speck while "750" looked right.
+   *
+   * The caller divides by this to get a decal whose LETTERING measures what was
+   * asked for. The empty margin around it is flat normal, so it costs nothing.
+   */
+  capFraction: number;
   normalMap: THREE.DataTexture;
   /**
    * Struck metal is rougher than the polish around it — the punch breaks the
@@ -29,7 +42,10 @@ export interface StampMaps {
 const SOFTEN = 3;
 
 /** Rasterises the mark into a 0..1 height field, or null off the main thread. */
-async function heightField(stamp: Stamp, font: string): Promise<Float32Array | null> {
+async function heightField(
+  stamp: Stamp,
+  font: string,
+): Promise<{ data: Float32Array; capFraction: number } | null> {
   if (typeof document === "undefined") return null;
 
   const size = STAMP_MAP_SIZE;
@@ -46,6 +62,9 @@ async function heightField(stamp: Stamp, font: string): Promise<Float32Array | n
 
   const inset = size * 0.12;
   const box = size - inset * 2;
+  // What share of the map the ink ends up filling vertically. Set by whichever
+  // branch runs below; the default is the box itself, for a mark that fills it.
+  let capFraction = box / size;
 
   if (stamp.source === "logo") {
     const image = await loadImage(stamp.value);
@@ -58,6 +77,7 @@ async function heightField(stamp: Stamp, font: string): Promise<Float32Array | n
     const w = image.width * scale;
     const h = image.height * scale;
     ctx.drawImage(image, (size - w) / 2, (size - h) / 2, w, h);
+    capFraction = h / size;
   } else {
     const text = stampText(stamp);
     if (!text) return null;
@@ -74,7 +94,13 @@ async function heightField(stamp: Stamp, font: string): Promise<Float32Array | n
     const textW = m.width;
     const textH =
       m.actualBoundingBoxAscent + m.actualBoundingBoxDescent || Number.parseInt(ctx.font, 10);
+    /*
+     * Still fitted by the smaller ratio, so a long word cannot overflow the
+     * map. What changes is that the resulting cap height is REPORTED rather
+     * than assumed, so the decal can be cut to suit it.
+     */
     const fit = Math.min(box / textW, box / textH);
+    capFraction = (textH * fit) / size;
     ctx.setTransform(fit, 0, 0, fit, size / 2, size / 2);
     // Centred on the glyph's own ink, not on its line box — a font's ascent
     // and descent are generous and would sit the mark high in the decal.
@@ -87,7 +113,7 @@ async function heightField(stamp: Stamp, font: string): Promise<Float32Array | n
   // Red alone: the mark was drawn white on black, so all three agree.
   for (let i = 0; i < raw.length; i++) raw[i] = pixels[i * 4] / 255;
 
-  return soften(raw, size);
+  return { data: soften(raw, size), capFraction };
 }
 
 /**
@@ -181,7 +207,7 @@ export function stampMaps(stamp: Stamp, font: string): Promise<StampMaps | null>
     const rough = new Uint8Array(size * size * 4);
 
     const at = (x: number, y: number) =>
-      height[Math.min(size - 1, Math.max(0, y)) * size + Math.min(size - 1, Math.max(0, x))];
+      height.data[Math.min(size - 1, Math.max(0, y)) * size + Math.min(size - 1, Math.max(0, x))];
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -209,7 +235,11 @@ export function stampMaps(stamp: Stamp, font: string): Promise<StampMaps | null>
       }
     }
 
-    return { normalMap: toTexture(normal, size), roughnessMap: toTexture(rough, size) };
+    return {
+      capFraction: height.capFraction,
+      normalMap: toTexture(normal, size),
+      roughnessMap: toTexture(rough, size),
+    };
   });
 
   cache.set(key, built);

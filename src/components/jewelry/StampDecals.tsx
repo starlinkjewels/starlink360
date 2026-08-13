@@ -163,7 +163,18 @@ export function StampDecals({
          * where the surface curves; anything it wrongly catches is on the far
          * side of the metal and hidden.
          */
-        const extent = new THREE.Vector3(mm * 2.2, mm * 2.2, mm * 4);
+        /*
+         * Scaled so the LETTERING measures `size`, not the map.
+         *
+         * The map is square and the text is fitted inside it, so a long word is
+         * width-limited and its capitals fill only a fraction of the height.
+         * Cutting the decal to the map gave "@bkpatel" a cap height an eighth
+         * of what the panel promised — an illegible speck — while "750" looked
+         * correct, because a short mark fills the box.
+         */
+        const cap = Math.max(maps.capFraction, 0.02);
+        const across = (mm / cap) * 1.05;
+        const extent = new THREE.Vector3(across, across, mm * 4);
 
         /*
          * Projected against only the triangles the mark can reach. The full
