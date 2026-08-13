@@ -441,12 +441,7 @@ export function DressedScene({
         turntable and appears in every still and every frame of video — which is
         the whole point of it being on the model rather than on the photograph.
       */}
-      <StampDecals
-        root={object}
-        stamps={stamps ?? EMPTY_STAMPS}
-        font={stampFont}
-        selectedId={selectedStampId}
-      />
+      <StampDecals root={object} stamps={stamps ?? EMPTY_STAMPS} font={stampFont} />
     </>
   );
 }

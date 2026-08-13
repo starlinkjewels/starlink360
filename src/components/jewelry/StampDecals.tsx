@@ -23,18 +23,76 @@ import { stampMaps } from "./stampTexture";
 /** Where the decal sits relative to the surface it copies. */
 const POLYGON_OFFSET = -4;
 
+/**
+ * The triangles near the strike point, as a mesh of their own.
+ *
+ * `DecalGeometry` clips the projector against EVERY triangle of the target. On
+ * the shipped model the metal is 1.5 million of them and a hallmark covers a
+ * few dozen, so striking one measured 5.9 SECONDS — on the main thread, with no
+ * GPU, and paid again for every stamp each time the effect re-runs. Dragging
+ * the size slider would have re-struck every mark on the piece and locked the
+ * tab for minutes.
+ *
+ * A bounding-box cull first turns that into a few milliseconds. Correctness is
+ * unaffected: the projector cannot reach a triangle outside its own extent, so
+ * every triangle dropped here would have been clipped away regardless.
+ *
+ * Returns null when the cull finds nothing, which means the point is not on
+ * this mesh and the caller should skip rather than project against emptiness.
+ */
+function nearbyGeometry(
+  target: THREE.Mesh,
+  centre: THREE.Vector3,
+  reach: number,
+): THREE.BufferGeometry | null {
+  const geo = target.geometry;
+  const pos = geo.getAttribute("position");
+  if (!pos) return null;
+  const index = geo.getIndex();
+  const triangles = index ? index.count / 3 : pos.count / 3;
+
+  // In the target's own space, because that is the space its vertices are in.
+  const local = target.worldToLocal(centre.clone());
+  const box = new THREE.Box3(local.clone().subScalar(reach), local.clone().addScalar(reach));
+
+  const kept: number[] = [];
+  const v = new THREE.Vector3();
+  for (let t = 0; t < triangles; t++) {
+    for (let c = 0; c < 3; c++) {
+      const vi = index ? index.getX(t * 3 + c) : t * 3 + c;
+      v.fromBufferAttribute(pos, vi);
+      // Any vertex inside the box keeps the whole triangle: a triangle
+      // straddling the edge still contributes to the mark.
+      if (box.containsPoint(v)) {
+        kept.push(index ? index.getX(t * 3) : t * 3);
+        kept.push(index ? index.getX(t * 3 + 1) : t * 3 + 1);
+        kept.push(index ? index.getX(t * 3 + 2) : t * 3 + 2);
+        break;
+      }
+    }
+  }
+  if (!kept.length) return null;
+
+  // Shares the position buffer — only the short index is new.
+  const near = new THREE.BufferGeometry();
+  near.setAttribute("position", pos);
+  const normal = geo.getAttribute("normal");
+  if (normal) near.setAttribute("normal", normal);
+  const uv = geo.getAttribute("uv");
+  if (uv) near.setAttribute("uv", uv);
+  near.setIndex(kept);
+  return near;
+}
+
 export function StampDecals({
   root,
   stamps,
   font,
-  selectedId,
 }: {
   /** The dressed scene, whose parts the stamps are pinned to. */
   root: THREE.Object3D;
   stamps: Stamp[];
   font: string;
-  /** Lit while its row is focused in the panel, so it can be found on a pave. */
-  selectedId?: string | null;
 }) {
   const attached = useRef<{ parent: THREE.Object3D; mesh: THREE.Mesh }[]>([]);
 
@@ -78,7 +136,15 @@ export function StampDecals({
          */
         const orient = new THREE.Object3D();
         orient.position.copy(position);
-        orient.lookAt(position.clone().add(normal));
+        /*
+         * Looking INTO the surface, along the inward normal.
+         *
+         * Pointing it along the OUTWARD normal put the projector behind the
+         * mark looking out, so the texture was seen from its own back and every
+         * hallmark came out mirrored — "@bkpatel" read right to left. A punch
+         * strikes downward into metal; the projector has to face the same way.
+         */
+        orient.lookAt(position.clone().sub(normal));
         orient.rotateZ(THREE.MathUtils.degToRad(stamp.rotation));
 
         /*
@@ -99,9 +165,20 @@ export function StampDecals({
          */
         const extent = new THREE.Vector3(mm * 2.2, mm * 2.2, mm * 4);
 
+        /*
+         * Projected against only the triangles the mark can reach. The full
+         * mesh took nearly six seconds per stamp on the shipped model; this is
+         * the same result in milliseconds.
+         */
+        const near = nearbyGeometry(target, position, extent.length());
+        if (!near) continue;
+        const proxy = new THREE.Mesh(near);
+        proxy.applyMatrix4(target.matrixWorld);
+        proxy.updateWorldMatrix(false, false);
+
         let geometry: THREE.BufferGeometry;
         try {
-          geometry = new DecalGeometry(target, position, orient.rotation, extent);
+          geometry = new DecalGeometry(proxy, position, orient.rotation, extent);
         } catch {
           // A degenerate projection — a stamp placed on a sliver of geometry —
           // must not take the whole scene down with it.
@@ -147,12 +224,16 @@ export function StampDecals({
         material.transparent = true;
         material.depthWrite = false;
 
-        if (stamp.id === selectedId) {
-          // Enough to find it on a busy piece, not so much that it reads as the
-          // finished look. Dropped the moment the row loses focus.
-          material.emissive = new THREE.Color("#22d3ee");
-          material.emissiveIntensity = 0.35;
-        }
+        /*
+         * No highlight for the selected mark.
+         *
+         * A cyan emissive was meant to help find one on a busy piece. It tints
+         * the WHOLE projected patch rather than outlining the lettering, so a
+         * selected hallmark rendered as a large blue sticker stuck over the
+         * metal — worse than not finding it, because it looks like a fault in
+         * the render. Finding a mark is what the list and its coordinates are
+         * for.
+         */
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.stampId = stamp.id;
@@ -183,7 +264,12 @@ export function StampDecals({
       }
       attached.current = [];
     };
-  }, [root, stamps, font, selectedId]);
+    /*
+     * Deliberately NOT keyed on which mark is selected. Selecting one changes
+     * nothing about how it renders, and re-running here would reproject every
+     * stamp on the piece for a panel highlight.
+     */
+  }, [root, stamps, font]);
 
   return null;
 }

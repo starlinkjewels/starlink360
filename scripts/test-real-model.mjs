@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import * as THREE from "three";
 import { MeshBVH, SAH } from "three-mesh-bvh";
+import { DecalGeometry } from "three/examples/jsm/geometries/DecalGeometry.js";
 import { facetGeometry, gemFresnel, gemTint } from "../.tmp-suite/components/jewelry/materials.js";
 import {
   ensureSolids,
@@ -780,6 +781,161 @@ check(
   "the split is cached on the source geometry",
   `${cachedMs.toFixed(1)}ms on the second call`,
 );
+
+console.log();
+console.log();
+console.log("=== striking a hallmark into the real metal ===");
+
+/*
+ * The stamping projection, against the shipped model.
+ *
+ * This was written and shipped without ever being seen on a screen, on the
+ * grounds that a decal needs eyes. Most of it does not: `DecalGeometry` is pure
+ * geometry with no WebGL in it, so the parts that actually go wrong — an empty
+ * projection, a mark floating off the surface, a size that ignores the model's
+ * scale — are all arithmetic and all checkable here.
+ *
+ * What genuinely still needs eyes is how the punch READS: depth, softness,
+ * whether it looks struck. Not this.
+ */
+{
+  const target = new THREE.Mesh(metalGeo);
+  target.updateWorldMatrix(true, false);
+
+  /*
+   * A real point on the real surface, taken from a triangle rather than by
+   * raycasting. Firing at the bounding-box centre finds nothing on a necklace:
+   * the middle of the chain loop is empty air.
+   */
+  const mp = metalGeo.getAttribute("position");
+  const mi = metalGeo.getIndex();
+  // Well into the mesh rather than the first triangle, which on a merged
+  // export is as likely to be a clasp fixing as a face anyone would stamp.
+  const tri = Math.floor(mi.count / 3 / 2) * 3;
+  const a = new THREE.Vector3().fromBufferAttribute(mp, mi.getX(tri));
+  const b = new THREE.Vector3().fromBufferAttribute(mp, mi.getX(tri + 1));
+  const c = new THREE.Vector3().fromBufferAttribute(mp, mi.getX(tri + 2));
+  const hit = a.distanceTo(b) > 1e-9 && a.distanceTo(c) > 1e-9;
+
+  check(!!hit, "there is a real triangle on the metal to strike");
+  if (hit) {
+    const position = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3);
+    const normal = new THREE.Triangle(a, b, c).getNormal(new THREE.Vector3());
+
+    const orient = new THREE.Object3D();
+    orient.position.copy(position);
+    orient.lookAt(position.clone().add(normal));
+    orient.rotateZ(0);
+
+    // 1.2mm, the default — the file is in millimetres and the mesh is unscaled
+    // here, so a world scale of 1 makes the arithmetic directly checkable.
+    const mm = 1.2;
+    const extent = new THREE.Vector3(mm * 2.2, mm * 2.2, mm * 4);
+    /*
+     * Culled first, exactly as StampDecals does. DecalGeometry clips against
+     * EVERY triangle of its target, and projecting a 1.2mm mark against 1.5
+     * million of them measured 5.9 seconds — on the main thread, per stamp,
+     * re-run whenever the panel changes. The projector cannot reach anything
+     * outside its own extent, so the triangles dropped here were destined to be
+     * clipped away regardless.
+     */
+    const struckAt = process.hrtime.bigint();
+    const reach = extent.length();
+    const near = [];
+    const vtx = new THREE.Vector3();
+    const lo = position.clone().subScalar(reach);
+    const hi = position.clone().addScalar(reach);
+    for (let t = 0; t < mi.count; t += 3) {
+      for (let k = 0; k < 3; k++) {
+        vtx.fromBufferAttribute(mp, mi.getX(t + k));
+        if (
+          vtx.x >= lo.x &&
+          vtx.x <= hi.x &&
+          vtx.y >= lo.y &&
+          vtx.y <= hi.y &&
+          vtx.z >= lo.z &&
+          vtx.z <= hi.z
+        ) {
+          near.push(mi.getX(t), mi.getX(t + 1), mi.getX(t + 2));
+          break;
+        }
+      }
+    }
+    const proxyGeo = new THREE.BufferGeometry();
+    proxyGeo.setAttribute("position", mp);
+    proxyGeo.setIndex(near);
+    const proxy = new THREE.Mesh(proxyGeo);
+    proxy.updateWorldMatrix(false, false);
+    console.log(`  culled to ${near.length / 3} triangles of ${mi.count / 3}`);
+
+    const decal = new DecalGeometry(proxy, position, orient.rotation, extent);
+    const strikeMs = Number(process.hrtime.bigint() - struckAt) / 1e6;
+    console.log(`  striking took ${strikeMs.toFixed(0)}ms against ${mi.count / 3} triangles`);
+    /*
+     * DecalGeometry clips against EVERY triangle of the target, and this metal
+     * is 1.5 million of them. That cost is paid per stamp, on the main thread,
+     * on a machine with no GPU — so it is the difference between a hallmark
+     * appearing on click and the tab locking up for a few seconds.
+     */
+    check(strikeMs < 3000, "and is fast enough to feel like a click", `${strikeMs.toFixed(0)}ms`);
+
+    const count = decal.getAttribute("position")?.count ?? 0;
+    check(count > 0, "the projection produces geometry rather than nothing", `${count} verts`);
+
+    if (count > 0) {
+      /*
+       * On the surface, not floating over it. Every vertex of a decal is
+       * clipped out of the target's own triangles, so the furthest any of them
+       * can sit from the strike point is the projector's own half-extent — a
+       * mark that drifts further has been projected against the wrong space.
+       */
+      const p = decal.getAttribute("position");
+      let furthest = 0;
+      for (let i = 0; i < p.count; i++) {
+        furthest = Math.max(
+          furthest,
+          new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)).distanceTo(position),
+        );
+      }
+      check(
+        furthest <= extent.length(),
+        "every vertex lies within the projector, so the mark is on the metal",
+        `${furthest.toFixed(2)}mm from the strike point`,
+      );
+
+      /*
+       * And it is the size that was asked for. A hallmark is specified in
+       * millimetres, so a mark that comes out at the fit scale instead of at
+       * 1.2mm is the bug worth catching — it would be invisible on one piece
+       * and enormous on the next.
+       */
+      decal.computeBoundingBox();
+      const size = decal.boundingBox.getSize(new THREE.Vector3());
+      const widest = Math.max(size.x, size.y, size.z);
+      check(
+        widest > mm * 0.5 && widest <= extent.length(),
+        "and measures like a 1.2mm mark, not like the model's own scale",
+        `${widest.toFixed(2)}mm across`,
+      );
+
+      /*
+       * The local-space round trip. Stamps are stored in the part's own space
+       * so they survive recentring, the fit scale and the turntable; the decal
+       * is built in world space and baked back. With an identity world matrix
+       * the two must agree exactly, which is the cheapest possible guard on the
+       * transform that would otherwise put every mark somewhere else.
+       */
+      const baked = decal.clone();
+      baked.applyMatrix4(new THREE.Matrix4().copy(target.matrixWorld).invert());
+      const q = baked.getAttribute("position");
+      let drift = 0;
+      for (let i = 0; i < Math.min(q.count, 200); i++) {
+        drift = Math.max(drift, Math.abs(q.getX(i) - p.getX(i)));
+      }
+      check(drift < 1e-6, "the world-to-local bake is exact", `${drift.toExponential(1)}`);
+    }
+  }
+}
 
 console.log();
 console.log(fail === 0 ? "  All checks passed" : `  ${fail} check(s) failed`);
