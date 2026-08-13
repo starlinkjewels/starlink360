@@ -247,6 +247,26 @@ export function StampDecals({
          * for.
          */
 
+        /*
+         * Dev only: which half failed.
+         *
+         * A mark that does not appear has two completely different causes with
+         * opposite fixes — the projection produced nothing, or it produced
+         * geometry that is not being drawn. Guessing between them has cost more
+         * time than any other single thing in this feature.
+         */
+        if (import.meta.env.DEV) {
+          const wp = new THREE.Vector3();
+          target.getWorldPosition(wp);
+          console.log(
+            `[stamp] ${stamp.id} on ${stamp.partId}: ` +
+              `${geometry.getAttribute("position").count} verts, ` +
+              `size=${stamp.size}mm cap=${maps.capFraction.toFixed(2)} ` +
+              `extent=${across.toFixed(2)} worldScale=${worldScale.x.toFixed(3)} ` +
+              `normalScale=${strength.toFixed(2)} culled=${near.getIndex()?.count ?? 0}`,
+          );
+        }
+
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.stampId = stamp.id;
         // Drawn after the metal, before the selection tint.
