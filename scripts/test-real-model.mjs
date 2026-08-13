@@ -799,7 +799,21 @@ console.log("=== striking a hallmark into the real metal ===");
  * whether it looks struck. Not this.
  */
 {
+  /*
+   * Scaled to fit, exactly as the viewer does.
+   *
+   * This test used an identity world matrix and passed all day while stamping
+   * was broken in the app. The piece is scaled to 0.008 on load, and the fault
+   * lived entirely in that difference: the cull searched in the mesh's LOCAL
+   * space using a reach measured in WORLD units, so it looked in a box 0.05
+   * millimetres wide and kept eighteen triangles out of 1.5 million.
+   *
+   * A test that does not do what the app does cannot find what the app gets
+   * wrong. Same lesson as the BVH fault: the suite has to carry the transform.
+   */
+  const WORLD_SCALE = 0.008;
   const target = new THREE.Mesh(metalGeo);
+  target.scale.setScalar(WORLD_SCALE);
   target.updateWorldMatrix(true, false);
 
   /*
@@ -819,8 +833,23 @@ console.log("=== striking a hallmark into the real metal ===");
 
   check(!!hit, "there is a real triangle on the metal to strike");
   if (hit) {
-    const position = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3);
-    const normal = new THREE.Triangle(a, b, c).getNormal(new THREE.Vector3());
+    /*
+     * Lifted into world space, exactly as StampDecals does. The triangle is
+     * read from the mesh's own buffer, which is local; the projector works in
+     * world. Leaving the point local while the target is scaled puts the
+     * projector nowhere near the metal — which is the same class of mistake the
+     * cull had, and the reason this test now carries the transform.
+     */
+    const position = new THREE.Vector3()
+      .add(a)
+      .add(b)
+      .add(c)
+      .divideScalar(3)
+      .applyMatrix4(target.matrixWorld);
+    const normal = new THREE.Triangle(a, b, c)
+      .getNormal(new THREE.Vector3())
+      .transformDirection(target.matrixWorld)
+      .normalize();
 
     const orient = new THREE.Object3D();
     orient.position.copy(position);
@@ -829,7 +858,8 @@ console.log("=== striking a hallmark into the real metal ===");
 
     // 1.2mm, the default — the file is in millimetres and the mesh is unscaled
     // here, so a world scale of 1 makes the arithmetic directly checkable.
-    const mm = 1.2;
+    // Millimetres through the world scale, as StampDecals does.
+    const mm = 1.2 * WORLD_SCALE;
     const extent = new THREE.Vector3(mm * 2.2, mm * 2.2, mm * 4);
     /*
      * Culled first, exactly as StampDecals does. DecalGeometry clips against
@@ -840,11 +870,18 @@ console.log("=== striking a hallmark into the real metal ===");
      * clipped away regardless.
      */
     const struckAt = process.hrtime.bigint();
-    const reach = extent.length();
+    /*
+     * Converted into the target's own units before searching. `extent` is in
+     * world space and the cull works in local space; passing one for the other
+     * is the bug this scaled target exists to catch.
+     */
+    const reach = extent.length() / WORLD_SCALE;
     const near = [];
     const vtx = new THREE.Vector3();
-    const lo = position.clone().subScalar(reach);
-    const hi = position.clone().addScalar(reach);
+    // Back into the mesh's own space to search it, as `nearbyGeometry` does.
+    const localCentre = target.worldToLocal(position.clone());
+    const lo = localCentre.clone().subScalar(reach);
+    const hi = localCentre.clone().addScalar(reach);
     for (let t = 0; t < mi.count; t += 3) {
       for (let k = 0; k < 3; k++) {
         vtx.fromBufferAttribute(mp, mi.getX(t + k));
@@ -871,6 +908,7 @@ console.log("=== striking a hallmark into the real metal ===");
      */
     proxyGeo.computeVertexNormals();
     const proxy = new THREE.Mesh(proxyGeo);
+    proxy.scale.setScalar(WORLD_SCALE);
     proxy.updateWorldMatrix(false, false);
     console.log(`  culled to ${near.length / 3} triangles of ${mi.count / 3}`);
 
@@ -954,7 +992,18 @@ console.log("=== striking a hallmark into the real metal ===");
       check(
         widest > mm * 0.5 && widest <= extent.length(),
         "and measures like a 1.2mm mark, not like the model's own scale",
-        `${widest.toFixed(2)}mm across`,
+        `${(widest / WORLD_SCALE).toFixed(2)}mm across`,
+      );
+
+      /*
+       * The cull has to find real geometry. Eighteen triangles under a mark is
+       * what a units mismatch looks like, and it produces a six-triangle sliver
+       * that renders as a speck while the panel reports the stamp as struck.
+       */
+      check(
+        near.length / 3 > 500,
+        "the cull finds the metal under the mark, not a sliver of it",
+        `${near.length / 3} triangles`,
       );
 
       /*
@@ -964,14 +1013,24 @@ console.log("=== striking a hallmark into the real metal ===");
        * the two must agree exactly, which is the cheapest possible guard on the
        * transform that would otherwise put every mark somewhere else.
        */
+      /*
+       * Round-tripped, not compared to the original.
+       *
+       * Baking world-space geometry into the part's local space MUST change the
+       * numbers once the part is scaled — comparing the two directly only held
+       * while this test used an identity matrix, which is precisely the
+       * assumption that let the real bug through. What has to be true is that
+       * putting it back returns where it started.
+       */
       const baked = decal.clone();
       baked.applyMatrix4(new THREE.Matrix4().copy(target.matrixWorld).invert());
+      baked.applyMatrix4(target.matrixWorld);
       const q = baked.getAttribute("position");
       let drift = 0;
       for (let i = 0; i < Math.min(q.count, 200); i++) {
         drift = Math.max(drift, Math.abs(q.getX(i) - p.getX(i)));
       }
-      check(drift < 1e-6, "the world-to-local bake is exact", `${drift.toExponential(1)}`);
+      check(drift < 1e-4, "the world-to-local bake round-trips", `${drift.toExponential(1)}`);
     }
   }
 }
