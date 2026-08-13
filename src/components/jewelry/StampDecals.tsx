@@ -137,14 +137,15 @@ export function StampDecals({
         const orient = new THREE.Object3D();
         orient.position.copy(position);
         /*
-         * Looking INTO the surface, along the inward normal.
+         * Along the OUTWARD normal, which is what DecalGeometry expects.
          *
-         * Pointing it along the OUTWARD normal put the projector behind the
-         * mark looking out, so the texture was seen from its own back and every
-         * hallmark came out mirrored — "@bkpatel" read right to left. A punch
-         * strikes downward into metal; the projector has to face the same way.
+         * Turning it inward to cure the mirrored lettering was the wrong fix:
+         * it flipped the decal's faces to point into the metal, so they were
+         * backface-culled and the mark vanished entirely while still appearing
+         * in the list. The mirroring is a property of the TEXTURE, and is
+         * corrected in the height field where it belongs.
          */
-        orient.lookAt(position.clone().sub(normal));
+        orient.lookAt(position.clone().add(normal));
         orient.rotateZ(THREE.MathUtils.degToRad(stamp.rotation));
 
         /*

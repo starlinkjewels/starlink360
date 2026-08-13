@@ -110,8 +110,23 @@ async function heightField(
 
   const pixels = ctx.getImageData(0, 0, size, size).data;
   const raw = new Float32Array(size * size);
-  // Red alone: the mark was drawn white on black, so all three agree.
-  for (let i = 0; i < raw.length; i++) raw[i] = pixels[i * 4] / 255;
+  /*
+   * Read back mirrored horizontally.
+   *
+   * A decal is projected onto the surface from outside and then viewed from
+   * that same side, which reverses it — every hallmark came out reading right
+   * to left. Turning the projector round instead flipped the decal's faces into
+   * the metal, where they were backface-culled and the mark disappeared
+   * altogether. Reversing the source is the fix that changes only what it
+   * should: the normals below are derived from this, so they stay consistent.
+   *
+   * Red alone: the mark was drawn white on black, so all three channels agree.
+   */
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      raw[y * size + x] = pixels[(y * size + (size - 1 - x)) * 4] / 255;
+    }
+  }
 
   return { data: soften(raw, size), capFraction };
 }

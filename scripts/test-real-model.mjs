@@ -864,6 +864,12 @@ console.log("=== striking a hallmark into the real metal ===");
     const proxyGeo = new THREE.BufferGeometry();
     proxyGeo.setAttribute("position", mp);
     proxyGeo.setIndex(near);
+    /*
+     * Normals, or DecalGeometry emits none and the facing check below silently
+     * passes over the very fault it exists to catch. The app's own cull carries
+     * the target's normals across; the decode here only reads positions.
+     */
+    proxyGeo.computeVertexNormals();
     const proxy = new THREE.Mesh(proxyGeo);
     proxy.updateWorldMatrix(false, false);
     console.log(`  culled to ${near.length / 3} triangles of ${mi.count / 3}`);
@@ -897,6 +903,39 @@ console.log("=== striking a hallmark into the real metal ===");
           new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)).distanceTo(position),
         );
       }
+      /*
+       * Facing OUT of the metal, not into it.
+       *
+       * Turning the projector round to cure mirrored lettering flipped every
+       * decal face inward, so they were backface-culled and the mark vanished
+       * — while still appearing in the panel's list as struck. Nothing else
+       * catches that: the geometry is produced, it is the right size and it is
+       * in the right place. It simply cannot be seen.
+       */
+      const dn = decal.getAttribute("normal");
+      check(!!dn, "the decal carries normals, so facing can be judged at all");
+      if (dn) {
+        /*
+         * A majority vote, not an average.
+         *
+         * Averaging the normals is meaningless here: a mark on a chain spans
+         * several links curving away in every direction, so the mean is near
+         * zero and its sign is noise. What matters is that MOST of the decal
+         * faces back toward the projector — and reversing the projector flips
+         * every one of them, so a majority still catches it cleanly.
+         */
+        let outward = 0;
+        for (let i = 0; i < dn.count; i++) {
+          if (new THREE.Vector3(dn.getX(i), dn.getY(i), dn.getZ(i)).dot(normal) > 0) outward++;
+        }
+        const share = outward / (dn.count || 1);
+        check(
+          share > 0.5,
+          "most of the mark faces out of the metal, so it can be seen",
+          `${(share * 100).toFixed(0)}% outward`,
+        );
+      }
+
       check(
         furthest <= extent.length(),
         "every vertex lies within the projector, so the mark is on the metal",
