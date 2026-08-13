@@ -5053,3 +5053,36 @@ input[type="radio"]:disabled {
   text-transform: uppercase;
   color: var(--color-muted-foreground);
 }
+
+/*
+ * The quieter twin of `btn-primary`, for the action that costs nothing.
+ *
+ * Preview and Download sit side by side and are the same decision at two
+ * confidence levels, so they share a shape — but only one of them commits you
+ * to minutes of encoding, and that is the one that should look like the answer.
+ */
+@utility btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 46px;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: all 0.18s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+    color: var(--color-foreground);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+  }
+}

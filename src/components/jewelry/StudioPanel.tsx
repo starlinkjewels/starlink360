@@ -1650,10 +1650,42 @@ export function StudioPanel({
           </div>
         </PanelGroup>
 
-        <button className="btn-primary mt-1" onClick={() => shootVideo()} disabled={disabled}>
-          <Download className="size-3.5" />
-          {format === "webm" ? "Download video (WebM)" : "Download video (MP4)"}
-        </button>
+        {/*
+         * Watch it before waiting for it.
+         *
+         * `poseAt` already drives both the viewport and the exporter, so what
+         * plays IS what downloads — but the play control lives on the stage and
+         * the download lives here, so nobody connected the two. Rendering a
+         * clip to find out what it looks like costs minutes; this costs the
+         * length of the clip.
+         *
+         * Preview sits beside Download rather than above it because they are
+         * the same decision at two confidence levels.
+         */}
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              // Nothing to preview without a move: the camera would sit still
+              // for six seconds and read as the button being broken.
+              if (!animation) onAnimation?.("turntable");
+              onAnimationPlaying?.(true);
+            }}
+            disabled={disabled}
+            title="Play the clip in the viewport"
+          >
+            <Play className="size-3.5" />
+            Preview
+          </button>
+          <button className="btn-primary" onClick={() => shootVideo()} disabled={disabled}>
+            <Download className="size-3.5" />
+            Download
+          </button>
+        </div>
+        <p className="field-hint mt-1">
+          Preview plays the exact clip in the viewport. Download writes it as{" "}
+          {format === "webm" ? "WebM" : "MP4"}.
+        </p>
 
         <p className="field-hint mt-2">
           {format === "png-sequence"
