@@ -222,7 +222,21 @@ export function StampDecals({
          * normal and the punch reads as raised — which is what a cast piece
          * carries from its mould.
          */
-        const strength = (stamp.depth / MAX_DEPTH) * 2;
+        /*
+         * Gain, not depth in millimetres.
+         *
+         * The height field is deliberately soft — two blur passes over a 512
+         * map, so a punch has a shoulder rather than a one-pixel cliff — which
+         * makes its gradients gentle by construction. A mark is also the SAME
+         * GOLD as the metal around it, lit the same way, on a near-mirror
+         * surface: the only thing distinguishing it is the perturbed normal.
+         *
+         * At the old factor of 2 a shallow 0.05mm punch came out at 0.4 and was
+         * invisible, while 0.12mm at 0.96 read fine. Six puts a shallow mark at
+         * 1.2 and keeps the deepest inside a range that still looks struck
+         * rather than melted.
+         */
+        const strength = (stamp.depth / MAX_DEPTH) * 6;
         material.normalScale = new THREE.Vector2(strength, strength);
         material.map = null;
         material.bumpMap = null;
