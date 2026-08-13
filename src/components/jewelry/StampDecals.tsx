@@ -182,7 +182,18 @@ export function StampDecals({
          * mesh took nearly six seconds per stamp on the shipped model; this is
          * the same result in milliseconds.
          */
-        const near = nearbyGeometry(target, position, extent.length());
+        /*
+         * The reach is converted into the target's OWN units first.
+         *
+         * `nearbyGeometry` searches in local space, and `extent` is in world
+         * space. The piece is scaled to fit — 0.008 on the shipped necklace —
+         * so passing a world reach of 0.05 searched a box 0.05 MILLIMETRES
+         * wide on a model measured in millimetres. It culled away the whole
+         * mark and left a six-triangle sliver: a speck on the metal, with the
+         * panel reporting the stamp as struck.
+         */
+        const reach = extent.length() / Math.max(worldScale.x, 1e-6);
+        const near = nearbyGeometry(target, position, reach);
         if (!near) continue;
         const proxy = new THREE.Mesh(near);
         proxy.applyMatrix4(target.matrixWorld);
@@ -276,7 +287,8 @@ export function StampDecals({
             `[stamp] ${stamp.id} on ${stamp.partId}: ` +
               `${geometry.getAttribute("position").count} verts, ` +
               `size=${stamp.size}mm cap=${maps.capFraction.toFixed(2)} ` +
-              `extent=${across.toFixed(2)} worldScale=${worldScale.x.toFixed(3)} ` +
+              `extent=${across.toFixed(3)} reach=${reach.toFixed(2)} ` +
+              `worldScale=${worldScale.x.toFixed(4)} ` +
               `normalScale=${strength.toFixed(2)} culled=${near.getIndex()?.count ?? 0}`,
           );
         }
