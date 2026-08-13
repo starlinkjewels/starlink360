@@ -168,5 +168,47 @@ check(
 check(b4k <= 120_000_000, "capped, so the file stays openable", `${(b4k / 1e6).toFixed(1)} Mbps`);
 check(bitrateFor(64, 64, 24) >= 8_000_000, "a tiny export still gets a floor, not a smear");
 
+/*
+ * The supersample budget.
+ *
+ * Exports render larger and shrink, which is the only thing that antialiases a
+ * ray-traced gem — MSAA samples triangle edges, and the sparkle is inside the
+ * triangles. But the factor is squared, and this runs on a software renderer
+ * when there is no GPU: a 4K still at 2x is 33 million pixels and takes
+ * minutes, during which someone assumes the download is broken and presses it
+ * again.
+ *
+ * Mirrors `safeFactor`. The rule worth holding is that the common sizes keep
+ * their full factor and only the largest is trimmed — a cap that quietly
+ * degraded every export would trade away the clarity fix to solve nothing.
+ */
+console.log("\n=== the supersample budget ===");
+{
+  const MAX_RENDER_PIXELS = 24_000_000;
+  const factor = (w, h, want, limit = 8192) => {
+    const longest = Math.max(w, h);
+    let f = longest * want <= limit ? want : limit / longest;
+    const px = w * h * f * f;
+    if (px > MAX_RENDER_PIXELS) f *= Math.sqrt(MAX_RENDER_PIXELS / px);
+    return Math.max(1, Math.floor(f * 100) / 100);
+  };
+
+  check(factor(1920, 1080, 2) === 2, "an HD still keeps the full 2x");
+  check(factor(2560, 1440, 2) === 2, "so does 2K");
+  check(factor(1920, 1080, 1.5) === 1.5, "and 1080p video keeps its 1.5x");
+
+  const uhd = factor(3840, 2160, 2);
+  check(uhd > 1.5 && uhd < 2, "4K is trimmed rather than dropped", `${uhd}x`);
+  check(
+    3840 * 2160 * uhd * uhd <= MAX_RENDER_PIXELS + 1,
+    "and lands inside the budget",
+    `${((3840 * 2160 * uhd * uhd) / 1e6).toFixed(1)}M pixels`,
+  );
+
+  // Below 1 would render SMALLER than the output — a downgrade dressed as a
+  // safeguard, and worse than not supersampling at all.
+  check(factor(7680, 4320, 2) >= 1, "an absurd request never renders below full size");
+}
+
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);
 process.exit(fail ? 1 : 0);

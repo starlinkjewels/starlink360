@@ -208,11 +208,39 @@ export const SUPERSAMPLE = { none: 1, good: 1.5, best: 2 } as const;
  * it silently produces a blank or truncated frame. Better to quietly drop to a
  * smaller factor than to hand back a broken download.
  */
+/**
+ * The most pixels worth rendering into for one frame.
+ *
+ * The texture limit is about what the driver will ALLOCATE. This is about what
+ * the machine will finish. A 4K still at 2x is 33 million pixels, and on a
+ * software renderer — which is what this runs on when there is no GPU — a
+ * gem-traced frame at that size is minutes, not seconds. Someone presses
+ * Download, nothing happens for long enough to assume it is broken, and they
+ * press it again.
+ *
+ * 24 million keeps 4K at roughly 1.7x, which is most of the benefit: the sharp
+ * gain from supersampling is between 1x and 1.5x, and beyond 2x it is barely
+ * distinguishable. HD and 2K are unaffected — both fit at the full 2x.
+ */
+const MAX_RENDER_PIXELS = 24_000_000;
+
 function safeFactor(gl: THREE.WebGLRenderer, width: number, height: number, want: number): number {
-  const limit = Math.min(gl.capabilities.maxTextureSize || 4096, 8192);
   const longest = Math.max(width, height);
-  if (longest * want <= limit) return want;
-  return Math.max(1, Math.floor((limit / longest) * 100) / 100);
+
+  // What the driver can allocate. Exceeding it does not throw — it silently
+  // returns a blank or truncated frame.
+  const limit = Math.min(gl.capabilities.maxTextureSize || 4096, 8192);
+  let factor = longest * want <= limit ? want : limit / longest;
+
+  // ...and what it can finish in a reasonable time.
+  const pixels = width * height * factor * factor;
+  if (pixels > MAX_RENDER_PIXELS) {
+    factor *= Math.sqrt(MAX_RENDER_PIXELS / pixels);
+  }
+
+  // Never below 1: rendering SMALLER than the output would be a downgrade
+  // dressed as a safeguard.
+  return Math.max(1, Math.floor(factor * 100) / 100);
 }
 
 /**
