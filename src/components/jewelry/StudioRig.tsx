@@ -314,6 +314,29 @@ export function StudioRig({
           : fitDistance(fit, settings, aspect);
         const dist = Math.max(rawDist * zoom, minDist);
 
+        /*
+         * Where the orbit STARTS, taken from the view rather than assumed.
+         *
+         * A view used to contribute only its centre and its distance: the
+         * camera was then placed at azimuth zero and the shot's own elevation,
+         * so every clip began square-on to the front at the same height no
+         * matter what was framed on screen. Someone would compose a
+         * three-quarter view, press download, and get a clip shot from
+         * somewhere else — which is what "the position is wrong" meant.
+         *
+         * With a view, its own angles win and the turn proceeds from there.
+         * Without one, the shot preset decides, as before.
+         */
+        const offset = view ? new THREE.Vector3(...view.position).sub(centre) : null;
+        const offsetLength = offset?.length() ?? 0;
+        const baseElevation =
+          offset && offsetLength > 1e-6
+            ? Math.asin(THREE.MathUtils.clamp(offset.y / offsetLength, -1, 1))
+            : elevation;
+        // atan2(x, z) rather than (z, x): the orbit below measures its angle
+        // from +Z, so this has to agree with it or the clip jumps on frame one.
+        const baseAzimuth = offset && offsetLength > 1e-6 ? Math.atan2(offset.x, offset.z) : 0;
+
         const scratch = document.createElement("canvas");
         scratch.width = width;
         scratch.height = height;
@@ -386,9 +409,10 @@ export function StudioRig({
               return scratch;
             }
 
-            const t = progress * Math.PI * 2 * turns;
+            // Begins where the framed view was, not square-on to the front.
+            const t = baseAzimuth + progress * Math.PI * 2 * turns;
             // Sine sweep returns to the start height, so the clip loops cleanly.
-            const el = elevation + Math.sin(progress * Math.PI * 2) * elevationSweep;
+            const el = baseElevation + Math.sin(progress * Math.PI * 2) * elevationSweep;
             const horizontal = Math.cos(el);
             camera.position.set(
               centre.x + Math.sin(t) * dist * horizontal,

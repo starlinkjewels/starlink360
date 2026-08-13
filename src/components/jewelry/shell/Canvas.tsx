@@ -1,4 +1,14 @@
-import { Contrast, Grid3x3, Lock, Maximize2, Unlock, RotateCcw, X } from "lucide-react";
+import {
+  Contrast,
+  Grid3x3,
+  Lock,
+  Maximize2,
+  Pause,
+  Play,
+  Unlock,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { TOOLS, type ToolMode } from "./tools";
 
 /*
@@ -157,6 +167,79 @@ export function SelectionHud({
         </button>
       </div>
       <p className="shud-help">Click a stone to select · ESC to clear</p>
+    </div>
+  );
+}
+
+/**
+ * The transport for a camera or object move, on the viewport.
+ *
+ * It used to live in the Animation panel. That panel is a scrolling list, so
+ * whichever end the bar was pinned to, reaching it meant scrolling there first
+ * — and pinning it to the foot of a scroller that carries its own bottom
+ * padding left a band of dead space beneath it that no arrangement of margins
+ * resolved.
+ *
+ * A transport belongs beside what it plays. The move happens in the viewport,
+ * so the control sits there: always in reach, never scrolled past, and the
+ * panel goes back to being a list of moves rather than a list with a player
+ * wedged into it.
+ *
+ * Hidden entirely when nothing is armed. A player with nothing to play is
+ * furniture.
+ */
+export function PlaybackBar({
+  playing,
+  onPlaying,
+  seconds,
+  onSeconds,
+  label,
+  onStop,
+}: {
+  playing: boolean;
+  onPlaying: (on: boolean) => void;
+  seconds: number;
+  onSeconds: (v: number) => void;
+  /** The armed move's name, or null when nothing is armed. */
+  label: string | null;
+  onStop: () => void;
+}) {
+  if (!label) return null;
+  return (
+    <div className="playbar" role="group" aria-label="Playback">
+      <button
+        className="transport-play"
+        onClick={() => onPlaying(!playing)}
+        aria-pressed={playing}
+        aria-label={playing ? "Pause" : "Play"}
+        title={playing ? "Pause" : "Play"}
+      >
+        {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+      </button>
+
+      {/* The move being played, so the bar says what it is doing. */}
+      <span className="playbar-name">{label}</span>
+
+      <input
+        className="transport-range"
+        type="range"
+        min={1}
+        max={30}
+        step={0.5}
+        value={seconds}
+        aria-label="Length in seconds"
+        onChange={(e) => onSeconds(Number(e.target.value))}
+      />
+      <span className="transport-time">{seconds.toFixed(1)}s</span>
+
+      <button
+        className="transport-btn"
+        onClick={onStop}
+        aria-label="Stop and clear the move"
+        title="Stop and clear the move"
+      >
+        <X className="size-3.5" />
+      </button>
     </div>
   );
 }

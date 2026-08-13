@@ -80,6 +80,25 @@ const elev = (e: number) => Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, e));
 /** The three-quarter view the viewer opens on, as a pose. */
 const HOME: CameraPose = { azimuth: 0.22, elevation: 0.18, distance: 1 };
 
+/**
+ * Ease that starts hard and settles softly, like a weighted camera head.
+ *
+ * `ease` is symmetric, which is right for a move that travels between two
+ * points. It is wrong for anything meant to feel driven — a whip round, a snap
+ * to a stop — where the energy belongs at the start and the end should glide
+ * in. Cubic decay is the classic shape for that.
+ */
+function settle(t: number): number {
+  const x = clamp01(t);
+  return 1 - Math.pow(1 - x, 3);
+}
+
+/** The reverse: creeps away, then accelerates. Used for a fall-away exit. */
+function gather(t: number): number {
+  const x = clamp01(t);
+  return x * x * x;
+}
+
 export const ANIMATIONS: AnimationPreset[] = [
   {
     id: "turntable",
@@ -194,6 +213,125 @@ export const ANIMATIONS: AnimationPreset[] = [
         distance: lerp(1.15, 0.85, e),
       };
     },
+  },
+
+  /* ── The showpieces ──────────────────────────────────────────────────────
+   *
+   * Everything above moves the camera from one sensible place to another. These
+   * are shot to be watched: each one has a moment in it. They are also the ones
+   * that survive being posted, because a phone feed rewards a clip that has
+   * changed noticeably by the second it is scrolled past.
+   */
+
+  {
+    id: "spiral",
+    label: "Orbit and close",
+    hint: "Circles the piece while drawing in — the whole thing, then the setting",
+    loops: false,
+    pose: (t) => {
+      const e = ease(t);
+      return {
+        /*
+         * A turn and a quarter rather than a clean revolution. Ending square-on
+         * to where it began reads as a loop that failed to close; three hundred
+         * and thirty degrees past the start reads as deliberate.
+         */
+        azimuth: HOME.azimuth + TAU * 1.25 * e,
+        // Lifts as it comes in, so the last frames look down into the setting
+        // rather than across it.
+        elevation: elev(lerp(0.08, 0.42, e)),
+        distance: lerp(1.15, 0.5, e),
+      };
+    },
+  },
+  {
+    id: "figure-eight",
+    label: "Figure eight",
+    hint: "Sweeps across and back through a slow S. Both flanks, one take",
+    loops: true,
+    pose: (t) => ({
+      /*
+       * A lemniscate: the azimuth swings once and the elevation swings twice.
+       * Two-to-one is what turns a circle into a crossing figure, and because
+       * both are whole sine cycles the pose at t=1 is exactly the pose at t=0.
+       */
+      azimuth: HOME.azimuth + Math.sin(TAU * t) * 0.85,
+      elevation: elev(HOME.elevation + Math.sin(TAU * 2 * t) * 0.3),
+      // Breathes in on the crossings, which is where the piece faces the lens.
+      distance: 0.92 - Math.cos(TAU * 2 * t) * 0.08,
+    }),
+  },
+  {
+    id: "whip",
+    label: "Whip and settle",
+    hint: "Snaps round fast and glides to a stop on the face. Sharp, modern",
+    loops: false,
+    pose: (t) => {
+      const s = settle(t);
+      return {
+        // Three quarters of a turn, most of it spent in the first third — the
+        // stones streak, then resolve. Cubic decay is what makes it land rather
+        // than merely arrive.
+        azimuth: lerp(HOME.azimuth - TAU * 0.75, HOME.azimuth, s),
+        elevation: elev(lerp(0.05, HOME.elevation, s)),
+        distance: lerp(1.05, 0.78, s),
+      };
+    },
+  },
+  {
+    id: "fall-away",
+    label: "Hold and fall away",
+    hint: "Sits on the detail, then pulls out to the whole piece. A closing shot",
+    loops: false,
+    pose: (t) => {
+      /*
+       * Gathers rather than eases: nothing happens for the first half, which is
+       * the point — the viewer reads the setting — and then it leaves. Easing
+       * would start drifting immediately and lose the hold.
+       */
+      const g = gather(t);
+      return {
+        azimuth: HOME.azimuth + g * 0.6,
+        elevation: elev(lerp(0.1, 0.38, g)),
+        distance: lerp(0.42, 1.2, g),
+      };
+    },
+  },
+  {
+    id: "catwalk",
+    label: "Rise and turn",
+    hint: "Comes up from below the girdle, turning onto the face. Full of drama",
+    loops: false,
+    pose: (t) => {
+      const e = ease(t);
+      return {
+        azimuth: lerp(HOME.azimuth - 1.1, HOME.azimuth + 0.35, e),
+        // Starts under the piece, which is the angle nobody shoots and exactly
+        // why it reads as expensive.
+        elevation: elev(lerp(MIN_ELEVATION, 0.5, e)),
+        distance: lerp(0.72, 0.95, e),
+      };
+    },
+  },
+  {
+    id: "sparkle",
+    label: "Sparkle pass",
+    hint: "A tight, quick arc across the stones so they fire one after another",
+    loops: true,
+    pose: (t) => ({
+      /*
+       * Short and fast, not a tour.
+       *
+       * A diamond flashes when the angle between the lens, the stone and the
+       * light crosses a narrow band, so what makes a pave come alive is
+       * traversing many of those angles quickly — not seeing every side of the
+       * piece slowly. A third of a turn at a shallow height crosses far more
+       * of them per second than a full revolution does.
+       */
+      azimuth: HOME.azimuth + Math.sin(TAU * t) * 0.55,
+      elevation: elev(HOME.elevation + Math.sin(TAU * t + Math.PI / 2) * 0.12),
+      distance: 0.62,
+    }),
   },
 ];
 
@@ -342,6 +480,23 @@ export function dampedSwing(t: number, amplitude: number, swings = 3, damping = 
   return amplitude * Math.exp(-damping * t) * Math.cos(TAU * swings * t);
 }
 
+/**
+ * Compresses a move into the first part of the clip, so the piece then RESTS.
+ *
+ * This is the difference between a physics demo and a film. Left alone, every
+ * arrival here filled its whole length — the piece was still bouncing on the
+ * last frame, so a viewer never once saw it sitting still, and a camera move
+ * running alongside meant everything on screen moved for the entire clip. That
+ * reads as busy and, oddly, as boring: nothing is ever resolved.
+ *
+ * Landing at just over half lets the piece arrive, settle, and then be looked
+ * at while the camera carries the rest. A jeweller filming on a bench does the
+ * same thing, for the same reason.
+ */
+function landing(t: number, landAt = 0.55): number {
+  return clamp01(clamp01(t) / landAt);
+}
+
 export const OBJECT_MOVES: ObjectMove[] = [
   {
     id: "none",
@@ -353,9 +508,18 @@ export const OBJECT_MOVES: ObjectMove[] = [
   {
     id: "drop",
     label: "Drop",
-    hint: "Falls, bounces and settles, the way it would onto a bench",
+    hint: "Falls a short way, settles, and is still. Restrained, not bouncy",
     loops: false,
-    pose: (t) => ({ ...AT_REST, lift: bounceHeight(clamp01(t), 1.6) }),
+    /*
+     * Half a radius, not one and a half.
+     *
+     * The fall used to start high enough to leave the frame and rebound like a
+     * rubber ball. A gold pendant dropped onto velvet does not do that: it
+     * falls a little, takes one soft bounce and stops. Low restitution is what
+     * makes it read as heavy, and weight is the whole impression a precious
+     * object has to give.
+     */
+    pose: (t) => ({ ...AT_REST, lift: bounceHeight(landing(t), 0.55, 0.18) }),
   },
   {
     id: "drop-spin",
@@ -363,13 +527,15 @@ export const OBJECT_MOVES: ObjectMove[] = [
     hint: "Falls turning, and settles square",
     loops: false,
     pose: (t) => {
-      const c = clamp01(t);
+      const c = landing(t);
       return {
-        lift: bounceHeight(c, 1.8),
+        lift: bounceHeight(c, 0.7, 0.18),
         // Rotation eases to a stop rather than cutting off, or the piece
-        // appears to be caught rather than to come to rest.
-        rotX: (1 - ease(c)) * 0.9,
-        rotY: (1 - ease(c)) * TAU * 0.75,
+        // appears to be caught rather than to come to rest. A third of a turn,
+        // not three quarters — enough to read as tumbling, little enough to
+        // arrive square without appearing to spin on landing.
+        rotX: (1 - ease(c)) * 0.45,
+        rotY: (1 - ease(c)) * TAU * 0.33,
         rotZ: 0,
       };
     },
@@ -380,13 +546,14 @@ export const OBJECT_MOVES: ObjectMove[] = [
     hint: "Swings as if just released, and comes to rest",
     loops: false,
     pose: (t) => {
-      const c = clamp01(t);
+      const c = landing(t, 0.7);
       return {
-        // A short fall onto the chain, then the swing takes over.
-        lift: bounceHeight(c, 0.35, 0.2),
+        // A short fall onto the chain, then the swing takes over. Given more of
+        // the clip than a drop, because a swing dying away IS the shot.
+        lift: bounceHeight(c, 0.18, 0.15),
         rotX: 0,
         rotY: 0,
-        rotZ: dampedSwing(c, 0.55),
+        rotZ: dampedSwing(c, 0.4),
       };
     },
   },
@@ -403,9 +570,112 @@ export const OBJECT_MOVES: ObjectMove[] = [
     hint: "Turns fast and slows to a stop, like a coin settling",
     loops: false,
     pose: (t) => {
+      const c = landing(t, 0.75);
+      // Exponential decay in RATE, so it slows without ever reversing, and it
+      // is stopped well before the clip is, so the piece can be looked at.
+      return { ...AT_REST, rotY: TAU * 1.5 * (1 - Math.exp(-4 * c)) };
+    },
+  },
+
+  /* ── The ones a jewellery film actually opens on ─────────────────────────
+   *
+   * Everything above is the piece arriving. These are the piece being
+   * PRESENTED: slower, deliberate, and shot to hold an eye rather than to get
+   * the object into frame. Each is still a pure function of t, so a phone and a
+   * desktop render frame 300 identically.
+   */
+
+  {
+    id: "present",
+    label: "Present",
+    hint: "Rises gently and turns a quarter, as if offered up. The opener",
+    loops: false,
+    pose: (t) => {
+      const e = ease(landing(t, 0.8));
+      return {
+        /*
+         * Lifted, and set back down. A full half-sine, so it returns to the
+         * bench exactly.
+         *
+         * This peaked at 0.85 of the arc before, which left the piece hanging
+         * in mid-air on the final frame — floating with nothing beneath it,
+         * which reads as the render having stalled rather than as a piece being
+         * presented.
+         */
+        lift: Math.sin(e * Math.PI) * 0.28,
+        rotX: 0,
+        rotY: e * TAU * 0.25,
+        rotZ: 0,
+      };
+    },
+  },
+  {
+    id: "turn-face",
+    label: "Turn to face",
+    hint: "Starts edge-on and turns its face to the camera, settling square",
+    loops: false,
+    pose: (t) => {
+      const c = landing(t, 0.7);
+      /*
+       * Overshoots by a few degrees and eases back — a damped arrival rather
+       * than a linear one. Stopping dead on the target is the single clearest
+       * tell that a move was computed rather than performed.
+       */
+      const swing = 1 - Math.exp(-4 * c) * Math.cos(c * 7);
+      return { ...AT_REST, rotY: -Math.PI * 0.5 * (1 - swing) };
+    },
+  },
+  {
+    id: "breathe",
+    label: "Breathe",
+    hint: "Hangs and drifts, barely. A loop that never distracts",
+    loops: true,
+    pose: (t) => ({
+      /*
+       * Deliberately tiny. This is the move for a page that leaves the viewer
+       * running behind other content — enough life that the piece does not look
+       * like a photograph, little enough that nobody watches it instead of
+       * reading. Lift runs at twice the swing so the two never quite repeat
+       * together, which is what stops it looking mechanical.
+       */
+      lift: 0.04 + Math.sin(TAU * 2 * t) * 0.03,
+      rotX: 0,
+      rotY: Math.sin(TAU * t) * 0.06,
+      rotZ: Math.sin(TAU * t + Math.PI / 3) * 0.045,
+    }),
+  },
+  {
+    id: "flip",
+    label: "Show the back",
+    hint: "Turns right over to the reverse and back again. For an engraved piece",
+    loops: true,
+    pose: (t) => {
+      /*
+       * A full turn out and back, with a hold at each end.
+       *
+       * The pauses are the point: a continuous rotation never lets anyone READ
+       * the back, which is the only reason to turn a piece over. Eased on both
+       * halves and symmetric about the midpoint, so it closes exactly.
+       */
       const c = clamp01(t);
-      // Exponential decay in RATE, so it slows without ever reversing.
-      return { ...AT_REST, rotY: TAU * 2 * (1 - Math.exp(-3 * c)) };
+      const half = c < 0.5 ? ease(c * 2) : ease((1 - c) * 2);
+      return { ...AT_REST, lift: half * 0.12, rotY: half * Math.PI };
+    },
+  },
+  {
+    id: "settle-tilt",
+    label: "Tilt and rest",
+    hint: "Leans back to catch the light, then eases level",
+    loops: false,
+    pose: (t) => {
+      const c = landing(t, 0.8);
+      /*
+       * Tilting the face toward the key light is how a bench jeweller shows a
+       * stone: the fire only appears across a narrow band of angles, and this
+       * crosses it slowly rather than settling outside it.
+       */
+      const arc = Math.sin(ease(c) * Math.PI);
+      return { lift: arc * 0.08, rotX: -arc * 0.38, rotY: 0, rotZ: arc * 0.1 };
     },
   },
 ];

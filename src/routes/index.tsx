@@ -4,7 +4,12 @@ import { finishById, finishes, type Finish } from "@/data/finishes";
 import { products, type Product } from "@/data/products";
 import { IconRail, SectionPanel, TopBar } from "@/components/jewelry/shell/Shell";
 import { DEFAULT_SECTION } from "@/components/jewelry/shell/sections";
-import { CanvasToolbar, SelectionHud, ViewportActions } from "@/components/jewelry/shell/Canvas";
+import {
+  CanvasToolbar,
+  PlaybackBar,
+  SelectionHud,
+  ViewportActions,
+} from "@/components/jewelry/shell/Canvas";
 import { DEFAULT_TOOL, type ToolMode } from "@/components/jewelry/shell/tools";
 import { useTheme } from "@/hooks/useTheme";
 import { StudioPanel } from "@/components/jewelry/StudioPanel";
@@ -465,16 +470,24 @@ function Index() {
     setMounted(true);
   }, []);
 
-  // Close upload popover on outside click
+  // Dismissed by clicking away from the card, or by Escape — which anything
+  // covering the screen has to offer, or the only way out is a lucky guess.
   useEffect(() => {
     if (!showUpload) return;
-    const handler = (e: MouseEvent) => {
+    const away = (e: MouseEvent) => {
       if (uploadRef.current && !uploadRef.current.contains(e.target as Node)) {
         setShowUpload(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowUpload(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
   }, [showUpload]);
 
   const onLoadedChange = useCallback((v: boolean) => setLoaded(v), []);
@@ -739,8 +752,14 @@ function Index() {
           onPointerDown={() => setShowHint(false)}
         >
           {canUpload && showUpload && (
-            <div ref={uploadRef} className="upload-float">
-              <div className="upload-popover">
+            /*
+             * The ref is on the CARD, not on the backdrop. The backdrop now
+             * covers the whole screen, so an outside-click test anchored to it
+             * would consider every click "inside" and the dialog could never be
+             * dismissed by clicking away from it.
+             */
+            <div className="upload-float" role="dialog" aria-modal="true" aria-label="Load a model">
+              <div ref={uploadRef} className="upload-popover">
                 <UploadPiece
                   onLoaded={handleUploaded}
                   onStatus={setUpload}
@@ -819,6 +838,39 @@ function Index() {
           <ViewportActions
             onResetView={() => setResetSignal((n) => n + 1)}
             viewportRef={stageRef}
+          />
+
+          {/*
+           * The transport, on the viewport rather than in the panel.
+           *
+           * It lived in the Animation panel, which is a scrolling list — so
+           * whichever end it was pinned to, reaching it meant scrolling there
+           * first, and pinning it to the foot of a padded scroller left a band
+           * of dead space under it that no amount of margin fixed.
+           *
+           * It belongs beside the thing it plays. The animation happens in the
+           * viewport, so the control does too: always in reach, never scrolled
+           * past, and the panel goes back to being a list of moves. Every video
+           * and 3D tool puts it here for the same reason.
+           */}
+          <PlaybackBar
+            playing={animationPlaying}
+            onPlaying={setAnimationPlaying}
+            seconds={animationSeconds}
+            onSeconds={setAnimationSeconds}
+            label={
+              animation
+                ? animationById(animation).label
+                : objectMove !== "none"
+                  ? objectMoveById(objectMove).label
+                  : null
+            }
+            onStop={() => {
+              setAnimation(null);
+              setObjectMove("none");
+              setAnimationPlaying(false);
+              setResetSignal((n) => n + 1);
+            }}
           />
 
           {/* Curtain over the canvas while exporting. The renderer is resized to

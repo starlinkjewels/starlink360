@@ -81,6 +81,7 @@ import {
 import type { SavedView, StudioApi } from "./StudioRig";
 import {
   ASPECTS,
+  DESTINATIONS,
   dimensionsFor,
   downloadBlob,
   exportName,
@@ -472,7 +473,13 @@ export function StudioPanel({
 
   const [exportTab, setExportTab] = useState<ExportTab>("image");
   const [aspect, setAspect] = useState<AspectPreset>(ASPECTS[0]);
-  const [imageQuality, setImageQuality] = useState<number>(1080);
+  /*
+   * 4K by default. A product shot is zoomed into, cropped and printed, and HD
+   * is the resolution that makes all three disappoint — a client sees soft
+   * edges and reads it as the render being poor rather than the size being
+   * small. The mobile cap below still applies.
+   */
+  const [imageQuality, setImageQuality] = useState<number>(2160);
 
   const [videoBase, setVideoBase] = useState<number>(1080);
   const [shot, setShot] = useState<(typeof VIDEO_SHOTS)[number]>(VIDEO_SHOTS[0]);
@@ -748,7 +755,16 @@ export function StudioPanel({
      * drifting back to the middle of the piece.
      */
     const part = resolvePart();
-    const view = part.angle ? api.angleView(part.angle) : part.view;
+    /*
+     * With nothing specific chosen, the clip is shot from the camera on
+     * screen — same angle, same height, same distance — and turns from there.
+     *
+     * It used to fall through to null, which put the orbit square-on to the
+     * front at a fixed height: you framed a three-quarter view, pressed
+     * download, and got a clip shot from somewhere else entirely. An explicit
+     * preset or saved part still wins, because choosing one IS the instruction.
+     */
+    const view = part.angle ? api.angleView(part.angle) : (part.view ?? api.currentView());
 
     /*
      * Resolved once, before the run. Painting hundreds of frames cannot await
@@ -1481,6 +1497,48 @@ export function StudioPanel({
             onDelete={deletePart}
             disabled={disabled || shot.id === "journey"}
           />
+        </PanelGroup>
+
+        {/*
+         * Where it is going, as one decision.
+         *
+         * Shape, size, frame rate and length are four controls expressing one
+         * intention: nobody weighing 9:16 against 4:5 is thinking about ratios,
+         * they are thinking "this goes on Instagram" — and every platform has a
+         * single right answer for all four. Asking separately is asking someone
+         * to derive what we already know, and getting any one wrong spoils the
+         * file. The controls below still exist for anyone who wants them.
+         */}
+        <PanelGroup title="Where is it going?">
+          <div className="dest-grid" role="radiogroup" aria-label="Where is it going">
+            {DESTINATIONS.map((d) => {
+              const on =
+                aspect.id === d.aspect &&
+                videoBase === d.base &&
+                fps === d.fps &&
+                (d.seconds === undefined || seconds === d.seconds);
+              return (
+                <button
+                  key={d.id}
+                  role="radio"
+                  aria-checked={on}
+                  className={`dest-chip ${on ? "dest-chip-on" : ""}`}
+                  disabled={disabled}
+                  onClick={() => {
+                    setAspect(ASPECTS.find((a) => a.id === d.aspect) ?? ASPECTS[0]);
+                    // Clamped to what this device can actually finish. A phone
+                    // asked for 4K60 is a killed tab, not a slow export.
+                    setVideoBase(Math.min(d.base, maxBase));
+                    setFps(Math.min(d.fps, maxFps));
+                    if (d.seconds !== undefined) setSeconds(Math.min(d.seconds, maxSeconds));
+                  }}
+                >
+                  <span className="dest-chip-label">{d.label}</span>
+                  <span className="dest-chip-hint">{d.hint}</span>
+                </button>
+              );
+            })}
+          </div>
         </PanelGroup>
 
         <PanelGroup title="The file">

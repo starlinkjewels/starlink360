@@ -51,10 +51,25 @@ export function h264Codec(width: number, height: number, fps: number): string {
  * 20 Mbps is right for 1080p and starves 4K badly.
  */
 export function bitrateFor(width: number, height: number, fps: number): number {
-  const perPixelPerFrame = 0.11; // bits, tuned against the old 1080p30 number
+  /*
+   * Jewellery is the worst case a video encoder ever sees.
+   *
+   * Compression works by predicting the next frame from the last one, and a
+   * turning pave breaks that completely: every stone is high-frequency sparkle
+   * that changes entirely between frames, so there is almost nothing to
+   * predict. The old 0.11 bits per pixel per frame — around 8 Mbps at 1080p —
+   * is a sensible number for ordinary footage and turns diamonds into a
+   * shimmering mush of blocks. The client called it "not clear" and they were
+   * describing exactly this.
+   *
+   * 0.28 puts 1080p30 near 18 Mbps, which is where a rotating stone holds
+   * together. Well above what a talking head would need, and the right order
+   * for the content.
+   */
+  const perPixelPerFrame = 0.28;
   const raw = width * height * fps * perPixelPerFrame;
   // Floor keeps small exports crisp; ceiling keeps a 4K60 file openable.
-  return Math.round(Math.min(Math.max(raw, 8_000_000), 90_000_000));
+  return Math.round(Math.min(Math.max(raw, 12_000_000), 120_000_000));
 }
 
 /** What this browser can actually produce, best first. */

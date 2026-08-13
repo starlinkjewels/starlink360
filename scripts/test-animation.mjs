@@ -362,5 +362,105 @@ console.log("=== the still and looping ones behave ===");
   );
 }
 
+/*
+ * The showpiece moves.
+ *
+ * These exist to be watched rather than to reposition the camera, so the thing
+ * worth asserting is that something actually HAPPENS in them. A preset that
+ * barely moves is worse than no preset: it takes a slot in the list, costs a
+ * full render to find out, and reads as the feature being broken.
+ */
+console.log("\n=== the showpieces earn their place ===");
+for (const id of ["spiral", "figure-eight", "whip", "fall-away", "catwalk", "sparkle"]) {
+  const move = ANIMATIONS.find((a) => a.id === id);
+  if (!move) {
+    check(false, `${id} exists`);
+    continue;
+  }
+
+  let minD = Infinity;
+  let maxD = -Infinity;
+  let minE = Infinity;
+  let maxE = -Infinity;
+  let sweep = 0;
+  let prev = move.pose(0).azimuth;
+  for (let i = 0; i <= 120; i++) {
+    const p = move.pose(i / 120);
+    minD = Math.min(minD, p.distance);
+    maxD = Math.max(maxD, p.distance);
+    minE = Math.min(minE, p.elevation);
+    maxE = Math.max(maxE, p.elevation);
+    sweep += Math.abs(p.azimuth - prev);
+    prev = p.azimuth;
+  }
+
+  // Either it travels round the piece or it travels toward it. A move doing
+  // neither is a still frame with a label on it.
+  const travels = sweep > 0.5 || maxD - minD > 0.15;
+  check(
+    travels,
+    `${id} actually moves`,
+    `${sweep.toFixed(2)} rad, ${(maxD - minD).toFixed(2)} dist`,
+  );
+
+  /*
+   * Elevation has to stay clear of the poles. At exactly +/-PI/2 the up vector
+   * is parallel to the view direction, `lookAt` cannot resolve roll, and the
+   * frame snaps to an arbitrary rotation mid-clip.
+   */
+  check(
+    minE >= MIN_ELEVATION - 1e-9 && maxE <= MAX_ELEVATION + 1e-9,
+    `${id} stays clear of the poles`,
+    `${minE.toFixed(2)}..${maxE.toFixed(2)}`,
+  );
+
+  // Distance is a multiplier on the fitted framing; at or below zero the camera
+  // is inside the piece and the clip renders black.
+  check(minD > 0.05, `${id} never puts the camera inside the piece`, `${minD.toFixed(2)}`);
+}
+
+/*
+ * An arrival has to finish before the clip does.
+ *
+ * Every one of these used to fill its whole length — the piece was still moving
+ * on the final frame, so a viewer never once saw it at rest, and with a camera
+ * move running alongside, everything on screen moved for the entire clip. That
+ * reads as busy and, oddly, as boring: nothing is ever resolved. A film lands
+ * the object and then looks at it.
+ */
+console.log("\n=== an arrival lands, then holds still ===");
+for (const move of OBJECT_MOVES) {
+  if (move.loops) continue;
+
+  const tail = [];
+  for (let i = 85; i <= 100; i++) tail.push(objectPoseAt(move, i / 100));
+
+  let motion = 0;
+  for (let i = 1; i < tail.length; i++) {
+    motion += Math.abs(tail[i].lift - tail[i - 1].lift);
+    motion += Math.abs(tail[i].rotX - tail[i - 1].rotX);
+    motion += Math.abs(tail[i].rotY - tail[i - 1].rotY);
+    motion += Math.abs(tail[i].rotZ - tail[i - 1].rotZ);
+  }
+  check(motion < 0.05, `${move.id} is settled through the last 15%`, motion.toFixed(4));
+
+  const end = objectPoseAt(move, 1);
+  check(Math.abs(end.lift) < 0.02, `${move.id} ends resting on the bench`, end.lift.toFixed(4));
+}
+
+/*
+ * And restrained on the way down. A gold pendant dropped onto velvet falls a
+ * little and stops; it does not leave the frame and rebound like a rubber ball.
+ * Weight is the whole impression a precious object has to give.
+ */
+console.log("\n=== the fall is restrained ===");
+for (const id of ["drop", "drop-spin", "hand-drop"]) {
+  const move = objectMoveById(id);
+  let peak = 0;
+  for (let i = 0; i <= 100; i++) peak = Math.max(peak, objectPoseAt(move, i / 100).lift);
+  check(peak > 0.05, `${id} actually falls`, peak.toFixed(2));
+  check(peak < 0.9, `${id} starts inside the frame, not above it`, `${peak.toFixed(2)} radii`);
+}
+
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);
 process.exit(fail ? 1 : 0);

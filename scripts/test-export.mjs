@@ -148,9 +148,16 @@ check(
 console.log("\n=== bitrate scales with the picture ===");
 const b1080 = bitrateFor(1920, 1080, 30);
 const b4k = bitrateFor(3840, 2160, 60);
+/*
+ * Jewellery is the worst case a video encoder sees. Compression predicts each
+ * frame from the last, and a turning pave breaks that completely — every stone
+ * is high-frequency sparkle that changes entirely between frames. The rate that
+ * suits ordinary footage turns diamonds into a shimmering mush of blocks, which
+ * is what "not clear" meant when the client said it.
+ */
 check(
-  b1080 >= 6_000_000 && b1080 <= 12_000_000,
-  "1080p30 lands near the old 20 Mbps ceiling for detail",
+  b1080 >= 15_000_000 && b1080 <= 25_000_000,
+  "1080p30 is rated for sparkle, not for a talking head",
   `${(b1080 / 1e6).toFixed(1)} Mbps`,
 );
 check(
@@ -158,7 +165,7 @@ check(
   "4K60 gets substantially more, or sparkle turns to mush",
   `${(b4k / 1e6).toFixed(1)} Mbps`,
 );
-check(b4k <= 90_000_000, "capped, so the file stays openable", `${(b4k / 1e6).toFixed(1)} Mbps`);
+check(b4k <= 120_000_000, "capped, so the file stays openable", `${(b4k / 1e6).toFixed(1)} Mbps`);
 check(bitrateFor(64, 64, 24) >= 8_000_000, "a tiny export still gets a floor, not a smear");
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);

@@ -1410,19 +1410,41 @@
   }
 }
 
-@utility upload-popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 0.5rem);
-  /* Never wider than the viewport on a small phone. */
-  width: min(240px, calc(100vw - 2rem - var(--safe-x, 0px) * 2));
+/*
+ * Loading a model is a dialog, not a dropdown.
+ *
+ * It used to be a popover hanging off the Upload button, positioned with
+ * `top: calc(100% + 0.5rem)` against a wrapper that HAD NO RULE — so it
+ * resolved against the stage instead and landed a full viewport height below
+ * the fold. The button worked perfectly; the panel was simply off-screen, which
+ * reads as the button being broken.
+ *
+ * Centred and on a backdrop now, which is also the right shape for the job:
+ * opening a file is the one action that replaces everything else on screen, and
+ * it deserves the whole of it rather than a corner.
+ */
+@utility upload-float {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
   padding: 1rem;
+  background: color-mix(in oklab, var(--color-background) 55%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+@utility upload-popover {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: calc(100dvh - 3rem);
+  overflow-y: auto;
+  padding: 1.25rem;
   border-radius: 1rem;
   border: 1px solid color-mix(in oklab, var(--gold) 22%, transparent);
   background: var(--menu-surface);
   backdrop-filter: blur(24px) saturate(150%);
   box-shadow: var(--menu-shadow);
-  z-index: 50;
 }
 
 @utility loader-brand {
@@ -3099,4 +3121,1897 @@ input[type="radio"]:disabled {
   &:hover {
     color: #ef4444;
   }
+}
+
+/* Destination chips: one click sets shape, size, frame rate and length. */
+@utility dest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+@utility dest-chip {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--color-border);
+  text-align: left;
+  transition: all 0.18s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+@utility dest-chip-on {
+  border-color: color-mix(in oklab, var(--gold) 70%, transparent);
+  background: color-mix(in oklab, var(--gold) 12%, transparent);
+}
+
+@utility dest-chip-label {
+  font-size: 0.68rem;
+  color: var(--color-foreground);
+}
+
+@utility dest-chip-hint {
+  /* Truncates rather than wrapping the chip to two heights on a phone. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.56rem;
+  color: var(--color-muted-foreground);
+}
+
+/*
+ * The turn curve, drawn beside the height curve on an object-move thumbnail.
+ *
+ * Dashed and lighter so the two read apart at 44px on a move that does both —
+ * a tumble is a bounce AND a rotation, and two solid lines of equal weight
+ * would just look like a scribble.
+ */
+@utility move-turn {
+  stroke: var(--color-muted-foreground);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-dasharray: 2 2;
+  opacity: 0.75;
+
+  [aria-checked="true"] & {
+    stroke: var(--gold);
+  }
+}
+
+/* The piece at rest, for the one move whose honest picture is a flat line. */
+@utility move-rest {
+  fill: var(--color-muted-foreground);
+  opacity: 0.55;
+
+  [aria-checked="true"] & {
+    fill: var(--gold);
+  }
+}
+
+/* Where a fall begins, so a drop reads as falling rather than as a curve. */
+@utility move-start {
+  fill: var(--color-muted-foreground);
+
+  [aria-checked="true"] & {
+    fill: var(--gold);
+  }
+}
+
+/* ------------------------------------------------------------- transport --
+ *
+ * The player bar for a camera move. One filled primary control, one secondary
+ * icon, and the length where a player shows its duration — rather than two
+ * oversized outline pills stacked over a captioned range slider, which had the
+ * proportions of a debug panel and read as one.
+ */
+@utility transport {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-foreground) 3%, transparent);
+}
+
+@utility transport-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--gold);
+  /* Against gold in both themes, so it is not a token that flips. */
+  color: #1a1205;
+  transition: filter 0.18s ease;
+
+  &:hover {
+    filter: brightness(1.08);
+  }
+}
+
+@utility transport-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: var(--color-foreground);
+    background: color-mix(in oklab, var(--color-foreground) 7%, transparent);
+  }
+}
+
+@utility transport-range {
+  /* min-width:0 or the flex child refuses to shrink and pushes the time out. */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 2px;
+  appearance: none;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-foreground) 18%, transparent);
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 999px;
+    background: var(--gold);
+  }
+
+  &::-moz-range-thumb {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: none;
+    border-radius: 999px;
+    background: var(--gold);
+  }
+}
+
+@utility transport-time {
+  flex: none;
+  min-width: 2.6rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.62rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility rail-btn {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 0.55rem;
+  color: var(--color-muted-foreground);
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--gold);
+    background: var(--hover-tint);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+@utility rail-btn-on {
+  color: var(--gold);
+  background: color-mix(in oklab, var(--gold) 15%, transparent);
+}
+
+@utility panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--panel-surface);
+  /*
+   * The panel frames; `panel-body` scrolls. Two nested scrollers is how a
+   * sticky header ends up scrolling with the content in one of them.
+   */
+  overflow: hidden;
+
+  @media (max-width: 1023px) {
+    /* Below lg the panel is a sheet, and hidden until the rail opens it. */
+    display: none;
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    /*
+     * Above the backdrop, which is 60.
+     *
+     * This was 40, so the scrim covered the sheet rather than the viewport
+     * behind it — two symptoms from one mistake. The panel looked washed out
+     * because it was being dimmed from in front, and scrolling did nothing
+     * because every touch landed on the backdrop and closed the sheet instead.
+     * The other sheet in this file has always been 61; this simply never
+     * matched it.
+     */
+    z-index: 61;
+    max-height: 68vh;
+    border-left: 0;
+    border-top: 1px solid color-mix(in oklab, var(--gold) 22%, transparent);
+    border-start-start-radius: 1.1rem;
+    border-start-end-radius: 1.1rem;
+    box-shadow: var(--sheet-shadow);
+    animation: sheet-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+
+    /*
+     * Opaque, unlike the docked panel.
+     *
+     * `--panel-surface` is 94% alpha, which is invisible against the page on a
+     * desktop and plainly wrong as a sheet lying over the render — the piece
+     * and the icon rail showed straight through the text. A backdrop filter
+     * would be the other answer and is worse: it costs a full-screen blur every
+     * frame, over a canvas that is already the expensive thing on the page.
+     */
+    background: var(--color-background);
+
+    /*
+     * The sheet itself does not scroll; its body does.
+     *
+     * A flex column that is both the scroller and the parent of a sticky header
+     * is the arrangement where a touch drag lands on neither — which is what
+     * "scrolling does nothing" was. One explicit scroll container removes the
+     * ambiguity.
+     */
+    overflow: hidden;
+  }
+}
+
+/* Only meaningful below lg; docked, the panel is always visible. */
+@utility panel-open {
+  @media (max-width: 1023px) {
+    display: flex;
+  }
+}
+
+/*
+ * The title is centred and the close button is taken out of the flow.
+ *
+ * They were flex siblings around `justify-content: center`, so the button was
+ * centred WITH the title and sat on top of it — which is what the X over the
+ * word "CAMERA" was. Absolute positioning is the only arrangement where a
+ * centred title stays centred whatever the button beside it does.
+ */
+@utility panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.9rem 3.25rem 0.6rem;
+  /* Opaque, or the body scrolls visibly underneath the heading. */
+  background: var(--color-background);
+}
+
+@utility panel-title {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+
+@utility panel-body {
+  /*
+   * The scroll container. Explicitly: `flex: 1` to take the space the header
+   * leaves, `min-height: 0` so a flex child is actually allowed to shrink and
+   * scroll rather than growing to fit its content, and `pan-y` so a vertical
+   * drag belongs to the sheet instead of being claimed by the canvas below it.
+   */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  touch-action: pan-y;
+  /* Stops a scroll that reaches the end from bouncing the page behind. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+
+  padding: 0 1rem 1.5rem;
+  padding-bottom: calc(1.5rem + var(--safe-b, 0px));
+
+  /*
+   * A backstop, not the fix.
+   *
+   * Every grid inside is written to shrink, so nothing should reach this. But a
+   * panel that scrolls sideways is a visibly broken panel, and one control
+   * added later with a long unbreakable label should degrade to a clipped word
+   * rather than to a horizontal scrollbar across the whole studio.
+   */
+  overflow-x: hidden;
+}
+
+/* ── NumberField ─────────────────────────────────────────────────────────── */
+
+@utility nf {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.7rem;
+}
+
+@utility nf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+@utility nf-label {
+  font-size: 0.63rem;
+  color: var(--color-foreground);
+  /* Never wraps. A label that goes to two lines in a grid drags one column
+     taller than its neighbours and the row stops looking like a row. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Compact: the field is in a grid column rather than across the panel.
+ *
+ * Label above the box instead of beside it, because at a third of the panel's
+ * width there is no room for both on one line — which is what was pushing the
+ * Z column off the edge entirely.
+ */
+@utility nf-compact {
+  margin-bottom: 0.5rem;
+
+  & .nf-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.2rem;
+  }
+
+  & .nf-label {
+    font-size: 0.55rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted-foreground);
+  }
+
+  & .nf-box {
+    width: 100%;
+    justify-content: flex-end;
+    /* 34px: a comfortable tap target without making a row of three tall. */
+    min-height: 2.125rem;
+  }
+
+  & .nf-box input {
+    /* Fills the column rather than a fixed width that overflows it. */
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* The range is the point of this control, so it is always visible — but it is
+ * secondary to the name, hence the lighter weight. */
+@utility nf-range {
+  color: var(--color-muted-foreground);
+  font-size: 0.9em;
+}
+
+@utility nf-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--color-border);
+  background: var(--hover-tint);
+
+  &:focus-within {
+    border-color: color-mix(in oklab, var(--gold) 55%, transparent);
+  }
+
+  & input {
+    width: 3.4rem;
+    background: transparent;
+    color: var(--color-foreground);
+    font-size: 0.63rem;
+    text-align: right;
+    outline: none;
+  }
+}
+
+@utility nf-suffix {
+  color: var(--color-muted-foreground);
+  font-size: 0.58rem;
+}
+
+@utility nf-slider {
+  width: 100%;
+  accent-color: var(--gold);
+}
+
+@utility nf-hint {
+  font-size: 0.57rem;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Viewport furniture ────────────────────────────────────────────────────
+ * Floating over the canvas, so everything here is pointer-events-auto inside a
+ * pointer-events-none parent — otherwise the bars would eat orbit drags.
+ */
+
+@utility ctools {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.28rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--menu-surface);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--menu-shadow);
+  /* Never wider than the viewport on a phone. */
+  max-width: calc(100% - 1.5rem);
+  overflow-x: auto;
+
+  /*
+   * On a phone the toolbar shares the bottom edge with the axis gizmo and the
+   * reset/fullscreen pair, and eight round buttons plus those two do not fit
+   * across 360px — they were overlapping. Below `sm` the disabled transform
+   * tools are dropped: they cannot be used yet, and spending a third of a
+   * phone's toolbar on controls that refuse to work is the wrong trade.
+   */
+  @media (max-width: 639px) {
+    bottom: 0.5rem;
+    gap: 0;
+    padding: 0.22rem;
+
+    & .ctool-optional {
+      display: none;
+    }
+  }
+}
+
+@utility ctool {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  color: var(--color-muted-foreground);
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--gold);
+    background: var(--hover-tint);
+  }
+  /* Dimmed but still readable: the tooltip explains why, so it must invite a
+   * hover rather than look like a rendering fault. */
+  &:disabled {
+    opacity: 0.38;
+    cursor: help;
+  }
+}
+
+@utility ctool-on {
+  color: var(--color-background);
+  background: var(--color-foreground);
+
+  &:hover {
+    color: var(--color-background);
+    background: var(--color-foreground);
+  }
+}
+
+@utility ctool-sep {
+  width: 1px;
+  height: 1.1rem;
+  margin: 0 0.25rem;
+  background: var(--color-border);
+}
+
+@utility vactions {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 20;
+  display: flex;
+  gap: 0.35rem;
+
+  /*
+   * Above the toolbar on a phone rather than beside it.
+   *
+   * Both were pinned to the bottom edge and, once the toolbar takes the width
+   * it needs, they overlapped. Stacking is the only arrangement that holds at
+   * 360px without shrinking a target below a thumb.
+   */
+  @media (max-width: 639px) {
+    right: 0.5rem;
+    bottom: 3.6rem;
+    flex-direction: column;
+  }
+}
+
+@utility vaction {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--menu-surface);
+  color: var(--color-muted-foreground);
+  box-shadow: var(--menu-shadow);
+
+  &:hover {
+    color: var(--gold);
+  }
+}
+
+@utility shud {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 20;
+  max-width: min(16rem, calc(100% - 1.5rem));
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-border);
+  background: var(--menu-surface);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--menu-shadow);
+}
+
+@utility shud-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@utility shud-count {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@utility shud-x {
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: var(--gold);
+  }
+}
+
+@utility shud-help {
+  margin-top: 0.2rem;
+  font-size: 0.55rem;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Materials: tabs, catalogue grid, custom editor ──────────────────────── */
+
+@utility tab-row {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  margin-bottom: 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--hover-tint);
+}
+
+@utility tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  /* 40px, so a tab is still a comfortable touch target on a phone. */
+  min-height: 2.5rem;
+  padding: 0 0.5rem;
+  border-radius: 0.6rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    color: var(--color-foreground);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+@utility tab-on {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+@utility tab-badge {
+  font-size: 0.5rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 999px;
+  background: var(--hover-tint);
+  color: var(--color-muted-foreground);
+
+  [aria-selected="true"] & {
+    background: color-mix(in oklab, var(--gold) 22%, transparent);
+    color: var(--gold);
+  }
+}
+
+/* Says what a click is about to change. Sticky so it survives a long scroll
+   through 24 stones — the scope is exactly what you forget while browsing. */
+@utility mat-scope {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  margin-bottom: 0.25rem;
+  background: var(--color-background);
+}
+
+@utility mat-scope-text {
+  font-size: 0.6rem;
+  color: var(--color-muted-foreground);
+
+  & strong {
+    color: var(--color-foreground);
+    font-weight: 500;
+  }
+}
+
+/* A narrowed scope is the surprising state, so it is the one that is marked. */
+@utility mat-scope-narrow {
+  & strong {
+    color: var(--gold);
+  }
+}
+
+@utility mat-scope-actions {
+  display: flex;
+  gap: 0.15rem;
+}
+
+@utility icon-toggle {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    background: var(--hover-tint);
+    color: var(--color-foreground);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 1px;
+  }
+}
+
+@utility icon-toggle-on {
+  background: var(--hover-tint);
+  color: var(--gold);
+}
+
+@utility mat-group {
+  margin-bottom: 0.6rem;
+}
+
+@utility mat-group-head {
+  font-size: 0.5rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+  margin: 0.4rem 0 0.35rem;
+}
+
+@utility mat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.25rem, 1fr));
+  gap: 0.35rem;
+}
+
+@utility mat-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.2rem;
+  border-radius: 0.75rem;
+  transition: background 0.18s ease;
+
+  &:hover {
+    background: var(--hover-tint);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+@utility mat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+@utility mat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  /* 44px: the list is the one-handed layout, so the row is a full target. */
+  min-height: 2.75rem;
+  padding: 0 0.5rem;
+  border-radius: 0.6rem;
+  text-align: left;
+  transition: background 0.18s ease;
+
+  &:hover {
+    background: var(--hover-tint);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+
+  & .mat-name {
+    flex: 1;
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
+}
+
+@utility mat-orb-ring {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: border-color 0.18s ease;
+
+  [role="radio"]:hover & {
+    border-color: color-mix(in oklab, var(--gold) 45%, transparent);
+  }
+}
+
+@utility mat-orb-on {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
+@utility mat-orb {
+  display: block;
+  border-radius: 999px;
+}
+
+@utility mat-name {
+  font-size: 0.5rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.3;
+  color: var(--color-muted-foreground);
+
+  [aria-checked="true"] & {
+    color: var(--gold);
+  }
+}
+
+@utility mat-meta {
+  font-size: 0.55rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted-foreground);
+}
+
+@utility mat-editor {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--color-border);
+  background: var(--hover-tint);
+}
+
+@utility part-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
+}
+
+@utility part-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.9rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  font-size: 0.6rem;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+    color: var(--color-foreground);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 1px;
+  }
+}
+
+@utility part-chip-on {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: color-mix(in oklab, var(--gold) 12%, transparent);
+}
+
+/* Marks a part that already carries an assigned material, so "which of these
+   have I changed" is answerable without clicking through them. */
+@utility part-chip-dot {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* ── Textures panel ──────────────────────────────────────────────────────── */
+
+@utility tex-thumb {
+  display: block;
+  border-radius: 0.55rem;
+  object-fit: cover;
+}
+
+/* "Polished" has no pattern to show, so it is drawn rather than rendered. */
+@utility tex-none {
+  background: linear-gradient(135deg, #f4f4f5 0%, #b8b8bd 48%, #ededf0 52%, #9a9aa0 100%);
+}
+
+@utility tex-ring {
+  border-radius: 0.65rem;
+}
+
+@utility tex-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.68rem;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+@utility tex-channels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem 0.5rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+@utility tex-channel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.9rem;
+  font-size: 0.63rem;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+/* A channel the chosen finish cannot drive. Shown, not hidden, so the set of
+   channels does not change shape as finishes are browsed. */
+@utility tex-channel-off {
+  color: var(--color-muted-foreground);
+  cursor: not-allowed;
+}
+
+/* ── Lights manager ──────────────────────────────────────────────────────── */
+
+@utility light-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+@utility light-row {
+  border-radius: 0.65rem;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  transition: border-color 0.18s ease;
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 35%, var(--color-border));
+  }
+}
+
+/* A hidden light stays listed, dimmed, so it can be brought back. */
+@utility light-row-off {
+  opacity: 0.5;
+}
+
+/*
+ * A fixed grid, not a flex row.
+ *
+ * The name takes whatever is left and the action cluster is a fixed track, so
+ * the three buttons land on the same x in every row however long the name is.
+ * As a flex row they drifted with the text and the list read as ragged.
+ */
+@utility light-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.5rem;
+}
+
+@utility light-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.05rem;
+}
+
+@utility light-name {
+  display: grid;
+  /* icon | name | the cast dot, which is absent on all but one row */
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 2.25rem;
+  padding: 0 0.25rem 0 0;
+  text-align: left;
+  border-radius: 0.5rem;
+
+  &:hover {
+    background: var(--hover-tint);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+/* The type, tinted with the light's own colour: one mark, not two. */
+@utility light-icon {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: none;
+  border-radius: 0.4rem;
+  background: var(--hover-tint);
+}
+
+/* Marks the one light that casts. A dot rather than a word, because it applies
+   to exactly one row and a label would widen all of them. */
+@utility light-casts {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--gold);
+}
+
+@utility light-label {
+  min-width: 0;
+  font-size: 0.66rem;
+  color: var(--color-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@utility light-meta {
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+@utility light-body {
+  padding: 0.5rem 0.6rem 0.7rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--hover-tint);
+}
+
+/*
+ * Three numeric boxes on one row: the XYZ idiom.
+ *
+ * `min-width: 0` on the children is the load-bearing line. A grid item defaults
+ * to `min-width: auto`, which means it refuses to shrink below its content —
+ * so one long label pushes the whole row wider than the panel and the last
+ * column ends up cut off at the edge, which is exactly what was happening.
+ */
+@utility light-xyz {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+
+  & > * {
+    min-width: 0;
+  }
+}
+
+/* A grid, not a wrapping flex row: four equal cells stay a row at every panel
+   width instead of collapsing into two ragged lines. */
+@utility light-add {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin-top: 0.6rem;
+}
+
+@utility text-input {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-size: 0.7rem;
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -1px;
+  }
+}
+
+/* A hint that is a caution rather than an explanation. */
+@utility field-warn {
+  color: var(--gold);
+}
+
+@utility light-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+
+  & > * {
+    min-width: 0;
+  }
+}
+
+/* ── Environment: gradient bar ───────────────────────────────────────────── */
+
+@utility grad-bar {
+  position: relative;
+  height: 2.25rem;
+  margin: 0.4rem 0 1.1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+}
+
+/* Handles sit ON the bar and hang below it, so the ramp is never covered by
+   the thing used to edit it. */
+@utility grad-stop {
+  position: absolute;
+  top: -0.25rem;
+  bottom: -0.55rem;
+  width: 0.75rem;
+  margin-left: -0.375rem;
+  border-radius: 0.3rem;
+  border: 2px solid var(--color-background);
+  box-shadow: 0 0 0 1px var(--color-border);
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+}
+
+@utility grad-stop-on {
+  box-shadow: 0 0 0 2px var(--gold);
+  z-index: 1;
+}
+
+@utility grad-edit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: 0.5rem;
+}
+
+@utility bg-preview {
+  height: 3.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-border);
+}
+
+/* ── Import orientation prompt ───────────────────────────────────────────── */
+
+@utility orient-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(3px);
+}
+
+@utility orient-card {
+  width: min(28rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.1rem;
+  border-radius: 1.1rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.4);
+}
+
+@utility orient-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+@utility orient-title {
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  color: var(--color-foreground);
+}
+
+@utility orient-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+@utility orient-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.6rem 0.35rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--color-border);
+  transition: all 0.18s ease;
+
+  &:hover {
+    background: var(--hover-tint);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+@utility orient-cell-on {
+  border-color: var(--gold);
+  background: color-mix(in oklab, var(--gold) 10%, transparent);
+}
+
+@utility orient-svg {
+  display: block;
+}
+
+@utility orient-hint {
+  font-size: 0.5rem;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Watermark logo ──────────────────────────────────────────────────────── */
+
+@utility mark-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--color-border);
+  /* Chequerboard, so a transparent logo is visibly transparent rather than
+     looking like it failed to load against a matching panel. */
+  background-image:
+    linear-gradient(45deg, var(--hover-tint) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--hover-tint) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--hover-tint) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--hover-tint) 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+}
+
+@utility mark-logo-img {
+  max-height: 2.75rem;
+  max-width: 60%;
+  object-fit: contain;
+}
+
+/* ── Panel grammar ───────────────────────────────────────────────────────── */
+
+@utility panel-intro {
+  margin-bottom: 0.85rem;
+  font-size: 0.63rem;
+  line-height: 1.6;
+  color: var(--color-muted-foreground);
+}
+
+/* A rule above each group rather than a gap alone: at a narrow width, spacing
+   on its own stops reading as a division and the panel becomes one long list. */
+@utility panel-group {
+  padding-top: 0.85rem;
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--color-border);
+
+  &:first-child {
+    padding-top: 0;
+    margin-top: 0;
+    border-top: 0;
+  }
+}
+
+@utility panel-group-title {
+  margin-bottom: 0.3rem;
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+
+@utility panel-group-hint {
+  margin-bottom: 0.55rem;
+}
+
+/* Separated from the controls above it, so it is never mistaken for one. */
+@utility panel-reset {
+  margin-top: 1.1rem;
+}
+
+/* ── Camera moves ────────────────────────────────────────────────────────── */
+
+@utility move-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.45rem 0.2rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  transition: all 0.18s ease;
+
+  &:hover {
+    background: var(--hover-tint);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -2px;
+  }
+}
+
+@utility move-cell-on {
+  border-color: var(--gold);
+  background: color-mix(in oklab, var(--gold) 10%, transparent);
+}
+
+@utility move-svg {
+  display: block;
+  border-radius: 0.5rem;
+  background: var(--hover-tint);
+}
+
+@utility move-subject {
+  fill: var(--color-muted-foreground);
+  opacity: 0.45;
+}
+
+@utility move-line {
+  stroke: var(--color-muted-foreground);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+
+  [aria-checked="true"] & {
+    stroke: var(--gold);
+  }
+}
+
+/* Where the move finishes, so a shot and its reverse are not the same picture. */
+@utility move-end {
+  fill: var(--gold);
+}
+
+@utility move-ground {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+/* ── Video: what the shot actually is ────────────────────────────────────── */
+
+/*
+ * A card, not another form row.
+ *
+ * The section used to open with three numbered instructions above the controls
+ * they described — useful once, permanent clutter afterwards. This says what
+ * the download will BE, which is the one thing worth stating before a
+ * three-minute encode.
+ */
+@utility shot-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.5rem;
+  border-radius: 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--gold) 30%, var(--color-border));
+  background: color-mix(in oklab, var(--gold) 7%, transparent);
+}
+
+@utility shot-preview-name {
+  font-size: 0.8rem;
+  color: var(--color-foreground);
+}
+
+@utility shot-preview-meta {
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Checkboxes and radios ───────────────────────────────────────────────── */
+
+/*
+ * Drawn, not native.
+ *
+ * A native checkbox is painted by the operating system: blue on Windows, a
+ * different blue on macOS, and on a dark panel it keeps its own white box — so
+ * the one control that appears in nearly every section was the one that looked
+ * borrowed from another application. These are the same size and colour as
+ * everything else here, in both themes.
+ */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  /* 18px: the smallest square that is still a comfortable touch target once
+     the label beside it is part of the hit area, which it is — every one of
+     these sits inside a <label>. */
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+input[type="checkbox"] {
+  border-radius: 0.35rem;
+}
+
+input[type="radio"] {
+  border-radius: 999px;
+}
+
+input[type="checkbox"]:hover:not(:disabled),
+input[type="radio"]:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  border-color: var(--gold);
+  background: var(--gold);
+}
+
+/* The tick, as a clipped square that scales in — no glyph, so it cannot fall
+   back to a font the machine does not have. */
+input[type="checkbox"]::before {
+  content: "";
+  width: 0.6rem;
+  height: 0.6rem;
+  transform: scale(0);
+  transition: transform 0.12s ease;
+  background: var(--color-background);
+  clip-path: polygon(14% 44%, 0 60%, 39% 100%, 100% 22%, 84% 6%, 39% 68%);
+}
+
+input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+input[type="radio"]::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  transform: scale(0);
+  transition: transform 0.12s ease;
+  background: var(--color-background);
+}
+
+input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------- stamping --
+ *
+ * A hallmark is chosen the way a jeweller picks a punch: from a tray of marks
+ * shown as the characters they strike, not as names in a list. So the chips
+ * carry the mark itself, monospaced and letter-spaced, which is also what makes
+ * 750 and 585 tellable apart at a glance.
+ */
+
+/* A row of exclusive choices, sized for three or four. */
+@utility seg {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-foreground) 3%, transparent);
+}
+
+@utility seg-btn {
+  flex: 1 1 0;
+  /* Grid and flex children default to min-width:auto, so a long label would
+   * push the row wider than the panel instead of shrinking. */
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.35rem;
+  font-size: 0.62rem;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    color: var(--color-foreground);
+  }
+}
+
+@utility seg-btn-on {
+  background: color-mix(in oklab, var(--gold) 16%, transparent);
+  color: var(--gold);
+}
+
+@utility text-field {
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  font-size: 0.7rem;
+  color: var(--color-foreground);
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  }
+
+  &::placeholder {
+    color: color-mix(in oklab, var(--color-muted-foreground) 70%, transparent);
+  }
+}
+
+@utility stamp-marks {
+  display: grid;
+  gap: 0.5rem;
+}
+
+@utility stamp-grid {
+  display: grid;
+  /* Wide enough for STERLING without wrapping, and minmax(0,·) so a long mark
+   * shrinks rather than overflowing the panel. */
+  grid-template-columns: repeat(auto-fill, minmax(3.4rem, 1fr));
+  gap: 0.25rem;
+}
+
+@utility stamp-chip {
+  min-height: 1.9rem;
+  padding: 0 0.35rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--color-border);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  color: var(--color-muted-foreground);
+  transition: all 0.18s ease;
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+    color: var(--color-foreground);
+  }
+}
+
+@utility stamp-chip-on {
+  border-color: color-mix(in oklab, var(--gold) 70%, transparent);
+  background: color-mix(in oklab, var(--gold) 14%, transparent);
+  color: var(--gold);
+}
+
+@utility stamp-list {
+  display: grid;
+  gap: 0.2rem;
+}
+
+@utility stamp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
+
+  &:hover {
+    border-color: var(--color-border);
+  }
+}
+
+@utility stamp-row-on {
+  border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  background: color-mix(in oklab, var(--gold) 10%, transparent);
+}
+
+@utility stamp-row-pick {
+  display: flex;
+  flex: 1 1 auto;
+  /* Without this the meta column pushes the row wider than the panel on a
+   * phone rather than the mark truncating. */
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.35rem 0.4rem;
+  text-align: left;
+}
+
+@utility stamp-row-mark {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  color: var(--color-foreground);
+}
+
+@utility stamp-row-meta {
+  flex: none;
+  font-size: 0.58rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility stamp-row-x {
+  flex: none;
+  padding: 0.35rem;
+  border-radius: 0.35rem;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: #ef4444;
+  }
+}
+
+/* Destination chips: one click sets shape, size, frame rate and length. */
+@utility dest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+@utility dest-chip {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--color-border);
+  text-align: left;
+  transition: all 0.18s ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+@utility dest-chip-on {
+  border-color: color-mix(in oklab, var(--gold) 70%, transparent);
+  background: color-mix(in oklab, var(--gold) 12%, transparent);
+}
+
+@utility dest-chip-label {
+  font-size: 0.68rem;
+  color: var(--color-foreground);
+}
+
+@utility dest-chip-hint {
+  /* Truncates rather than wrapping the chip to two heights on a phone. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.56rem;
+  color: var(--color-muted-foreground);
+}
+
+/*
+ * The turn curve, drawn beside the height curve on an object-move thumbnail.
+ *
+ * Dashed and lighter so the two read apart at 44px on a move that does both —
+ * a tumble is a bounce AND a rotation, and two solid lines of equal weight
+ * would just look like a scribble.
+ */
+@utility move-turn {
+  stroke: var(--color-muted-foreground);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-dasharray: 2 2;
+  opacity: 0.75;
+
+  [aria-checked="true"] & {
+    stroke: var(--gold);
+  }
+}
+
+/* The piece at rest, for the one move whose honest picture is a flat line. */
+@utility move-rest {
+  fill: var(--color-muted-foreground);
+  opacity: 0.55;
+
+  [aria-checked="true"] & {
+    fill: var(--gold);
+  }
+}
+
+/* Where a fall begins, so a drop reads as falling rather than as a curve. */
+@utility move-start {
+  fill: var(--color-muted-foreground);
+
+  [aria-checked="true"] & {
+    fill: var(--gold);
+  }
+}
+
+/* ------------------------------------------------------------- transport --
+ *
+ * The player bar for a camera move. One filled primary control, one secondary
+ * icon, and the length where a player shows its duration — rather than two
+ * oversized outline pills stacked over a captioned range slider, which had the
+ * proportions of a debug panel and read as one.
+ */
+@utility transport {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-foreground) 3%, transparent);
+}
+
+@utility transport-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--gold);
+  /* Against gold in both themes, so it is not a token that flips. */
+  color: #1a1205;
+  transition: filter 0.18s ease;
+
+  &:hover {
+    filter: brightness(1.08);
+  }
+}
+
+@utility transport-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: var(--color-foreground);
+    background: color-mix(in oklab, var(--color-foreground) 7%, transparent);
+  }
+}
+
+@utility transport-range {
+  /* min-width:0 or the flex child refuses to shrink and pushes the time out. */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 2px;
+  appearance: none;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-foreground) 18%, transparent);
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 999px;
+    background: var(--gold);
+  }
+
+  &::-moz-range-thumb {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: none;
+    border-radius: 999px;
+    background: var(--gold);
+  }
+}
+
+@utility transport-time {
+  flex: none;
+  min-width: 2.6rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.62rem;
+  color: var(--color-muted-foreground);
+}
+
+/*
+ * The transport, pinned to the foot of the Animation panel.
+ *
+ * It used to sit inside the camera-move group, so arming a move on the PIECE —
+ * a section further down — meant scrolling back up to find anything to press.
+ * Sticky rather than fixed, so it belongs to the panel and does not float over
+ * unrelated sections.
+ */
+@utility transport-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  /*
+   * Flush to the foot of the panel — one row tall, no gap beneath it.
+   *
+   * It carried its own explanatory line and a negative margin before, which
+   * made it a tall block floating with dead space under it. A docked bar is a
+   * bar: the sentence belongs beside the move it describes.
+   */
+  /*
+   * Full-bleed and flush to the foot of the scroller.
+   *
+   * `panel-body` carries 1rem at the sides and 1.5rem at the bottom, so a
+   * docked bar left in normal flow sits inside all of it — a floating pill with
+   * a band of dead space beneath. The negative margins cancel exactly that
+   * padding; the bar's own padding puts the inset back where it belongs, inside
+   * the surface rather than under it.
+   */
+  margin: 0.5rem -1rem calc(-1.5rem - var(--safe-b, 0px));
+  padding: 0.5rem 1rem calc(0.5rem + var(--safe-b, 0px));
+  /*
+   * Fully opaque, with a rule above it.
+   *
+   * A gradient was tried and the cards scrolled visibly through the controls,
+   * which looks like a rendering fault rather than a toolbar. A docked bar has
+   * to read as a surface in front of the list, not as a tint over it.
+   */
+  background: var(--color-background);
+  border-top: 1px solid var(--color-border);
+}
+
+/*
+ * The playback bar, floating on the viewport above the tool dock.
+ *
+ * Centred on the stage rather than tucked in a corner: it is a transient
+ * control that only exists while a move is armed, and a transient control in a
+ * corner is one nobody finds.
+ */
+@utility playbar {
+  position: absolute;
+  /*
+   * Top left, out of the picture.
+   *
+   * Centred along the bottom first, which put it squarely across the piece — a
+   * pendant hangs low in frame, so the one control that appears while you are
+   * watching an animation was covering the thing being animated. Centred along
+   * the top still cut into a tall piece. Bottom left collides with the axis
+   * gizmo. The top-left corner is the only spot clear in every framing, and it
+   * is where a viewport conventionally puts its status chrome.
+   */
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  /*
+   * Narrow. It sits over the piece, so it takes the least room that still
+   * leaves the length draggable — the slider absorbs the difference.
+   */
+  width: min(14rem, calc(100% - 1.5rem));
+  padding: 0.4rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--menu-surface);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--menu-shadow);
+}
+
+@utility playbar-name {
+  flex: none;
+  /* Truncates rather than pushing the slider off a now-narrow bar. */
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  color: var(--color-foreground);
 }

@@ -124,6 +124,8 @@ export function beginOffscreen(
   height: number,
   /** Frustum half-height when the camera is orthographic. */
   orthoHalfHeight?: number,
+  /** How much larger than the output to render. See SUPERSAMPLE. */
+  supersample = SUPERSAMPLE.good,
 ) {
   const prevSize = gl.getSize(new THREE.Vector2());
   const prevRatio = gl.getPixelRatio();
@@ -133,12 +135,22 @@ export function beginOffscreen(
     : camera.aspect;
   const prevOrthoHalf = ortho.isOrthographicCamera ? ortho.top : undefined;
 
+  /*
+   * Supersampling costs the square of the factor and a video pays it on every
+   * frame, so the default is gentler here than for a still — 1.5x is 2.25x the
+   * work and removes most of the crawling shimmer a rotating pave shows. The
+   * caller can turn it off entirely for a long clip.
+   */
+  const factor = safeFactor(gl, width, height, supersample);
+  const renderW = Math.round(width * factor);
+  const renderH = Math.round(height * factor);
+
   const patched: { mat: { resolution: THREE.Vector2 }; prev: THREE.Vector2 }[] = [];
   scene.traverse((obj) => {
     const mat = (obj as THREE.Mesh).material as unknown as { resolution?: THREE.Vector2 };
     if (mat?.resolution instanceof THREE.Vector2) {
       patched.push({ mat: mat as { resolution: THREE.Vector2 }, prev: mat.resolution.clone() });
-      mat.resolution = new THREE.Vector2(width, height);
+      mat.resolution = new THREE.Vector2(renderW, renderH);
     }
   });
 
@@ -146,16 +158,17 @@ export function beginOffscreen(
   const showOverlays = hideOverlays(scene);
 
   gl.setPixelRatio(1);
-  gl.setSize(width, height, false);
+  gl.setSize(renderW, renderH, false);
   applyAspect(camera as unknown as THREE.PerspectiveCamera, width / height, orthoHalfHeight);
-  renderFrame?.setSize(width, height);
+  renderFrame?.setSize(renderW, renderH);
 
   return {
     /** Draws one frame at the export size. The camera must already be posed. */
     render(): HTMLCanvasElement {
       if (renderFrame) renderFrame.render();
       else gl.render(scene, camera);
-      return gl.domElement as HTMLCanvasElement;
+      const frame = gl.domElement as HTMLCanvasElement;
+      return factor === 1 ? frame : downscale(frame, width, height);
     },
     end() {
       for (const { mat, prev } of patched) mat.resolution = prev;
@@ -170,11 +183,84 @@ export function beginOffscreen(
   };
 }
 
+/*
+ * Supersampling: render bigger, then shrink.
+ *
+ * This is THE thing that makes an export look like a product photograph rather
+ * than a screenshot, and it is not the same as the MSAA the canvas already has.
+ * MSAA antialiases geometry SILHOUETTES — it samples the edges of triangles.
+ * The detail that makes jewellery hard is inside the triangles: a pave of 140
+ * ray-traced diamonds is high-frequency sparkle computed per fragment, and
+ * multisampling does nothing for it. Shrinking a larger render averages those
+ * fragments properly, which is the only fix.
+ *
+ * It costs the square of the factor, so 2x is four times the render. That is
+ * the right trade for one still and the wrong one for nine hundred video
+ * frames, which is why the caller chooses.
+ */
+export const SUPERSAMPLE = { none: 1, good: 1.5, best: 2 } as const;
+
+/**
+ * The largest render the driver will actually allocate.
+ *
+ * A supersampled 4K frame is 8192 across, which is at or past the limit on
+ * software renderers and older mobile GPUs — and exceeding it does not throw,
+ * it silently produces a blank or truncated frame. Better to quietly drop to a
+ * smaller factor than to hand back a broken download.
+ */
+function safeFactor(gl: THREE.WebGLRenderer, width: number, height: number, want: number): number {
+  const limit = Math.min(gl.capabilities.maxTextureSize || 4096, 8192);
+  const longest = Math.max(width, height);
+  if (longest * want <= limit) return want;
+  return Math.max(1, Math.floor((limit / longest) * 100) / 100);
+}
+
+/**
+ * Shrinks a rendered frame to its output size.
+ *
+ * Two halvings rather than one jump when the factor is large: a browser's
+ * one-shot downscale samples too few source pixels and reintroduces exactly the
+ * shimmer supersampling was meant to remove.
+ */
+function downscale(source: HTMLCanvasElement, width: number, height: number): HTMLCanvasElement {
+  let current: HTMLCanvasElement = source;
+  let w = source.width;
+  let h = source.height;
+
+  while (w / 2 >= width && h / 2 >= height) {
+    const step = document.createElement("canvas");
+    step.width = Math.round(w / 2);
+    step.height = Math.round(h / 2);
+    const sctx = step.getContext("2d");
+    if (!sctx) break;
+    sctx.imageSmoothingEnabled = true;
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(current, 0, 0, step.width, step.height);
+    current = step;
+    w = step.width;
+    h = step.height;
+  }
+
+  if (w === width && h === height) return current;
+
+  const out = document.createElement("canvas");
+  out.width = width;
+  out.height = height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return current;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(current, 0, 0, width, height);
+  return out;
+}
+
 export function renderAtSize(
   { gl, scene, camera, renderFrame }: CaptureTarget,
   width: number,
   height: number,
   onFrame: (canvas: HTMLCanvasElement) => void,
+  /** How much larger than the output to render. See SUPERSAMPLE. */
+  supersample = SUPERSAMPLE.best,
 ) {
   const prevSize = gl.getSize(new THREE.Vector2());
   const prevRatio = gl.getPixelRatio();
@@ -186,6 +272,10 @@ export function renderAtSize(
    * samples at the wrong coordinates and the export comes out corrupted while
    * the on-screen view looks fine.
    */
+  const factor = safeFactor(gl, width, height, supersample);
+  const renderW = Math.round(width * factor);
+  const renderH = Math.round(height * factor);
+
   const resolutionUniforms: { mat: { resolution: THREE.Vector2 }; prev: THREE.Vector2 }[] = [];
   scene.traverse((obj) => {
     const mat = (obj as THREE.Mesh).material as unknown as { resolution?: THREE.Vector2 };
@@ -194,7 +284,10 @@ export function renderAtSize(
         mat: mat as { resolution: THREE.Vector2 },
         prev: mat.resolution.clone(),
       });
-      mat.resolution = new THREE.Vector2(width, height);
+      // The size actually being RENDERED, not the output size — the gem shader
+      // divides gl_FragCoord by this, so the supersampled frame would sample at
+      // the wrong coordinates and every stone would come out wrong.
+      mat.resolution = new THREE.Vector2(renderW, renderH);
     }
   });
 
@@ -202,15 +295,18 @@ export function renderAtSize(
   const showOverlays = hideOverlays(scene);
 
   try {
-    // Pixel ratio 1: `width`/`height` are already the real output pixels.
+    // Pixel ratio 1: the dimensions here are already real pixels.
     gl.setPixelRatio(1);
-    gl.setSize(width, height, false);
+    gl.setSize(renderW, renderH, false);
+    // Aspect from the OUTPUT, which the supersample preserves exactly — taking
+    // it from the rounded render size would shift the framing by a hair.
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    renderFrame?.setSize(width, height);
+    renderFrame?.setSize(renderW, renderH);
     if (renderFrame) renderFrame.render();
     else gl.render(scene, camera);
-    onFrame(gl.domElement as HTMLCanvasElement);
+    const frame = gl.domElement as HTMLCanvasElement;
+    onFrame(factor === 1 ? frame : downscale(frame, width, height));
   } finally {
     for (const { mat, prev } of resolutionUniforms) mat.resolution = prev;
     // Restored before the re-render below, so the viewport gets its tint back.
@@ -292,6 +388,88 @@ export const ASPECTS: AspectPreset[] = [
   { id: "9x16", label: "9:16", hint: "Vertical · reels, stories", w: 9, h: 16 },
   { id: "16x9", label: "16:9", hint: "Widescreen · web, presentation", w: 16, h: 9 },
   { id: "3x2", label: "3:2", hint: "Classic photo", w: 3, h: 2 },
+];
+
+/**
+ * Where the file is going, in the words the person sending it would use.
+ *
+ * Shape, size and frame rate are one decision, not three. Nobody choosing
+ * between 9:16 and 4:5 is thinking about ratios — they are thinking "this goes
+ * on Instagram", and every platform has one right answer for all three. Asking
+ * for them separately is asking someone to derive what we already know, and
+ * getting any one of them wrong spoils the file.
+ *
+ * `base` is the SHORT edge, matching `dimensionsFor`.
+ */
+export interface Destination {
+  id: string;
+  label: string;
+  hint: string;
+  aspect: string;
+  /** Short edge, in pixels. */
+  base: number;
+  fps: number;
+  /** Seconds, where the platform has a limit worth respecting. */
+  seconds?: number;
+}
+
+export const DESTINATIONS: Destination[] = [
+  {
+    id: "instagram",
+    label: "Instagram",
+    hint: "Vertical reel, 1080×1920",
+    aspect: "9x16",
+    base: 1080,
+    fps: 30,
+    seconds: 8,
+  },
+  {
+    id: "whatsapp",
+    label: "WhatsApp",
+    hint: "Square and small enough to send",
+    aspect: "1x1",
+    base: 720,
+    fps: 30,
+    seconds: 5,
+  },
+  {
+    id: "website",
+    label: "Website",
+    hint: "Widescreen 1080p",
+    aspect: "16x9",
+    base: 1080,
+    fps: 30,
+  },
+  {
+    id: "best",
+    label: "Best quality",
+    hint: "4K, 60fps — large file",
+    aspect: "16x9",
+    base: 2160,
+    fps: 60,
+  },
+];
+
+/** Print and screen sizes for a still, same idea as DESTINATIONS. */
+export const PHOTO_DESTINATIONS: Destination[] = [
+  {
+    id: "instagram",
+    label: "Instagram",
+    hint: "Square, 2160px",
+    aspect: "1x1",
+    base: 2160,
+    fps: 0,
+  },
+  {
+    id: "whatsapp",
+    label: "WhatsApp",
+    hint: "Square, quick to send",
+    aspect: "1x1",
+    base: 1440,
+    fps: 0,
+  },
+  { id: "website", label: "Website", hint: "Widescreen, 4K", aspect: "16x9", base: 2160, fps: 0 },
+  { id: "print", label: "Print", hint: "4K at 300dpi", aspect: "3x2", base: 2160, fps: 0 },
 ];
 
 /** Pixel dimensions for an aspect at a given short-edge size, rounded even for H.264. */

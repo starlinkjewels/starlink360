@@ -9,7 +9,6 @@
  * wants. Nobody can tell them apart from the result alone, so they belong side
  * by side with the difference written down.
  */
-import { Pause, Play, RotateCcw } from "lucide-react";
 import { useMemo } from "react";
 import {
   ANIMATIONS,
@@ -74,24 +73,68 @@ function MovePath({ preset }: { preset: AnimationPreset }) {
  * thumbnail is the curve itself, taken from the same function that drives it.
  */
 function ObjectPath({ move }: { move: ObjectMove }) {
-  const d = useMemo(() => {
-    const pts: string[] = [];
-    for (let i = 0; i <= 32; i++) {
-      const p = objectPoseAt(move, i / 32);
-      const x = 4 + (i / 32) * 36;
-      // Lift runs up to about 1.8 radii; 20px of headroom shows it without
-      // clipping the tallest drop.
-      const y = 36 - Math.min(1, p.lift / 1.8) * 26;
-      pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`);
-    }
-    return pts.join(" ");
+  const { height, turn, lifts } = useMemo(() => {
+    const SAMPLES = 32;
+    const poses = Array.from({ length: SAMPLES + 1 }, (_, i) => objectPoseAt(move, i / SAMPLES));
+
+    /*
+     * Two curves, because a move has two things it can do and drawing only one
+     * of them made half the set look identical.
+     *
+     * Height alone was plotted before. That is the whole story for a drop and
+     * NOTHING at all for a turn — so Spin down, Sway, Turn to face and Still
+     * all rendered as the same flat line on the ground, which reads as four
+     * broken thumbnails rather than four different moves.
+     */
+    const lifts = poses.map((p) => p.lift);
+    // The largest rotation on any axis, so a turn and a swing are both visible.
+    const rots = poses.map((p) => Math.max(Math.abs(p.rotX), Math.abs(p.rotY), Math.abs(p.rotZ)));
+
+    /*
+     * Each curve is scaled to its own peak rather than to a fixed maximum.
+     * A 0.06-radian breath and a full turn are both worth seeing, and a shared
+     * scale would flatten the gentle ones into the baseline — which is exactly
+     * the fault being fixed. The floor stops a still move being amplified into
+     * noise.
+     */
+    const peakLift = Math.max(...lifts, 0.001);
+    const peakRot = Math.max(...rots, 0.001);
+    const flatLift = peakLift < 0.02;
+    const flatRot = peakRot < 0.02;
+
+    const path = (values: number[], peak: number, span: number) =>
+      values
+        .map((v, i) => {
+          const x = 4 + (i / SAMPLES) * 36;
+          const y = 36 - (v / peak) * span;
+          return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+        })
+        .join(" ");
+
+    return {
+      height: flatLift ? null : path(lifts, peakLift, 26),
+      // Drawn shorter than the height curve so the two read apart at 44px even
+      // when a move does both, as a tumble does.
+      turn: flatRot ? null : path(rots, peakRot, 18),
+      lifts,
+    };
   }, [move]);
+
+  const still = !height && !turn;
 
   return (
     <svg viewBox="0 0 44 44" width={44} height={44} aria-hidden="true" className="move-svg">
-      {/* The bench it lands on, so the curve has something to be a height above. */}
+      {/* The bench it rests on, so a height has something to be measured from. */}
       <line x1="4" y1="36" x2="40" y2="36" className="move-ground" />
-      <path d={d} className="move-line" fill="none" />
+      {turn && <path d={turn} className="move-turn" fill="none" />}
+      {height && <path d={height} className="move-line" fill="none" />}
+      {/*
+       * "Still" is the one case where a flat line is the honest picture, so it
+       * gets the piece sitting on the bench rather than an empty box that looks
+       * like a thumbnail which failed to render.
+       */}
+      {still && <circle cx="22" cy="32" r="3.5" className="move-rest" />}
+      {lifts[0] > 0.02 && <circle cx="4" cy={36 - 26} r="1.6" className="move-start" />}
     </svg>
   );
 }
@@ -143,7 +186,25 @@ export function AnimationPanel({
                 role="radio"
                 aria-checked={on}
                 className={`move-cell ${on ? "move-cell-on" : ""}`}
-                onClick={() => onAnimation?.(on ? null : a.id)}
+                onClick={() => {
+                  /*
+                   * One move at a time.
+                   *
+                   * A camera move and a move on the piece both running turns
+                   * two deliberate shots into a drift: the piece rotates while
+                   * the camera rotates around it, and neither reads. Choosing
+                   * one clears the other, so what plays is always the single
+                   * shot that was picked.
+                   */
+                  onAnimation?.(on ? null : a.id);
+                  if (!on) {
+                    onObjectMove?.("none");
+                    // Picking a move is asking to see it. Requiring a second
+                    // press on a control further down the panel is a step that
+                    // exists for no reason.
+                    onAnimationPlaying?.(true);
+                  }
+                }}
                 title={`${a.label} — ${a.hint}`}
               >
                 <MovePath preset={a} />
@@ -153,45 +214,20 @@ export function AnimationPanel({
           })}
         </div>
 
+        {/*
+         * What the chosen move does, beside the move itself.
+         *
+         * This used to ride in the transport, which doubled the height of a bar
+         * that should be one row and left dead space under it. Whether a move
+         * loops matters when picking one, not when pressing play.
+         */}
         {preset && (
-          <>
-            <p className="field-hint mt-2">{preset.hint}.</p>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <button
-                className="dock-btn dock-btn-lg"
-                onClick={() => onAnimationPlaying?.(!animationPlaying)}
-                aria-pressed={animationPlaying}
-              >
-                {animationPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                {animationPlaying ? "Pause" : "Play"}
-              </button>
-              <button
-                className="dock-btn dock-btn-lg"
-                onClick={() => {
-                  onAnimation?.(null);
-                  onReset();
-                }}
-              >
-                <RotateCcw className="size-3.5" />
-                Stop
-              </button>
-            </div>
-            <NumberField
-              label="Length"
-              value={animationSeconds}
-              min={1}
-              max={30}
-              step={0.5}
-              precision={1}
-              suffix="s"
-              hint={
-                preset.loops
-                  ? "This move returns where it started, so the clip loops without a jump."
-                  : "This move ends somewhere else, so it does not loop cleanly — fine for a reveal, not for a feed."
-              }
-              onChange={(v) => onAnimationSeconds?.(v)}
-            />
-          </>
+          <p className="field-hint mt-2">
+            {preset.hint}.{" "}
+            {preset.loops
+              ? "Returns where it started, so the clip loops cleanly."
+              : "Ends elsewhere, so it will not loop — right for a reveal, not a feed."}
+          </p>
         )}
       </PanelGroup>
 
@@ -207,14 +243,30 @@ export function AnimationPanel({
       >
         <div className="mat-grid" role="radiogroup" aria-label="Object move">
           {OBJECT_MOVES.map((m) => {
-            const on = m.id === objectMove;
+            /*
+             * "Still" is the absence of a move, not a move.
+             *
+             * Highlighting it made clearing a camera move look like it had
+             * armed an object move instead — two cards lit at once, which is
+             * exactly what a single-shot panel must never show. It still acts
+             * as the button that clears one; it just does not claim to be one.
+             */
+            const on = m.id === objectMove && m.id !== "none";
             return (
               <button
                 key={m.id}
                 role="radio"
                 aria-checked={on}
                 className={`move-cell ${on ? "move-cell-on" : ""}`}
-                onClick={() => onObjectMove?.(m.id)}
+                onClick={() => {
+                  // Same rule in the other direction: arming a move on the
+                  // piece puts the camera down.
+                  onObjectMove?.(m.id);
+                  if (m.id !== "none") {
+                    onAnimation?.(null);
+                    onAnimationPlaying?.(true);
+                  }
+                }}
                 title={`${m.label} — ${m.hint}`}
               >
                 <ObjectPath move={m} />
