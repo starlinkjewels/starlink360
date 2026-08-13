@@ -82,6 +82,7 @@ import type { SavedView, StudioApi } from "./StudioRig";
 import {
   ASPECTS,
   DESTINATIONS,
+  PHOTO_DESTINATIONS,
   dimensionsFor,
   downloadBlob,
   exportName,
@@ -1406,6 +1407,49 @@ export function StudioPanel({
           onDelete={deletePart}
           disabled={disabled}
         />
+
+        {/*
+         * Where it is going, as one decision — the same treatment Video gets.
+         *
+         * Shape and size are two controls expressing one intention, and print
+         * adds DPI as a third. Nobody weighing 1:1 against 3:2 is thinking
+         * about ratios; they are thinking "this goes on Instagram", and every
+         * destination has one right answer for all of them. The controls below
+         * remain for anyone who wants them.
+         */}
+        <PanelGroup title="Where is it going?">
+          <div className="dest-grid" role="radiogroup" aria-label="Where is it going">
+            {PHOTO_DESTINATIONS.map((d) => {
+              const on = aspect.id === d.aspect && imageQuality === Math.min(d.base, maxBase);
+              return (
+                <button
+                  key={d.id}
+                  role="radio"
+                  aria-checked={on}
+                  className={`dest-chip ${on ? "dest-chip-on" : ""}`}
+                  disabled={disabled}
+                  onClick={() => {
+                    setAspect(ASPECTS.find((a) => a.id === d.aspect) ?? ASPECTS[0]);
+                    // Clamped to what this device can finish, same as Video.
+                    setImageQuality(Math.min(d.base, maxBase));
+                    /*
+                     * Print is the only one that cares about DPI: 300 is what a
+                     * press wants, and 72 is what everything on a screen wants.
+                     * Getting it wrong lands a 4K render in InDesign at 42
+                     * inches wide, which is the fault the pHYs writer exists to
+                     * prevent — so the destination sets it rather than leaving
+                     * it to be discovered.
+                     */
+                    onExportOptions?.({ ...exportOptions, dpi: d.id === "print" ? 300 : 72 });
+                  }}
+                >
+                  <span className="dest-chip-label">{d.label}</span>
+                  <span className="dest-chip-hint">{d.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+        </PanelGroup>
 
         <Field label="Shape" hint={aspect.hint}>
           <Select
