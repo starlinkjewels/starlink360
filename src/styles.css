@@ -5015,3 +5015,41 @@ input[type="radio"]:disabled {
   font-size: 0.62rem;
   color: var(--color-foreground);
 }
+
+/* ------------------------------------------------- the studio's own frame --
+ *
+ * These three were used in the markup and never defined — no `@utility`, no
+ * plain selector. They did not throw and they did not warn; the elements simply
+ * rendered with no styling of their own, which is the same fault that left the
+ * upload dialog positioned a full viewport below the fold. A sweep for classes
+ * with no rule now runs in `npm run test:css`.
+ */
+
+/* Everything in the panel: the heading row, then whichever section is open. */
+@utility studio-sections {
+  display: flex;
+  flex-direction: column;
+  /* No gap. `panel-group` owns the spacing between blocks and resets its own
+   * top margin on the first child; a gap here would double every seam. */
+  min-width: 0;
+}
+
+@utility sect-panel {
+  display: block;
+  /* Same reason: the groups inside space themselves. This exists to be a
+   * container with an identity, not to add rhythm of its own. */
+  min-width: 0;
+}
+
+/*
+ * The line under the panel heading that says what is currently set — "3 sets",
+ * "Orthographic", "2 struck". It was rendering at body size in body colour,
+ * competing with the heading above it instead of annotating it.
+ */
+@utility sect-caption {
+  margin-bottom: 0.75rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
