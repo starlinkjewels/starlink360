@@ -11,7 +11,7 @@ import {
   ViewportActions,
 } from "@/components/jewelry/shell/Canvas";
 import { DEFAULT_TOOL, type ToolMode } from "@/components/jewelry/shell/tools";
-import { useTheme } from "@/hooks/useTheme";
+import { useTheme, type Theme } from "@/hooks/useTheme";
 import { StudioPanel } from "@/components/jewelry/StudioPanel";
 import type { StudioApi } from "@/components/jewelry/StudioRig";
 import type { StoneGroup } from "@/components/jewelry/stones";
@@ -604,6 +604,70 @@ function Index() {
     [product.ref],
   );
 
+  /*
+   * The best-look toggle.
+   *
+   * First click layers changes on top of whatever is already set, each
+   * documented elsewhere in this codebase as the thing that makes a piece
+   * look photographed rather than rendered:
+   *
+   *  - `gemEnvironment: "tent"` — the light tent lighting.ts builds by hand
+   *    specifically because "a diamond is a picture of whatever its rays
+   *    land on." This is the single biggest lever on how a stone reads, and
+   *    the metal keeps its own environment throughout.
+   *  - `shadows.mode: "directional"` — a real cast shadow instead of the
+   *    soft contact pool. shadows.ts keeps contact as the default deliberately
+   *    ("not a change to make on the user's behalf — it is one click away
+   *    instead"); this button is that one click.
+   *  - `post.bloom.enabled` — cheap (bloom.ts halves its own buffer) and
+   *    tuned to catch only genuine sparkle above 0.95, not the metal.
+   *  - the panel theme goes to light, so the showcase reads as a bright
+   *    studio shot rather than the dark editing chrome.
+   *
+   * Switching the light tent on in the SAME tick as the shadow camera and the
+   * post composer — three fresh GPU allocations at once — reproducibly lost
+   * the WebGL context in testing. It is safe a frame later, once the shadow
+   * camera and composer have already been allocated, which is why it is set
+   * inside a `requestAnimationFrame` rather than alongside the rest.
+   *
+   * Second click restores exactly what was there before, from the snapshot
+   * taken on the way in — so this can never leave a piece stuck in a state
+   * nothing put it in on purpose.
+   */
+  const showcaseSnapshot = useRef<{
+    lighting: LightingSettings;
+    shadows: ShadowSettings;
+    post: PostSettings;
+    theme: Theme;
+  } | null>(null);
+  const [showcaseOn, setShowcaseOn] = useState(false);
+
+  const handleToggleShowcase = useCallback(() => {
+    const snapshot = showcaseSnapshot.current;
+    if (snapshot) {
+      showcaseSnapshot.current = null;
+      setLighting(snapshot.lighting);
+      setShadows(snapshot.shadows);
+      setPost(snapshot.post);
+      setTheme(snapshot.theme);
+      setShowcaseOn(false);
+      return;
+    }
+
+    showcaseSnapshot.current = { lighting, shadows, post, theme };
+    setShadows({ ...shadows, mode: "directional" });
+    setPost({ ...post, bloom: { ...post.bloom, enabled: true } });
+    setTheme("light");
+    setShowcaseOn(true);
+    requestAnimationFrame(() => {
+      setLighting((current) => ({
+        ...current,
+        separateGemEnvironment: true,
+        gemEnvironment: "tent",
+      }));
+    });
+  }, [lighting, shadows, post, theme, setTheme]);
+
   const handleUploaded = useCallback((p: Product) => {
     setProduct(p);
     setResetSignal((n) => n + 1);
@@ -839,6 +903,8 @@ function Index() {
 
           <ViewportActions
             onResetView={() => setResetSignal((n) => n + 1)}
+            onDefaultSettings={handleToggleShowcase}
+            defaultSettingsOn={showcaseOn}
             viewportRef={stageRef}
           />
 

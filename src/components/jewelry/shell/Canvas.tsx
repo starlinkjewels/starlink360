@@ -7,6 +7,7 @@ import {
   Play,
   Unlock,
   RotateCcw,
+  Wand2,
   X,
 } from "lucide-react";
 import { TOOLS, type ToolMode } from "./tools";
@@ -102,9 +103,15 @@ export function CanvasToolbar({
 
 export function ViewportActions({
   onResetView,
+  onDefaultSettings,
+  defaultSettingsOn,
   viewportRef,
 }: {
   onResetView: () => void;
+  /** Applies the best-look preset, or reverts it on a second click. */
+  onDefaultSettings: () => void;
+  /** Whether the best-look preset is the one currently applied. */
+  defaultSettingsOn: boolean;
   viewportRef: React.RefObject<HTMLElement | null>;
 }) {
   const toggleFullscreen = () => {
@@ -119,6 +126,19 @@ export function ViewportActions({
 
   return (
     <div className="vactions">
+      <button
+        className={`vaction ${defaultSettingsOn ? "ctool-on" : ""}`}
+        onClick={onDefaultSettings}
+        title={
+          defaultSettingsOn
+            ? "Back to your settings"
+            : "Best look — gem light tent, a real shadow, sparkle bloom"
+        }
+        aria-label="Best look"
+        aria-pressed={defaultSettingsOn}
+      >
+        <Wand2 className="size-4" />
+      </button>
       <button
         className="vaction"
         onClick={onResetView}
