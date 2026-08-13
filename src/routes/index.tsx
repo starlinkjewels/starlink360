@@ -99,14 +99,14 @@ export interface ViewerSearch {
 }
 
 /*
- * Passphrase that reveals the upload control.
+ * Passphrases that reveal the upload control, one per person.
  *
  * Obscurity, not security: it travels in the address bar, so anyone who is sent
  * a link with it — or who reads it out of the page source — can use it. That is
  * acceptable for hiding a control, and must not be relied on for anything that
  * needs actually protecting.
  */
-const UPLOAD_KEY = "bhumit";
+const UPLOAD_KEYS = ["bhumit", "dishant", "hardik"];
 
 const asText = (v: unknown, max: number): string | undefined => {
   const s = typeof v === "string" ? v.trim() : "";
@@ -144,13 +144,13 @@ export const Route = createFileRoute("/")({
   }),
   head: () => ({
     meta: [
-      { title: "RenderGod — Photorealistic Jewellery Rendering" },
+      { title: "Starlink — Photorealistic Jewellery Rendering" },
       {
         name: "description",
         content:
-          "Explore jewellery in interactive 3D with RenderGod. Rotate each piece in 360° and switch between gold, platinum and silver finishes live.",
+          "Explore jewellery in interactive 3D with Starlink. Rotate each piece in 360° and switch between gold, platinum and silver finishes live.",
       },
-      { property: "og:title", content: "RenderGod — Photorealistic Jewellery Rendering" },
+      { property: "og:title", content: "Starlink — Photorealistic Jewellery Rendering" },
       {
         property: "og:description",
         content:
@@ -630,7 +630,9 @@ function Index() {
   const { file: fileUrl, name: linkName, ref: linkRef, embed, key } = Route.useSearch();
   // Hidden everywhere by default — on the plain route and behind a ?file= link
   // alike. Only the passphrase brings it back.
-  const canUpload = key === UPLOAD_KEY;
+  // Case-insensitive: these are typed into an address bar by hand, and a
+  // capital letter is not a reason to hide the control.
+  const canUpload = !!key && UPLOAD_KEYS.includes(key.trim().toLowerCase());
 
   useEffect(() => {
     if (!fileUrl) return;

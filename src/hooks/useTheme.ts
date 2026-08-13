@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export type Theme = "dark" | "light";
 
-const KEY = "rendergod.theme";
+const KEY = "starlink.theme";
 
 /**
  * Theme lives on the <html> element as `data-theme`, which is what the CSS

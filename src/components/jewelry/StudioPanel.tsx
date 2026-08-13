@@ -554,7 +554,7 @@ export function StudioPanel({
    * user frames it by eye and saves it. Kept per product so a set survives a
    * reload.
    */
-  const storageKey = `rendergod.views.${productRef}`;
+  const storageKey = `starlink.views.${productRef}`;
   const [views, setViews] = useState<SavedView[]>([]);
   useEffect(() => {
     try {

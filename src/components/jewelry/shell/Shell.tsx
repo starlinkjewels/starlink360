@@ -33,7 +33,7 @@ export function TopBar({
   return (
     <header className="topbar">
       <span className="brand">
-        RenderGod<span className="brand-mark">✦</span>
+        Starlink<span className="brand-mark">✦</span>
       </span>
 
       <div className="topbar-actions">

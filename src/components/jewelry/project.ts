@@ -101,7 +101,7 @@ export interface ProjectInput {
  * the suite can assert the whole output.
  */
 export function saveProject(input: ProjectInput, savedAt: string): Project {
-  return { version: PROJECT_VERSION, app: "RenderGod", savedAt, ...input };
+  return { version: PROJECT_VERSION, app: "Starlink", savedAt, ...input };
 }
 
 export function projectJson(project: Project): string {
@@ -223,7 +223,7 @@ export function loadProject(text: string): LoadResult {
 
   const project: Project = {
     version: PROJECT_VERSION,
-    app: str(raw.app, "RenderGod", 40),
+    app: str(raw.app, "Starlink", 40),
     savedAt: str(raw.savedAt, "", 40),
     piece: { name: str(piece.name, "", 120), ref: str(piece.ref, "", 60) },
 
@@ -285,5 +285,5 @@ export function projectFileName(ref: string): string {
     .trim()
     .replace(/[^\w-]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `${slug || "project"}.rendergod.json`;
+  return `${slug || "project"}.starlink.json`;
 }

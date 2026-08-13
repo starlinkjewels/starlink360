@@ -237,7 +237,7 @@ const INPUT = {
 {
   const saved = saveProject(INPUT, "2026-08-12T10:00:00Z");
   check(saved.version === PROJECT_VERSION, "the version is stamped");
-  check(saved.app === "RenderGod", "and the app, for anyone opening it in an editor");
+  check(saved.app === "Starlink", "and the app, for anyone opening it in an editor");
 
   const round = loadProject(projectJson(saved));
   check(round.project !== null, "a saved project loads");
@@ -347,9 +347,9 @@ console.log("\n=== opening a project against another piece ===");
 }
 
 console.log("\n=== project file names ===");
-check(projectFileName("LP 043") === "LP-043.rendergod.json", "a ref becomes a filename");
-check(projectFileName("REF. LP 043") === "LP-043.rendergod.json", "the REF prefix is dropped");
-check(projectFileName("") === "project.rendergod.json", "and nothing at all still has a name");
+check(projectFileName("LP 043") === "LP-043.starlink.json", "a ref becomes a filename");
+check(projectFileName("REF. LP 043") === "LP-043.starlink.json", "the REF prefix is dropped");
+check(projectFileName("") === "project.starlink.json", "and nothing at all still has a name");
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);
 process.exit(fail ? 1 : 0);
