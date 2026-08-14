@@ -192,6 +192,8 @@ export function createSceneRenderer(
   });
 
   const composer = new EffectComposer(gl, target);
+  /** What the composer was last told; see `render` for why it is watched. */
+  let appliedRatio = gl.getPixelRatio();
   composer.addPass(new RenderPass(scene, camera));
 
   /*
@@ -248,6 +250,24 @@ export function createSceneRenderer(
 
   return {
     render() {
+      /*
+       * The composer captures the pixel ratio when it is built and never looks
+       * again, so every target it owns stays the size it was born at. Dropping
+       * the renderer's ratio to keep the frame rate up therefore shrank the
+       * scene pass and nothing else — the expensive half, SSR and the bright
+       * pass, carried on at full resolution and the frame rate did not move.
+       *
+       * Checked here rather than pushed from outside because the ratio has more
+       * than one owner: an export sets it to 1 and restores it afterwards, and
+       * the adaptive loop moves it while the pointer is down. Reading it each
+       * frame means the composer follows whoever last set it, with no ordering
+       * to get wrong.
+       */
+      const ratio = gl.getPixelRatio();
+      if (ratio !== appliedRatio) {
+        appliedRatio = ratio;
+        composer.setPixelRatio(ratio);
+      }
       composer.render();
     },
     setSize(width, height) {

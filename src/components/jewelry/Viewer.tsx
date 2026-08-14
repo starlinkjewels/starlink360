@@ -271,6 +271,66 @@ function SelectionHighlight({
  * prop change alone moves the numbers without moving the shadow — which reads
  * as the controls not working.
  */
+/**
+ * Fewer pixels while the piece is moving.
+ *
+ * The stutter people report is always the same moment: they drag to turn the
+ * piece and it lurches. At rest the scene is cheap enough, but a drag asks for
+ * a new frame every 16ms of a ray-traced gem shader and a shadow pass, at up
+ * to twice the device pixel ratio — four times the pixels of a plain render.
+ * Nothing in the chain ever stepped down, so the frame rate had to give.
+ *
+ * Half resolution while the pointer is down and full resolution the moment it
+ * is released: motion hides the softness, and a still frame is what anyone
+ * actually looks at. Restoring is delayed a beat because OrbitControls damping
+ * keeps gliding after release, and sharpening mid-glide costs a frame exactly
+ * where it shows.
+ *
+ * Exports are untouched. They set the pixel ratio themselves and restore it,
+ * and nothing here fires while one runs.
+ */
+function InteractionQuality({
+  controlsRef,
+}: {
+  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+}) {
+  const setDpr = useThree((s) => s.setDpr);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const full = Math.min(window.devicePixelRatio || 1, 2);
+    /*
+     * Never below 1. Going under it is visible as a soft, cheap-looking piece
+     * even in motion, and on the integrated graphics this is aimed at the win
+     * from halving again is small next to what it costs to look at.
+     */
+    const moving = Math.max(1, full / 2);
+    let restore: ReturnType<typeof setTimeout> | undefined;
+
+    const onStart = () => {
+      clearTimeout(restore);
+      setDpr(moving);
+    };
+    const onEnd = () => {
+      clearTimeout(restore);
+      restore = setTimeout(() => setDpr(full), 250);
+    };
+
+    controls.addEventListener("start", onStart);
+    controls.addEventListener("end", onEnd);
+    return () => {
+      clearTimeout(restore);
+      controls.removeEventListener("start", onStart);
+      controls.removeEventListener("end", onEnd);
+      setDpr(full);
+    };
+  }, [controlsRef, setDpr]);
+
+  return null;
+}
+
 function LightRig({
   lights,
   fit,
@@ -1190,6 +1250,7 @@ export default function Viewer({
           piece={pieceRef}
         />
         <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
+        <InteractionQuality controlsRef={controlsRef} />
         {/*
           Bottom-left orientation ball, and a way to snap to an axis.
 

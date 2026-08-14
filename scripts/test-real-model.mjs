@@ -814,7 +814,10 @@ console.log("=== finding the claws ===");
     solids: mesh.userData.solids,
   };
 
+  const t0 = performance.now();
   const found = findProngs([metalPart, stonePart]);
+  const ms = performance.now() - t0;
+  console.log(`  findProngs took ${ms.toFixed(0)}ms on ${metalSolids.length - 1} metal solids`);
   const likely = found.filter((c) => c.confidence === "likely");
   const metalTotal = metalSolids.length - 1;
   console.log(
