@@ -36,6 +36,18 @@ export interface MetalMaterial {
  * Karat drives colour: gold is diluted with copper and silver, so 9k is a long
  * way from 24k and a client can tell at a glance. Ordered by group so the grid
  * reads down a family rather than jumping between them.
+ *
+ * Every polishable metal below (Gold, White, Silver) shares one roughness,
+ * 0.02 — a jeweller's final finish, not a per-karat property. The spread these
+ * used to carry (0.16 to 0.27) was never a real difference between alloys —
+ * roughness is documented on the type itself as "polish level, not alloy" —
+ * it was just never pushed as low as an actual mirror polish goes, which is
+ * what a piece looks like fresh from a jeweller's buffing wheel and what read
+ * as "real metal" against "CG" once it was tried. Speciality below keeps its
+ * own, different values on purpose: titanium is brushed, black rhodium plates
+ * with a satin sheen, and antique bronze is deliberately patinated — none of
+ * the three is ever a mirror in real life, so defaulting them to one would be
+ * wrong in the other direction.
  */
 export const METALS: MetalMaterial[] = [
   {
@@ -43,7 +55,7 @@ export const METALS: MetalMaterial[] = [
     name: "24k Yellow Gold",
     group: "Gold",
     color: "#ffd75e",
-    roughness: 0.19,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -51,7 +63,7 @@ export const METALS: MetalMaterial[] = [
     name: "22k Yellow Gold",
     group: "Gold",
     color: "#fcd070",
-    roughness: 0.2,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -59,7 +71,7 @@ export const METALS: MetalMaterial[] = [
     name: "18k Yellow Gold",
     group: "Gold",
     color: "#f2cf76",
-    roughness: 0.24,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -67,7 +79,7 @@ export const METALS: MetalMaterial[] = [
     name: "14k Yellow Gold",
     group: "Gold",
     color: "#eed08d",
-    roughness: 0.25,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -75,7 +87,7 @@ export const METALS: MetalMaterial[] = [
     name: "9k Yellow Gold",
     group: "Gold",
     color: "#e6d2a6",
-    roughness: 0.27,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -83,7 +95,7 @@ export const METALS: MetalMaterial[] = [
     name: "18k Rose Gold",
     group: "Gold",
     color: "#f0b79c",
-    roughness: 0.26,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -91,7 +103,7 @@ export const METALS: MetalMaterial[] = [
     name: "14k Rose Gold",
     group: "Gold",
     color: "#eebda8",
-    roughness: 0.27,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -99,7 +111,7 @@ export const METALS: MetalMaterial[] = [
     name: "18k Red Gold",
     group: "Gold",
     color: "#e79c7d",
-    roughness: 0.26,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -107,7 +119,7 @@ export const METALS: MetalMaterial[] = [
     name: "18k Green Gold",
     group: "Gold",
     color: "#dcd694",
-    roughness: 0.26,
+    roughness: 0.02,
     metalness: 1,
   },
 
@@ -116,7 +128,7 @@ export const METALS: MetalMaterial[] = [
     name: "18k White Gold",
     group: "White",
     color: "#ecebe6",
-    roughness: 0.2,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -124,7 +136,7 @@ export const METALS: MetalMaterial[] = [
     name: "14k White Gold",
     group: "White",
     color: "#e8e6df",
-    roughness: 0.22,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -132,7 +144,7 @@ export const METALS: MetalMaterial[] = [
     name: "Platinum 950",
     group: "White",
     color: "#dadbe0",
-    roughness: 0.22,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -140,7 +152,7 @@ export const METALS: MetalMaterial[] = [
     name: "Palladium 950",
     group: "White",
     color: "#d3d4d6",
-    roughness: 0.24,
+    roughness: 0.02,
     metalness: 1,
   },
 
@@ -149,7 +161,7 @@ export const METALS: MetalMaterial[] = [
     name: "Sterling Silver",
     group: "Silver",
     color: "#cfd0d4",
-    roughness: 0.18,
+    roughness: 0.02,
     metalness: 1,
   },
   {
@@ -157,7 +169,7 @@ export const METALS: MetalMaterial[] = [
     name: "Fine Silver",
     group: "Silver",
     color: "#dcdde0",
-    roughness: 0.16,
+    roughness: 0.02,
     metalness: 1,
   },
 

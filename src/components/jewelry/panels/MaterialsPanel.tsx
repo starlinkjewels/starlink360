@@ -294,6 +294,27 @@ export function MaterialsPanel({
       )}
 
       {/*
+        Always visible rather than behind the Custom toggle below: this is the
+        single biggest lever on whether the metal reads as a mirror-polished
+        photograph or a satin-finished render, and it should not take finding
+        a small icon to reach. Framed as smoothness rather than roughness —
+        up means smoother — because that is the direction a jeweller thinks
+        in, even though the material underneath still stores roughness.
+      */}
+      {tab === "metals" && has && (
+        <NumberField
+          label="Smoothness"
+          value={1 - (patch.roughness ?? (chosen as MetalMaterial | undefined)?.roughness ?? 0.02)}
+          min={0}
+          max={1}
+          step={0.01}
+          precision={2}
+          hint="All the way up is a mirror polish; down is brushed or satin. This is what a highlight looks like — tight and bright at the top, soft and spread at the bottom."
+          onChange={(v) => edit({ roughness: 1 - v })}
+        />
+      )}
+
+      {/*
         The parts of this kind, by name.
 
         Clicking the piece selects too, but only for something you can see and
@@ -379,16 +400,8 @@ export function MaterialsPanel({
 
           {tab === "metals" ? (
             <>
-              <NumberField
-                label="Roughness"
-                value={patch.roughness ?? (chosen as MetalMaterial | undefined)?.roughness ?? 0.25}
-                min={0}
-                max={1}
-                step={0.01}
-                precision={2}
-                hint="0 is a mirror polish, 1 is fully matte."
-                onChange={(v) => edit({ roughness: v })}
-              />
+              {/* Smoothness (roughness) lives above, always visible — it did
+                  not belong hidden behind this toggle. */}
               <NumberField
                 label="Metalness"
                 value={patch.metalness ?? (chosen as MetalMaterial | undefined)?.metalness ?? 1}

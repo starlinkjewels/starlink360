@@ -17,6 +17,7 @@ import {
   DEFAULT_BLOOM,
   DEFAULT_DOF,
   DEFAULT_FILM,
+  DEFAULT_HIGHLIGHTS,
   DEFAULT_POST,
   DEFAULT_SSR,
   composerKey,
@@ -30,10 +31,32 @@ const check = (ok, label, detail) => {
   if (!ok) fail++;
 };
 
+/*
+ * Same display path as test-lighting.mjs's tent measurement: three's
+ * ACESFilmicToneMapping (scalar form) at the viewer's default exposure, then
+ * sRGB. Duplicated rather than imported — this file only compiles bloom.ts,
+ * and the constant is small enough that sharing a module across two
+ * independent suites is more coupling than the duplication it would save.
+ * 1.4 / 0.6 mirrors DEFAULT_LIGHTING.exposure there.
+ */
+const EXPOSURE_SCALE = 1.4 / 0.6;
+const aces = (c) => {
+  c *= EXPOSURE_SCALE;
+  const a = c * (c + 0.0245786) - 0.000090537;
+  const b = c * (0.983729 * c + 0.432951) + 0.238081;
+  return Math.min(1, Math.max(0, a / b));
+};
+const srgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+const screen = (c) => Math.round(srgb(aces(c)) * 255);
+
 const withBloom = (patch) => ({ ...DEFAULT_POST, bloom: { ...DEFAULT_BLOOM, ...patch } });
 const withDof = (patch) => ({ ...DEFAULT_POST, dof: { ...DEFAULT_DOF, ...patch } });
 const withSsr = (patch) => ({ ...DEFAULT_POST, ssr: { ...DEFAULT_SSR, ...patch } });
 const withFilm = (patch) => ({ ...DEFAULT_POST, film: { ...DEFAULT_FILM, ...patch } });
+const withHighlights = (patch) => ({
+  ...DEFAULT_POST,
+  highlights: { ...DEFAULT_HIGHLIGHTS, ...patch },
+});
 
 /*
  * Bloom is the exception, and deliberately so. On a jewellery viewer the halo
@@ -84,19 +107,59 @@ check(
   `${DEFAULT_FILM.aberration}`,
 );
 
+/*
+ * Highlight recovery is the third effect on by default. It runs before tone
+ * mapping, not after like Film — it is compressing light, not photographing
+ * a finished frame — so it gets its own section rather than living in Film.
+ */
+console.log("\n=== highlight recovery is on, and leaves midtones alone ===");
+check(
+  DEFAULT_HIGHLIGHTS.enabled,
+  "on — otherwise two different blown facets both read as the same flat white",
+);
+check(
+  DEFAULT_HIGHLIGHTS.strength > 0 && DEFAULT_HIGHLIGHTS.strength <= 10,
+  "a real compression amount, not zero or something absurd",
+  `${DEFAULT_HIGHLIGHTS.strength}`,
+);
+/*
+ * Worked out against this renderer's own ACES curve, not guessed: at the
+ * first value tried (0.5) a facet 10x over white and one 40x over both
+ * rounded to the same 8-bit output — invisible. This checks the default
+ * actually separates them, using the aces()/srgb() path defined above.
+ */
+{
+  const compress = (peak, strength) => {
+    if (peak <= 1.0 || strength <= 0.0001) return peak;
+    const excess = peak - 1.0;
+    return 1.0 + Math.log(1.0 + excess * strength) / strength;
+  };
+  const screenOf = (peak) => screen(compress(peak, DEFAULT_HIGHLIGHTS.strength));
+  const tenX = screenOf(10);
+  const fortyX = screenOf(40);
+  check(
+    tenX !== fortyX,
+    "a facet 10x over white and one 40x over land on different 8-bit values",
+    `${tenX} vs ${fortyX}`,
+  );
+  check(fortyX < 255, "and even a facet 40x over white is not pinned to pure 255", `${fortyX}`);
+}
+
 console.log("\n=== a composer exists only when something needs one ===");
 check(usesComposer(withBloom({ enabled: true })), "bloom needs one");
 check(usesComposer(withDof({ enabled: true })), "depth of field needs one");
 check(usesComposer(withSsr({ enabled: true })), "SSR needs one");
 check(usesComposer(withFilm({ enabled: true })), "film needs one too");
+check(usesComposer(withHighlights({ enabled: true })), "and so does highlight recovery");
 check(
   !usesComposer({
     ...withBloom({ enabled: false }),
     dof: { ...DEFAULT_DOF, enabled: false },
     ssr: { ...DEFAULT_SSR, enabled: false },
     film: { ...DEFAULT_FILM, enabled: false },
+    highlights: { ...DEFAULT_HIGHLIGHTS, enabled: false },
   }),
-  "and none at all when every effect, film included, is off",
+  "and none at all when every effect is off",
 );
 /*
  * Enabled with zero strength draws nothing, so building the whole chain for it
@@ -107,6 +170,7 @@ check(
   !usesComposer({
     ...withBloom({ enabled: true, strength: 0 }),
     film: { ...DEFAULT_FILM, enabled: false },
+    highlights: { ...DEFAULT_HIGHLIGHTS, enabled: false },
   }),
   "but bloom at zero strength does not, on its own — it would build a chain to change nothing",
 );
@@ -115,6 +179,7 @@ check(
     ...withBloom({ enabled: true, strength: 0 }),
     dof: { ...DEFAULT_DOF, enabled: true },
     film: { ...DEFAULT_FILM, enabled: false },
+    highlights: { ...DEFAULT_HIGHLIGHTS, enabled: false },
   }),
   "though another effect still brings one back",
 );
@@ -143,6 +208,10 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
     composerKey(base) === composerKey(withFilm({ grain: 0.2, vignette: 0.9, aberration: 0.8 })),
     "and film's grain, vignette and aberration are uniforms too",
   );
+  check(
+    composerKey(base) === composerKey(withHighlights({ strength: 1.5 })),
+    "and highlight recovery's strength",
+  );
 
   /*
    * Baked in at construction. Changing any of these in place silently does
@@ -170,6 +239,10 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
   check(
     composerKey(base) !== composerKey(withFilm({ enabled: false })),
     "turning film off changes which passes exist too",
+  );
+  check(
+    composerKey(base) !== composerKey(withHighlights({ enabled: false })),
+    "and so does turning off highlight recovery",
   );
 }
 

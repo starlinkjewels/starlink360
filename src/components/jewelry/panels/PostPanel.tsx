@@ -1,15 +1,17 @@
 /*
  * Post processing.
  *
- * Four effects. Depth of field and SSR are off by default, each costing a
+ * Five effects. Depth of field and SSR are off by default, each costing a
  * full-screen pass on top of the render — that cost is stated on screen
  * rather than discovered, and so is the one honest caveat: SSR does not work
  * properly on transmissive materials, which is most of what this product
  * renders. It is here because a product competing on a feature list needs
  * it — warned about, not hidden.
  *
- * Bloom and Film are on by default. Neither is a flourish here: a stone
- * without bloom is a grey dot, and a frame without grain, vignette or lens
+ * Bloom, Highlight recovery and Film are on by default. None of the three is
+ * a flourish: a stone without bloom is a grey dot, a frame where every bright
+ * facet saturates to the same flat white has lost the thing that made it
+ * sparkle rather than glow, and a frame without grain, vignette or lens
  * aberration is a render, not a photograph.
  */
 import { RotateCcw } from "lucide-react";
@@ -67,6 +69,8 @@ export function PostPanel({
     onPost({ ...post, ssr: { ...post.ssr, ...patch } });
   const film = (patch: Partial<PostSettings["film"]>) =>
     onPost({ ...post, film: { ...post.film, ...patch } });
+  const highlights = (patch: Partial<PostSettings["highlights"]>) =>
+    onPost({ ...post, highlights: { ...post.highlights, ...patch } });
 
   return (
     <>
@@ -123,8 +127,33 @@ export function PostPanel({
         </div>
       )}
 
+      {/* ── Highlight recovery ── */}
+      <label className="tex-toggle mt-2">
+        <input
+          type="checkbox"
+          checked={post.highlights.enabled}
+          onChange={(e) => highlights({ enabled: e.target.checked })}
+        />
+        <span>Highlight recovery</span>
+      </label>
+
+      {post.highlights.enabled && (
+        <div className="mat-editor">
+          <NumberField
+            label="Strength"
+            value={post.highlights.strength}
+            min={0}
+            max={10}
+            step={0.1}
+            precision={2}
+            hint="Compresses whatever is already brighter than white so two different bright facets stay two different shades instead of both flattening to the same white. There's a real ceiling — a screen only has 256 shades — so this narrows the gap rather than closing it. Leaves anything not already blown untouched."
+            onChange={(v) => highlights({ strength: v })}
+          />
+        </div>
+      )}
+
       {/* ── Bloom ── */}
-      <label className="tex-toggle">
+      <label className="tex-toggle mt-2">
         <input
           type="checkbox"
           checked={post.bloom.enabled}

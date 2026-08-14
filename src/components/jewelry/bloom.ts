@@ -174,12 +174,57 @@ export const DEFAULT_FILM: FilmSettings = {
   aberration: 0.15,
 };
 
+/**
+ * Highlight recovery.
+ *
+ * A diamond's brightest facet and its second-brightest facet can both be many
+ * times over white before tone mapping ever sees them — the light tent's hard
+ * sources go up to intensity 26 — and ACES's own shoulder, however good, still
+ * has a point past which everything above it reads as the same flat white. A
+ * real diamond photograph does not have that flatness: two flashes at
+ * different intensities look different, which is most of what "sparkle" is
+ * as opposed to "glow".
+ *
+ * This runs BEFORE tone mapping, in the same linear HDR space bloom and depth
+ * of field already work in — unlike Film below, this is not what a camera
+ * does to a finished photograph, it is compressing light that has not been
+ * turned into a photograph yet. Bloom must still run first: it decides what
+ * glows from the same uncompressed brightness a real lens would see, and
+ * compressing before that would starve it.
+ *
+ * There is a real ceiling here that no amount of strength removes: this is
+ * an SDR canvas, 256 shades per channel, and two facets ten and forty times
+ * over white are never going to land far apart in an 8-bit output — there is
+ * nowhere for "far apart" to mean. What this buys is the difference between
+ * "identical" and "close but distinguishable", worked out numerically against
+ * this renderer's own ACES curve rather than guessed: 0.5 (the first value
+ * tried) turned out to move those two peaks from 255/255 to only 253/254 —
+ * invisible. 2.0 moves them to 248/250, which reads as two different flashes
+ * rather than one shape. Actual HDR display output (wide-gamut, 10-bit,
+ * shown on hardware that supports it) is a different and much larger project
+ * than a tone-mapping constant; this is the honest version of that ask on an
+ * ordinary screen.
+ */
+export interface HighlightSettings {
+  enabled: boolean;
+  /** 0 leaves everything above white to tone mapping alone. Higher values
+   *  compress a wider range of highlight brightness into visibly different
+   *  shades instead of one flat white. */
+  strength: number;
+}
+
+export const DEFAULT_HIGHLIGHTS: HighlightSettings = {
+  enabled: true,
+  strength: 2,
+};
+
 /** Everything the composer draws, in one object. */
 export interface PostSettings {
   bloom: BloomSettings;
   dof: DofSettings;
   ssr: SsrSettings;
   film: FilmSettings;
+  highlights: HighlightSettings;
 }
 
 export const DEFAULT_POST: PostSettings = {
@@ -187,6 +232,48 @@ export const DEFAULT_POST: PostSettings = {
   dof: DEFAULT_DOF,
   ssr: DEFAULT_SSR,
   film: DEFAULT_FILM,
+  highlights: DEFAULT_HIGHLIGHTS,
+};
+
+/**
+ * Compresses whatever is already brighter than white, logarithmically rather
+ * than linearly — a facet ten times over gets pulled in far more than one
+ * twice over, which is what keeps them looking different instead of both
+ * saturating to the same value a little sooner.
+ *
+ * Below 1.0 (anything not already blown) this is the identity: midtones and
+ * shadows are untouched, which is the difference between this and lowering
+ * exposure — exposure dims the whole picture to buy the highlights headroom,
+ * this only ever touches pixels already past white.
+ */
+const HighlightShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    strength: { value: DEFAULT_HIGHLIGHTS.strength },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float strength;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float peak = max(c.r, max(c.g, c.b));
+      if (peak > 1.0 && strength > 0.0001) {
+        float excess = peak - 1.0;
+        float compressed = 1.0 + log(1.0 + excess * strength) / strength;
+        c.rgb *= compressed / peak;
+      }
+      gl_FragColor = c;
+    }
+  `,
 };
 
 /**
@@ -361,6 +448,16 @@ export function createSceneRenderer(
     composer.addPass(dof);
   }
 
+  // Still linear HDR here — see HighlightShader for why this runs after
+  // bloom (which needs the uncompressed brightness) but before tone mapping
+  // (which is what would otherwise flatten it).
+  let highlights: ShaderPass | null = null;
+  if (post.highlights.enabled) {
+    highlights = new ShaderPass(HighlightShader);
+    highlights.uniforms.strength.value = post.highlights.strength;
+    composer.addPass(highlights);
+  }
+
   // Tone mapping and sRGB conversion for the composed frame.
   composer.addPass(new OutputPass());
 
@@ -439,6 +536,9 @@ export function createSceneRenderer(
         film.uniforms.aberration.value = next.film.aberration;
         film.uniforms.grain.value = next.film.grain;
       }
+      if (highlights) {
+        highlights.uniforms.strength.value = next.highlights.strength;
+      }
     },
     dispose() {
       ssr?.dispose();
@@ -467,6 +567,7 @@ export function composerKey(post: PostSettings): string {
     post.ssr.width,
     post.ssr.height,
     post.film.enabled ? 1 : 0,
+    post.highlights.enabled ? 1 : 0,
   ].join("|");
 }
 
@@ -481,6 +582,7 @@ export function usesComposer(post: PostSettings): boolean {
     (post.bloom.enabled && post.bloom.strength > 0) ||
     post.dof.enabled ||
     post.ssr.enabled ||
-    post.film.enabled
+    post.film.enabled ||
+    post.highlights.enabled
   );
 }
