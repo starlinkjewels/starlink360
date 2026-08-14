@@ -717,10 +717,38 @@ function Index() {
     setShadows({ ...shadows, mode: "directional" });
     setPost({
       ...post,
-      bloom: { ...post.bloom, enabled: true, strength: 0.6, radius: 0.55 },
+      bloom: { ...post.bloom, enabled: true, strength: 0.45, radius: 0.45 },
+      // Compresses highlights already above white a little harder than the
+      // everyday default, so the extra exposure/reflection below reads as
+      // brighter facets rather than a flat white patch — the mechanism this
+      // file already built for exactly that problem (see HighlightSettings).
+      highlights: { ...post.highlights, enabled: true, strength: 3 },
     });
     setTheme("light");
     setLights(resetLights());
+    /*
+     * Exposure and environment intensity, raised immediately rather than
+     * deferred like the gem tent below.
+     *
+     * Bloom needs something already bright enough to catch, and the light
+     * rig only looks different if it had been touched — on a piece where
+     * neither applies, those two changes are invisible and "best look"
+     * reads as broken. These multiply the WHOLE render, metal and
+     * background alike, so they show up on every piece, from every angle,
+     * whatever the rig already was.
+     *
+     * Kept modest on purpose. The first version of this pushed both much
+     * harder and the result was a flat white piece instead of a photographed
+     * one — a real product shot has bright, distinct highlights, not a
+     * washed-out one. `Math.max` rather than a flat overwrite: a render
+     * already pushed brighter than this on purpose should not be dimmed back
+     * down in the name of "best".
+     */
+    setLighting((current) => ({
+      ...current,
+      exposure: Math.max(current.exposure, 1.55),
+      environmentIntensity: Math.max(current.environmentIntensity, 1.15),
+    }));
     setShowcaseOn(true);
     requestAnimationFrame(() => {
       setLighting((current) => ({
