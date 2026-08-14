@@ -108,11 +108,13 @@ export function ObjectsPanel({
 
   return (
     <>
+      {/*
+       * One line. The original explained both gestures in four, which is a
+       * paragraph of instructions above a list that demonstrates them — read
+       * once, then permanent clutter at the top of the panel.
+       */}
       <PanelIntro>
-        Everything in this piece, as the file describes it. Click a <strong>name</strong> to select
-        just that one; click its <strong>box</strong> to add or remove it from the selection. Metal
-        and stones can be selected together, and any material, finish or mark applies to exactly
-        what is selected.
+        Tap a <strong>name</strong> to select it alone, or its <strong>box</strong> to add it.
       </PanelIntro>
 
       {parts.length === 0 && <p className="field-hint">Nothing loaded yet.</p>}
@@ -126,41 +128,50 @@ export function ObjectsPanel({
        * tool and the export path keep working with no knowledge that groups
        * exist. Nothing downstream changed to support this.
        */}
-      {onGroups && parts.length > 0 && (
+      {onGroups && parts.length > 0 && (selected.size > 0 || groups.length > 0) && (
         <PanelGroup title="Saved sets">
           {/*
            * Named on the way in. A list of "Set 1, Set 2, Set 3" is a list
            * nobody can use an hour later, and asking for the name afterwards
            * means everyone skips it.
            */}
-          <input
-            className="text-field"
-            value={draftName}
-            maxLength={40}
-            placeholder="Centre cluster, Prongs, Bail…"
-            aria-label="Name for this set"
-            onChange={(e) => setDraftName(e.target.value)}
-          />
-          <button
-            className="btn-ghost"
-            disabled={selected.size === 0 || selectionKind === null}
-            title={
-              selected.size === 0
-                ? "Select some objects first"
-                : selectionKind === null
-                  ? "A set is metal or stones, not both — a material only applies to one"
-                  : "Save the current selection as a named set"
-            }
-            onClick={() => {
-              if (!selectionKind) return;
-              onGroups(
-                createGroup(groups, `Set ${groups.length + 1}`, [...selected], selectionKind),
-              );
-            }}
-          >
-            <FolderPlus className="size-3.5" />
-            Group selection ({selected.size})
-          </button>
+          {/*
+           * Only while something is selected. A naming field and a full-width
+           * button sitting above an empty list is the panel asking a question
+           * nobody posed.
+           */}
+          {selected.size > 0 && (
+            <div className="set-save">
+              <input
+                className="text-field"
+                value={draftName}
+                maxLength={40}
+                placeholder="Centre cluster, Prongs, Bail…"
+                aria-label="Name for this set"
+                onChange={(e) => setDraftName(e.target.value)}
+              />
+              <button
+                className="btn-ghost"
+                disabled={selected.size === 0 || selectionKind === null}
+                title={
+                  selected.size === 0
+                    ? "Select some objects first"
+                    : selectionKind === null
+                      ? "A set is metal or stones, not both — a material only applies to one"
+                      : "Save the current selection as a named set"
+                }
+                onClick={() => {
+                  if (!selectionKind) return;
+                  onGroups(
+                    createGroup(groups, `Set ${groups.length + 1}`, [...selected], selectionKind),
+                  );
+                }}
+              >
+                <FolderPlus className="size-3.5" />
+                Save {selected.size}
+              </button>
+            </div>
+          )}
 
           {/*
            * Refused rather than allowed, and said out loud. The metal renderer

@@ -5297,3 +5297,24 @@ input[type="radio"]:disabled {
   border-color: color-mix(in oklab, var(--gold) 70%, transparent);
   background: color-mix(in oklab, var(--gold) 16%, transparent);
 }
+
+/* Name and save on one line: it is a single action, not two. */
+@utility set-save {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+
+  /* The field takes the slack; the button stays as wide as its label. */
+  & > .text-field {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  & > .btn-ghost {
+    flex: none;
+    width: auto;
+    min-height: 2rem;
+    padding: 0 0.7rem;
+    white-space: nowrap;
+  }
+}
