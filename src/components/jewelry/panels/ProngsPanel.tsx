@@ -9,7 +9,9 @@
  * proximity, and repeated tuning against a real piece never got past
  * "either everything or nothing." Picking a prong is a person's own click.
  */
-import { Brush as BrushIcon } from "lucide-react";
+import { Brush as BrushIcon, Wand2 } from "lucide-react";
+import { useMemo } from "react";
+import { findProngs, prongIds } from "../prongDetect";
 import {
   PRONG_HEIGHT_MAX,
   PRONG_HEIGHT_MIN,
@@ -30,6 +32,7 @@ export function ProngsPanel({
   selected,
   prongHeights,
   onProngHeights,
+  onSelect,
   armed = null,
   onArm,
 }: {
@@ -49,6 +52,27 @@ export function ProngsPanel({
   const common = commonProngHeight(prongHeights, targets);
   const changed = targets.some((id) => (prongHeights[id] ?? 1) !== 1);
 
+  /*
+   * A starting point, not an answer.
+   *
+   * Claws are found by what they HOLD — within a stone's own radius of it,
+   * smaller than that stone, and with two to eight companions around the same
+   * one. Size alone cannot do this: a first attempt used the brush's own size
+   * filter and returned 666 of 675 objects on a necklace, because every chain
+   * link is small relative to a 182mm chain.
+   *
+   * EVERYTHING that passes those tests is offered, including the ones marked
+   * unsure. They were only demoted for sitting alone by their nearest stone,
+   * having already cleared both geometric tests — and for a select-all the
+   * trade runs the other way round: a claw left out costs a hunt through the
+   * piece to find, an extra one costs a click to drop.
+   *
+   * What this cannot reach is a bead modelled as part of the plate rather than
+   * as its own solid. There is no separate object to select, so no amount of
+   * detection will find it; those stay a click on the piece.
+   */
+  const suggested = useMemo(() => prongIds(findProngs(parts), false), [parts]);
+
   return (
     <>
       <PanelIntro>
@@ -57,6 +81,24 @@ export function ProngsPanel({
         or anything clearly too large to be a claw — a shank, or a plate a whole field of stones is
         set into — does nothing.
       </PanelIntro>
+
+      {onSelect && suggested.length > 0 && (
+        <div className="prong-suggest">
+          <button
+            className="btn-ghost"
+            onClick={() => onSelect(new Set(suggested))}
+            title="Select the metal that appears to hold a stone"
+          >
+            <Wand2 className="size-3.5" />
+            Select all prongs ({suggested.length})
+          </button>
+          <p className="field-hint">
+            Found by what they hold, so check them before adjusting. Click any prong on the piece to
+            add one it missed, or click a selected one to drop it. Save the result in Objects to
+            reuse it later.
+          </p>
+        </div>
+      )}
 
       <PanelStatus
         narrowed={targets.length > 0}

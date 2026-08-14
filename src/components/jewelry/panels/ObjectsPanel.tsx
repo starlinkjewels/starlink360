@@ -27,11 +27,12 @@
  * it has always been, which is what lets a row here feed the material panels,
  * the stamp tool and `groups.ts` without any of them changing.
  */
-import { Check, ChevronRight, FolderPlus, Layers, Trash2 } from "lucide-react";
+import { Check, ChevronRight, FolderPlus, Layers, Trash2, Wand2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { applyClick, solidCount, solidId, type Part, type PartKind } from "../selection";
 import { PanelGroup, PanelIntro } from "../ui/Panel";
 import { createGroup, kindOf, removeGroup, renameGroup, type PartGroup } from "../groups";
+import { findProngs, prongIds } from "../prongDetect";
 
 /**
  * How many individual objects a part lists before it stops.
@@ -42,6 +43,13 @@ import { createGroup, kindOf, removeGroup, renameGroup, type PartGroup } from ".
  * because a list that silently stops is worse than one that admits it.
  */
 const VISIBLE_SOLIDS = 120;
+
+/*
+ * The prong list collapses through the same `open` set the parts use. It needs
+ * a key of its own, and one that cannot collide with a part id — those carry a
+ * "kind|name" shape, so a bare word never matches one.
+ */
+const PRONGS_KEY = "prongs";
 
 const KINDS: { kind: PartKind; label: string; unit: string }[] = [
   { kind: "metal", label: "Metal", unit: "object" },
@@ -81,6 +89,17 @@ export function ObjectsPanel({
     return (id: string) => map.get(id.split("#solid")[0]);
   }, [parts]);
   const selectionKind = useMemo(() => kindOf(selected, kindById), [selected, kindById]);
+
+  /*
+   * Prongs are not a kind the file declares — no exporter writes them out as
+   * their own layer, which is why they cannot join KINDS above. They are metal
+   * found by what it holds, so they are offered here as their own section: one
+   * click to select them, one to keep them as an ordinary named group that
+   * then behaves like any other and can be corrected by hand.
+   */
+  const prongs = useMemo(() => prongIds(findProngs(parts), false), [parts]);
+  const allProngs = prongs.length > 0 && prongs.every((id) => selected.has(id));
+  const prongsOpen = open.has(PRONGS_KEY);
 
   const toggleOpen = (id: string) => {
     const next = new Set(open);
@@ -342,6 +361,109 @@ export function ObjectsPanel({
           </div>
         );
       })}
+
+      {prongs.length > 0 && (
+        <div className="obj-kind">
+          <div className="obj-kind-head">
+            <span className="obj-kind-name">
+              <Wand2 className="size-3.5" />
+              Prongs
+            </span>
+            <span className="obj-kind-count">
+              {prongs.length} {prongs.length === 1 ? "prong" : "prongs"}
+            </span>
+            <button
+              className={`obj-all ${allProngs ? "obj-all-on" : ""}`}
+              onClick={() => onSelect(allProngs ? new Set() : new Set(prongs))}
+              aria-pressed={allProngs}
+            >
+              {allProngs ? "None" : "All"}
+            </button>
+          </div>
+
+          {/*
+           * Built exactly like a part with many solids: a row that collapses,
+           * a box that adds the whole set to whatever is already selected, and
+           * the claws numbered underneath. Somebody straightening one lifted
+           * claw needs to reach THAT claw, and somebody who wants prongs plus
+           * two stones needs the boxes to add rather than replace — which is
+           * the same behaviour, and the same code, as the sections below.
+           */}
+          <ul className="obj-list">
+            <li>
+              <div className={`obj-row ${allProngs ? "obj-row-on" : ""}`}>
+                <button
+                  className={`obj-twist ${prongsOpen ? "obj-twist-open" : ""}`}
+                  onClick={() => toggleOpen(PRONGS_KEY)}
+                  aria-expanded={prongsOpen}
+                  aria-label={prongsOpen ? "Collapse prongs" : "Expand prongs"}
+                >
+                  <ChevronRight className="size-3" />
+                </button>
+                <button
+                  className={`obj-box ${allProngs ? "obj-box-on" : ""}`}
+                  onClick={() => {
+                    const next = new Set(selected);
+                    if (allProngs) for (const id of prongs) next.delete(id);
+                    else for (const id of prongs) next.add(id);
+                    onSelect(next);
+                  }}
+                  aria-pressed={allProngs}
+                  aria-label={`${allProngs ? "Remove" : "Add"} all prongs`}
+                  title={allProngs ? "Remove from selection" : "Add to selection"}
+                >
+                  {allProngs && <Check className="size-3" />}
+                </button>
+                <button
+                  className="obj-name"
+                  onClick={() => onSelect(new Set(prongs))}
+                  title="Select only the prongs"
+                >
+                  All prongs
+                </button>
+                <span className="obj-count">{prongs.length}</span>
+              </div>
+
+              {prongsOpen && (
+                <ul className="obj-sub">
+                  {prongs.slice(0, VISIBLE_SOLIDS).map((id, i) => (
+                    <li key={id}>
+                      <div className={`obj-row ${selected.has(id) ? "obj-row-on" : ""}`}>
+                        <button
+                          className={`obj-box ${selected.has(id) ? "obj-box-on" : ""}`}
+                          onClick={() => onSelect(applyClick(selected, id, true))}
+                          aria-pressed={selected.has(id)}
+                          aria-label={`${selected.has(id) ? "Remove" : "Add"} prong ${i + 1}`}
+                          title={selected.has(id) ? "Remove from selection" : "Add to selection"}
+                        >
+                          {selected.has(id) && <Check className="size-3" />}
+                        </button>
+                        <button
+                          className="obj-name obj-sub-row"
+                          onClick={() => onSelect(new Set([id]))}
+                          title={`Select only prong ${i + 1}`}
+                        >
+                          Prong · {i + 1}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                  {prongs.length > VISIBLE_SOLIDS && (
+                    <li className="obj-more">
+                      {prongs.length - VISIBLE_SOLIDS} more — click them on the piece, or use All
+                    </li>
+                  )}
+                </ul>
+              )}
+            </li>
+          </ul>
+
+          <p className="field-hint obj-prong-hint">
+            Metal that appears to hold a stone. Click a prong on the piece to add one this missed,
+            or a selected one to drop it.
+          </p>
+        </div>
+      )}
     </>
   );
 }

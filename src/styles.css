@@ -5318,3 +5318,15 @@ input[type="radio"]:disabled {
     white-space: nowrap;
   }
 }
+
+/* The suggestion, set apart from the brush controls it precedes. */
+@utility prong-suggest {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+/* The caveat sits with the prong rows, indented to line up under them. */
+@utility obj-prong-hint {
+  margin-left: 1.55rem;
+}

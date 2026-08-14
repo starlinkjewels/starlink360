@@ -24,6 +24,7 @@ import { createRequire } from "node:module";
 import * as THREE from "three";
 import { MeshBVH, SAH } from "three-mesh-bvh";
 import { DecalGeometry } from "three/examples/jsm/geometries/DecalGeometry.js";
+import { findProngs, prongIds } from "../.tmp-suite/components/jewelry/prongDetect.js";
 import { facetGeometry, gemFresnel, gemTint } from "../.tmp-suite/components/jewelry/materials.js";
 import {
   ensureSolids,
@@ -783,6 +784,79 @@ check(
 );
 
 console.log();
+console.log();
+console.log("=== finding the claws ===");
+
+/*
+ * The first attempt reused `isReasonablySized`, which asks whether a solid is
+ * small relative to the whole PIECE. On this 182mm necklace every chain link is
+ * small relative to the whole piece, so it returned 666 of 675 objects — the
+ * entire chain — and was worse than no button at all.
+ *
+ * Size is not the discriminator. A chain link and a claw are genuinely similar
+ * in size. What separates them is that a claw HOLDS A STONE, which is why this
+ * is measured against the real file rather than reasoned about: the right
+ * answer here is some small multiple of 140 stones, and emphatically not 666.
+ */
+{
+  const metalPart = {
+    id: "metal|Metal",
+    label: "Metal",
+    kind: "metal",
+    mesh: new THREE.Mesh(metalGeo),
+    solids: metalSolids,
+  };
+  const stonePart = {
+    id: "stone|Stones",
+    label: "Stones",
+    kind: "stone",
+    mesh,
+    solids: mesh.userData.solids,
+  };
+
+  const found = findProngs([metalPart, stonePart]);
+  const likely = found.filter((c) => c.confidence === "likely");
+  const metalTotal = metalSolids.length - 1;
+  console.log(
+    `  ${found.length} candidates of ${metalTotal} metal objects, ${likely.length} likely, around ${count} stones`,
+  );
+
+  check(
+    found.length < metalTotal * 0.5,
+    "it does not select the whole chain, as a size test did",
+    `${found.length} of ${metalTotal}`,
+  );
+  check(found.length > 0, "and it finds something rather than giving up", `${found.length}`);
+
+  /*
+   * A stone is held by a few claws. Far more than that per stone means the
+   * test has caught the plate the stones sit in rather than what holds them.
+   */
+  const perStone = new Map();
+  for (const c of found) perStone.set(c.stone, (perStone.get(c.stone) ?? 0) + 1);
+  /*
+   * A busy stone is expected on a pave — beads are shared between neighbours,
+   * so the nearest-stone tally concentrates. What matters is that a large
+   * cluster no longer DELETES those candidates, which used to hollow out the
+   * middle of the field and keep only the border.
+   */
+  const worst = Math.max(0, ...perStone.values());
+  console.log(`  busiest stone has ${worst} nearby`);
+  check(
+    found.length > count,
+    "a pave finds more claws than it has stones, since beads are shared",
+    `${found.length} for ${count} stones`,
+  );
+
+  // Every candidate has to be a real, selectable id.
+  const ids = new Set(prongIds(found, false));
+  check(ids.size === found.length, "every candidate is a distinct id");
+  check(
+    [...ids].every((id) => id.startsWith("metal|")),
+    "and every one is metal — a stone is never a claw",
+  );
+}
+
 console.log();
 console.log("=== striking a hallmark into the real metal ===");
 

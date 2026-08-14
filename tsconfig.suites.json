@@ -19,6 +19,7 @@
     "src/lib/loadJewelryFile.ts",
     "src/components/jewelry/materials.ts",
     "src/components/jewelry/selection.ts",
+    "src/components/jewelry/prongDetect.ts",
     "src/components/jewelry/plan.ts",
     "src/components/jewelry/assign.ts",
     "src/components/jewelry/library.ts",
