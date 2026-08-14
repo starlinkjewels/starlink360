@@ -13,6 +13,7 @@ import {
   Grid,
 } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { acceleratePicking } from "./pickBvh";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
@@ -328,6 +329,27 @@ function InteractionQuality({
     };
   }, [controlsRef, setDpr]);
 
+  return null;
+}
+
+/**
+ * Keeps hover picking off the brute-force path as the scene changes.
+ *
+ * Swept from the frame loop rather than an effect on the parts, because a
+ * mesh appears in the scene a beat after the state that produced it and one
+ * mesh without a tree is enough to stall the pointer by itself. The sweep is
+ * a traverse over a handful of objects, skipping any that already have one,
+ * and runs twice a second — next to a stalled pointer it does not register.
+ */
+function PickAcceleration() {
+  const scene = useThree((s) => s.scene);
+  const next = useRef(0);
+  useFrame(() => {
+    const now = performance.now();
+    if (now < next.current) return;
+    next.current = now + 500;
+    acceleratePicking(scene);
+  });
   return null;
 }
 
@@ -1251,6 +1273,7 @@ export default function Viewer({
         />
         <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
         <InteractionQuality controlsRef={controlsRef} />
+        <PickAcceleration />
         {/*
           Bottom-left orientation ball, and a way to snap to an axis.
 
