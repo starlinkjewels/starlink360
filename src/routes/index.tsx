@@ -714,7 +714,23 @@ function Index() {
     }
 
     showcaseSnapshot.current = { lighting, shadows, post, theme, lights };
-    setShadows({ ...shadows, mode: "directional" });
+
+    /*
+     * Every one of these was tried in one synchronous batch and it
+     * reproducibly went to a blank canvas — confirmed by actually driving the
+     * app and watching it happen, not guessed from the settings alone.
+     * `shadows.mode` forces the shadow-casting light to drop and reallocate
+     * its map (LightRig disposes it whenever the `shadows` object reference
+     * changes, which every one of these does), and the gem light tent below
+     * builds and uploads its own environment texture — two real GPU
+     * allocations. The comment this replaced already knew a shadow camera, a
+     * composer and an environment map going up in the same tick loses the
+     * context; bundling bloom/highlights/exposure/environment-intensity
+     * alongside them tipped it over again. Cheap, prop-only changes (theme,
+     * the light rig's own numbers, bloom/highlight numbers on already-
+     * existing passes) stay in this first batch; the two changes that
+     * actually allocate GPU memory each get their own animation frame.
+     */
     setPost({
       ...post,
       bloom: { ...post.bloom, enabled: true, strength: 0.45, radius: 0.45 },
@@ -727,22 +743,19 @@ function Index() {
     setTheme("light");
     setLights(resetLights());
     /*
-     * Exposure and environment intensity, raised immediately rather than
-     * deferred like the gem tent below.
-     *
      * Bloom needs something already bright enough to catch, and the light
      * rig only looks different if it had been touched — on a piece where
      * neither applies, those two changes are invisible and "best look"
-     * reads as broken. These multiply the WHOLE render, metal and
-     * background alike, so they show up on every piece, from every angle,
-     * whatever the rig already was.
+     * reads as broken. Exposure and environment intensity multiply the WHOLE
+     * render, metal and background alike, so they show up on every piece,
+     * from every angle, whatever the rig already was.
      *
-     * Kept modest on purpose. The first version of this pushed both much
-     * harder and the result was a flat white piece instead of a photographed
-     * one — a real product shot has bright, distinct highlights, not a
-     * washed-out one. `Math.max` rather than a flat overwrite: a render
-     * already pushed brighter than this on purpose should not be dimmed back
-     * down in the name of "best".
+     * Kept modest on purpose. An earlier version pushed both much harder and
+     * the result was a flat white piece instead of a photographed one — a
+     * real product shot has bright, distinct highlights, not a washed-out
+     * one. `Math.max` rather than a flat overwrite: a render already pushed
+     * brighter than this on purpose should not be dimmed back down in the
+     * name of "best".
      */
     setLighting((current) => ({
       ...current,
@@ -750,12 +763,18 @@ function Index() {
       environmentIntensity: Math.max(current.environmentIntensity, 1.15),
     }));
     setShowcaseOn(true);
+
+    // Frame 2: the shadow camera's own allocation, alone.
     requestAnimationFrame(() => {
-      setLighting((current) => ({
-        ...current,
-        separateGemEnvironment: true,
-        gemEnvironment: "tent",
-      }));
+      setShadows((current) => ({ ...current, mode: "directional" }));
+      // Frame 3: the gem light tent's environment texture, alone.
+      requestAnimationFrame(() => {
+        setLighting((current) => ({
+          ...current,
+          separateGemEnvironment: true,
+          gemEnvironment: "tent",
+        }));
+      });
     });
   }, [lighting, shadows, post, theme, lights, setTheme]);
 
