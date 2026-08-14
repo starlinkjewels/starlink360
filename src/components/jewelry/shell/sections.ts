@@ -11,6 +11,7 @@ import {
   Palette,
   Sparkles,
   Stamp,
+  ListTree,
   Sun,
   Triangle,
   Type,
@@ -49,6 +50,13 @@ export const SECTIONS: SectionDef[] = [
     hint: "Ask the AI to change a setting or explain the app",
     icon: Bot,
   },
+  /*
+   * First, because it answers the question every other section assumes you have
+   * already answered: WHICH part. Finding one object among 675 by clicking a
+   * dense render is not a workflow, and every professional 3D tool solves it
+   * with an outliner rather than with a better cursor.
+   */
+  { id: "objects", title: "Objects", hint: "Everything in the piece, by name", icon: ListTree },
   { id: "metal", title: "Metals", hint: "Metal for the whole piece or one part", icon: Palette },
   { id: "stones", title: "Stones", hint: "Select one stone or all, and set the gem", icon: Gem },
   { id: "textures", title: "Textures", hint: "Surface finish, per part", icon: Waves },

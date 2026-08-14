@@ -5270,3 +5270,235 @@ input[type="radio"]:disabled {
     opacity: 0.45;
   }
 }
+
+/* ---------------------------------------------------------- the outliner --
+ *
+ * A list of what is in the piece. Dense on purpose: 675 objects is a real
+ * count, so rows are tight and the type is small — this is a tool for finding
+ * one thing among many, not a menu.
+ */
+@utility obj-kind {
+  margin-bottom: 0.75rem;
+}
+
+@utility obj-kind-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+@utility obj-kind-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+
+@utility obj-kind-count {
+  /* Takes the slack so the button stays hard right. */
+  flex: 1 1 auto;
+  font-size: 0.58rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility obj-all {
+  flex: none;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 50%, transparent);
+    color: var(--color-foreground);
+  }
+}
+
+@utility obj-all-on {
+  border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  color: var(--gold);
+}
+
+@utility obj-list {
+  display: grid;
+  gap: 0.05rem;
+  margin-top: 0.2rem;
+}
+
+@utility obj-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  /* Or a long layer name pushes the count off the panel instead of truncating. */
+  min-width: 0;
+  width: 100%;
+  border-radius: 0.3rem;
+
+  &:hover {
+    background: color-mix(in oklab, var(--color-foreground) 5%, transparent);
+  }
+}
+
+@utility obj-row-on {
+  background: color-mix(in oklab, var(--gold) 14%, transparent);
+}
+
+@utility obj-twist {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1.4rem;
+  color: var(--color-muted-foreground);
+  transition: transform 0.15s ease;
+}
+
+@utility obj-twist-open {
+  transform: rotate(90deg);
+}
+
+/* Keeps unexpandable rows aligned with expandable ones. */
+@utility obj-twist-none {
+  opacity: 0;
+}
+
+@utility obj-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  text-align: left;
+  font-size: 0.64rem;
+  color: var(--color-foreground);
+}
+
+@utility obj-count {
+  flex: none;
+  padding-right: 0.3rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.55rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility obj-sub {
+  display: grid;
+  gap: 0.05rem;
+  /* Indented to the depth of the twist, so children line up under the name. */
+  margin-left: 1rem;
+}
+
+@utility obj-sub-row {
+  padding: 0.15rem 0.3rem;
+  font-size: 0.6rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility obj-more {
+  padding: 0.25rem 0.3rem 0.25rem 1rem;
+  font-size: 0.55rem;
+  color: var(--color-muted-foreground);
+}
+
+/* The tick that makes a row read as a checkbox rather than a link. */
+@utility obj-tick {
+  flex: none;
+  margin-right: 0.3rem;
+  color: var(--gold);
+}
+
+/* Delete, on a saved-set row. Quiet until hovered — it is destructive. */
+@utility obj-del {
+  flex: none;
+  padding: 0.25rem;
+  border-radius: 0.3rem;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: #ef4444;
+  }
+}
+
+/* Select the set — a tick button, matching how a row reads elsewhere. */
+@utility obj-pick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 0.3rem;
+  color: var(--gold);
+}
+
+/* Renamed in place; looks like text until you touch it. */
+@utility obj-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.2rem 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  font-size: 0.64rem;
+  color: var(--color-foreground);
+
+  &:hover {
+    border-color: var(--color-border);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  }
+}
+
+/* The box: adds and removes. Distinct from the name, which selects alone. */
+@utility obj-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin-right: 0.15rem;
+  border-radius: 0.2rem;
+  border: 1px solid var(--color-border);
+  color: var(--gold);
+
+  &:hover {
+    border-color: color-mix(in oklab, var(--gold) 60%, transparent);
+  }
+}
+
+@utility obj-box-on {
+  border-color: color-mix(in oklab, var(--gold) 70%, transparent);
+  background: color-mix(in oklab, var(--gold) 16%, transparent);
+}
+
+/* Name and save on one line: it is a single action, not two. */
+@utility set-save {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+
+  /* The field takes the slack; the button stays as wide as its label. */
+  & > .text-field {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  & > .btn-ghost {
+    flex: none;
+    width: auto;
+    min-height: 2rem;
+    padding: 0 0.7rem;
+    white-space: nowrap;
+  }
+}

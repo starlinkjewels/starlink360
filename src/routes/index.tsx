@@ -38,6 +38,7 @@ import {
   type Stamp,
 } from "@/components/jewelry/stamps";
 import type { StampDraft } from "@/components/jewelry/panels/StampsPanel";
+import { resetGroupIds, type PartGroup } from "@/components/jewelry/groups";
 import { gemById, metalById, resolveGem, resolveMetal } from "@/components/jewelry/library";
 import type { GemOptics } from "@/components/jewelry/GemRefraction";
 import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
@@ -316,6 +317,11 @@ function Index() {
    * would be work the jeweller already did.
    */
   const [stamps, setStamps] = useState<Stamp[]>([]);
+  /*
+   * Named sets of parts. A group selects its members rather than being
+   * something the renderers understand, so nothing downstream needs to know.
+   */
+  const [groups, setGroups] = useState<PartGroup[]>([]);
   const [stampDraft, setStampDraft] = useState<StampDraft>({ ...DEFAULT_STAMP });
   const [stampFont, setStampFont] = useState("serif");
   const [selectedStamp, setSelectedStamp] = useState<string | null>(null);
@@ -384,6 +390,9 @@ function Index() {
     setProngHeights({});
     setStamps([]);
     resetStampIds();
+    // A set pointing at the last piece's parts would select nothing at all.
+    setGroups([]);
+    resetGroupIds();
     setSelectedStamp(null);
     setBrush(null);
     // A new piece has different parts; carrying ids across would leave a
@@ -1256,6 +1265,8 @@ function Index() {
             onTextures={setTextures}
             stamps={stamps}
             onStamps={setStamps}
+            groups={groups}
+            onGroups={setGroups}
             stampDraft={stampDraft}
             onStampDraft={setStampDraft}
             stampFont={stampFont}

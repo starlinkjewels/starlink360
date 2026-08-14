@@ -17,6 +17,7 @@ import {
   ensurePart,
   hideOverlays,
   parseId,
+  resolveSelection,
   SELECT_COLOR,
   solidAt,
   solidId,
@@ -482,6 +483,44 @@ console.log("=== finding solids in a file that arrived without them ===");
   const single = merge([[0, 0, 0]]);
   check(ensureSolids(single) === null, "a geometry that declines is remembered as declining");
   check(single.userData.solidsChecked === true, "so the rejected attempt is not paid again");
+}
+
+/*
+ * Selecting a WHOLE part, which is what the Objects panel's "All" does.
+ *
+ * The draw range was read from `index.count` alone. Stones have NO index —
+ * faceting de-indexes them for flat shading — so a whole-group selection
+ * resolved to a count of zero and highlighted nothing, while picking the same
+ * stones one at a time worked perfectly, because that path goes through
+ * `solidRange` and the offsets instead. Nothing exercised it until the outliner
+ * gave anyone a way to select a whole part.
+ */
+console.log("\n=== a whole part highlights, indexed or not ===");
+{
+  const indexed = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+  const flat = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1).toNonIndexed());
+
+  const both = resolveSelection(
+    [
+      { id: "metal|Shank", label: "Shank", kind: "metal", mesh: indexed },
+      { id: "stone|Stones", label: "Stones", kind: "stone", mesh: flat },
+    ],
+    set("metal|Shank", "stone|Stones"),
+  );
+
+  check(flat.geometry.index === null, "the faceted stone geometry really has no index");
+  check(both.length === 2, "both parts resolve", `${both.length}`);
+  for (const r of both) {
+    check(r.count > 0, `${r.id} gets a real draw range`, `${r.start}..${r.start + r.count}`);
+  }
+
+  // And it has to cover the whole part, not a fragment of it.
+  const stone = both.find((r) => r.id === "stone|Stones");
+  check(
+    stone.count === flat.geometry.getAttribute("position").count,
+    "and it covers every vertex of the part",
+    `${stone.count}`,
+  );
 }
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);

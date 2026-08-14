@@ -13,6 +13,7 @@ import {
   Video,
   Lightbulb,
   Layers,
+  ListTree,
   MoveVertical,
   Triangle,
   Type,
@@ -28,14 +29,16 @@ import {
 import { finishById, finishes, type Finish } from "@/data/finishes";
 import { Select } from "./Select";
 import type { StoneGroup } from "./stones";
-import type { Part, PartKind } from "./selection";
+import { solidCount, type Part, type PartKind } from "./selection";
 import type { Assignments, Brush } from "./assign";
 import { NumberField } from "./ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
 import { MaterialsPanel } from "./panels/MaterialsPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
+import { ObjectsPanel } from "./panels/ObjectsPanel";
 import type { Stamp } from "./stamps";
+import type { PartGroup } from "./groups";
 import { ProngsPanel } from "./panels/ProngsPanel";
 import { AIChat } from "./AIChat";
 import type { ChatAction } from "./chatProtocol";
@@ -351,6 +354,9 @@ export interface StudioPanelProps {
   /** Hallmarks struck into the metal, and the punch waiting to be struck. */
   stamps: Stamp[];
   onStamps?: (next: Stamp[]) => void;
+  /** Named sets of parts the user has saved. */
+  groups?: PartGroup[];
+  onGroups?: (next: PartGroup[]) => void;
   stampDraft: StampDraft;
   onStampDraft?: (next: StampDraft) => void;
   stampFont: string;
@@ -437,6 +443,8 @@ export function StudioPanel({
   onProngHeights,
   stamps,
   onStamps,
+  groups = [],
+  onGroups,
   stampDraft,
   onStampDraft,
   stampFont,
@@ -1267,6 +1275,30 @@ export function StudioPanel({
           share the same panel component and the same assignment state — the
           duplicate colour state that used to make them disagree is gone — but
           each shows only its own catalogue, so neither is a tab click away. */}
+      {/* ── 0. Objects ──────────────────────────────────────────────
+          Before the material sections, because it answers the question they
+          all assume: which part. On a 675-object piece, finding one by
+          clicking the render is not a workflow. */}
+      <Section
+        icon={<ListTree className="size-4" />}
+        title="Objects"
+        subtitle={
+          parts.length
+            ? `${parts.reduce((n, p) => n + solidCount(p), 0)} objects`
+            : "Nothing loaded"
+        }
+        open={open === "objects"}
+        onToggle={() => toggle("objects")}
+      >
+        <ObjectsPanel
+          parts={parts}
+          selected={selectedParts}
+          onSelect={onSelectParts ?? (() => {})}
+          groups={groups}
+          onGroups={onGroups}
+        />
+      </Section>
+
       <Section
         icon={<Palette className="size-4" />}
         title="Metals"
