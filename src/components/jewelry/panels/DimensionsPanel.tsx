@@ -72,13 +72,15 @@ export function DimensionsPanel({
           suffix="mm"
           slider={false}
           hint={
-            dimensions.knownWidthMM === DEFAULT_DIMENSIONS.knownWidthMM
-              ? "A starting guess, not a measurement — this file's own scale was normalised away before it reached the viewer, so there is nothing to read the real size off. Type the piece's actual width to make every figure below, including carat weight, accurate."
+            dimensions.knownWidthMM === null
+              ? "Not calibrated — this file carries no usable unit (true for .obj and .stl, and for a piece already rescaled before it reached the viewer), so there is nothing to read the real size off. Type the piece's actual width to make every figure below, including carat weight, accurate."
               : scale
-                ? "Every measurement below is scaled from this. Change it any time — nothing else needs re-entering."
-                : "Cleared. Every figure below is a bare multiple of the model's own unit until a width is typed in again."
+                ? dimensions.autoDetected
+                  ? "Read automatically from the file's own units — not a guess. Every measurement below is scaled from this; override it any time if it looks wrong."
+                  : "Every measurement below is scaled from this. Change it any time — nothing else needs re-entering."
+                : "Waiting for the piece to finish loading — this will apply once it does."
           }
-          onChange={(v) => set({ knownWidthMM: v > 0 ? v : null })}
+          onChange={(v) => set({ knownWidthMM: v > 0 ? v : null, autoDetected: false })}
         />
       </PanelGroup>
 

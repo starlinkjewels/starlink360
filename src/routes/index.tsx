@@ -278,6 +278,17 @@ function Index() {
   const [parts, setParts] = useState<Part[]>([]);
   const [fit, setFit] = useState<Fit | null>(null);
   const [dimensions, setDimensions] = useState<DimensionSettings>(DEFAULT_DIMENSIONS);
+  /*
+   * The latest fit, read from a ref rather than the `fit` state above: the
+   * per-piece reset in `handleStones` needs the value the moment a new piece
+   * lands, and `onFit`/`onStones` fire in the same commit — a ref sidesteps
+   * waiting a render for state to catch up.
+   */
+  const lastFitRef = useRef<Fit | null>(null);
+  const handleFit = useCallback((next: Fit) => {
+    lastFitRef.current = next;
+    setFit(next);
+  }, []);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const stageBackground = backgroundCss(background);
   const [stoneColors, setStoneColors] = useState<Record<string, string>>({});
@@ -402,6 +413,17 @@ function Index() {
     // A new piece has different parts; carrying ids across would leave a
     // selection pointing at meshes that no longer exist.
     setSelected(new Set());
+    // A calibrated width is per piece too — carrying it across would silently
+    // scale the next piece's mm figures and carat weight by the wrong ratio.
+    // When the file itself carries a real unit (Rhino's own document unit, or
+    // glTF's guaranteed metre), the true width is known outright — no one has
+    // to type in a guess. Formats with no unit convention (.obj/.stl), or a
+    // piece already rescaled before it reached this codebase, fall back to
+    // asking, same as before.
+    const detected = lastFitRef.current;
+    const knownWidthMM =
+      detected?.detectedMMPerUnit !== undefined ? detected.detectedMMPerUnit * detected.width : null;
+    setDimensions({ ...DEFAULT_DIMENSIONS, knownWidthMM, autoDetected: knownWidthMM !== null });
   }, []);
 
   /*
@@ -636,22 +658,28 @@ function Index() {
   /*
    * The best-look toggle.
    *
-   * First click layers changes on top of whatever is already set, each
-   * documented elsewhere in this codebase as the thing that makes a piece
-   * look photographed rather than rendered:
+   * Every one of these used to be a real change from the editing defaults —
+   * that stopped being true as the defaults themselves drifted to match:
+   * `shadows.mode`, `post.bloom.enabled` and `lighting.gemEnvironment` are ALL
+   * already "directional" / true / "tent" out of the box now, so clicking
+   * this produced a snapshot, a light-rig reset to values it may already have
+   * held, and otherwise nothing visibly different — reported as "the button
+   * does nothing," correctly. It still sets them explicitly (cheap, and a
+   * correct floor for anyone who wandered away from the defaults), but the
+   * two things below are what actually make this button DO something again:
    *
-   *  - `gemEnvironment: "tent"` — the light tent lighting.ts builds by hand
-   *    specifically because "a diamond is a picture of whatever its rays
-   *    land on." This is the single biggest lever on how a stone reads, and
-   *    the metal keeps its own environment throughout.
-   *  - `shadows.mode: "directional"` — a real cast shadow instead of the
-   *    soft contact pool. shadows.ts keeps contact as the default deliberately
-   *    ("not a change to make on the user's behalf — it is one click away
-   *    instead"); this button is that one click.
-   *  - `post.bloom.enabled` — cheap (bloom.ts halves its own buffer) and
-   *    tuned to catch only genuine sparkle above 0.95, not the metal.
-   *  - the panel theme goes to light, so the showcase reads as a bright
-   *    studio shot rather than the dark editing chrome.
+   *  - `post.bloom.strength/radius` pushed past the everyday tuning — the
+   *    default is deliberately restrained (bloom.ts keeps it subtle so it
+   *    never reads as a glow bug on metal); a "best look" is allowed to be
+   *    more dramatic than the everyday render.
+   *  - the light rig (lights.ts) resets to `DEFAULT_LIGHTS` — the key/fill/
+   *    rim/ambient/sparkle five-light setup transcribed from an actual
+   *    jeweller's-lamp shoot, guaranteeing the photographed look regardless
+   *    of whatever a key light was switched off or dragged to.
+   *
+   * Deliberately leaves the ground/surface alone — that's a separate,
+   * user-driven choice (GroundPanel), not something this button should
+   * impose on the piece.
    *
    * Switching the light tent on in the SAME tick as the shadow camera and the
    * post composer — three fresh GPU allocations at once — reproducibly lost
@@ -668,6 +696,7 @@ function Index() {
     shadows: ShadowSettings;
     post: PostSettings;
     theme: Theme;
+    lights: LightDef[];
   } | null>(null);
   const [showcaseOn, setShowcaseOn] = useState(false);
 
@@ -679,14 +708,19 @@ function Index() {
       setShadows(snapshot.shadows);
       setPost(snapshot.post);
       setTheme(snapshot.theme);
+      setLights(snapshot.lights);
       setShowcaseOn(false);
       return;
     }
 
-    showcaseSnapshot.current = { lighting, shadows, post, theme };
+    showcaseSnapshot.current = { lighting, shadows, post, theme, lights };
     setShadows({ ...shadows, mode: "directional" });
-    setPost({ ...post, bloom: { ...post.bloom, enabled: true } });
+    setPost({
+      ...post,
+      bloom: { ...post.bloom, enabled: true, strength: 0.6, radius: 0.55 },
+    });
     setTheme("light");
+    setLights(resetLights());
     setShowcaseOn(true);
     requestAnimationFrame(() => {
       setLighting((current) => ({
@@ -695,7 +729,7 @@ function Index() {
         gemEnvironment: "tent",
       }));
     });
-  }, [lighting, shadows, post, theme, setTheme]);
+  }, [lighting, shadows, post, theme, lights, setTheme]);
 
   /*
    * What the AI chat is allowed to do, and nothing more.
@@ -1051,7 +1085,7 @@ function Index() {
                   onStones={handleStones}
                   onStoneTap={setSelectedStone}
                   onParts={setParts}
-                  onFit={setFit}
+                  onFit={handleFit}
                   dimensions={dimensions}
                   selected={selected}
                   selecting={tool === "select"}

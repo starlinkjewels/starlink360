@@ -72,6 +72,19 @@ export function bitrateFor(width: number, height: number, fps: number): number {
   return Math.round(Math.min(Math.max(raw, 12_000_000), 120_000_000));
 }
 
+/*
+ * "avc" (length-prefixed NAL units, decoder config carried separately),
+ * never "annexb" (start-code-prefixed, no separate description). mp4-muxer
+ * builds the file's avcC box from `meta.decoderConfig.description`, which
+ * only exists in "avc" output — omitting this relies on every browser's
+ * unstated default agreeing with the spec's, and any that didn't produced an
+ * MP4 with no real avcC atom. Chrome's own `<video>` tag is forgiving enough
+ * to still play that back, which is exactly why it looked fine here and only
+ * broke once the file reached a stricter player — a phone's native gallery
+ * app, VLC, anything that actually validates the box before decoding.
+ */
+const AVC_ENCODER_OPTIONS = { avc: { format: "avc" as const } };
+
 /** What this browser can actually produce, best first. */
 export async function bestAvailableFormat(
   width: number,
@@ -86,6 +99,7 @@ export async function bestAvailableFormat(
       height,
       bitrate: bitrateFor(width, height, fps),
       framerate: fps,
+      ...AVC_ENCODER_OPTIONS,
     });
     if (support.supported) return "mp4";
   } catch {
@@ -135,6 +149,7 @@ export async function encodeMp4(opts: EncodeOptions): Promise<Blob> {
     height,
     bitrate: bitrateFor(width, height, fps),
     framerate: fps,
+    ...AVC_ENCODER_OPTIONS,
   });
 
   const frameDuration = 1e6 / fps; // microseconds

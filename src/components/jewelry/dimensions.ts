@@ -39,25 +39,31 @@ export interface DimensionSettings {
   /** Shows the stats and per-stone breakdown in the panel. */
   showTable: boolean;
   /**
-   * The piece's real width, in millimetres, typed in by hand.
+   * The piece's real width, in millimetres.
    *
-   * Defaults to a plausible starting figure rather than null: a panel that
-   * shows dashes until someone finds a calibration field reads as broken, not
-   * as honest. The default is a guess and says so in the panel; the figures
-   * become real the moment the actual width is typed in, which is one field,
-   * not a blocker. Null is still meaningful — it is what a reset returns to
-   * — it is just no longer the first thing anyone sees.
+   * Starts uncalibrated (null) rather than guessing a plausible figure: a
+   * made-up starting width silently scales every mm figure and the carat
+   * weight to match it, which reads as a real measurement even though it
+   * isn't. Null means the panel honestly shows "uncalibrated" until a real
+   * width is known, either read automatically from the file (see
+   * `autoDetected`) or typed in by hand.
    */
   knownWidthMM: number | null;
+  /**
+   * True when `knownWidthMM` came from the file's own units (Rhino's
+   * document unit, or glTF's guaranteed metre) rather than a hand-typed
+   * figure — worth surfacing, since one is a measurement and the other is
+   * only as good as whoever typed it. Cleared the moment someone edits the
+   * field, since a manual edit is no longer the file's own number.
+   */
+  autoDetected: boolean;
 }
 
-/** A plausible pendant width, not a measurement — the starting guess. */
-const DEFAULT_WIDTH_MM = 40;
-
 export const DEFAULT_DIMENSIONS: DimensionSettings = {
-  showOnCanvas: true,
-  showTable: true,
-  knownWidthMM: DEFAULT_WIDTH_MM,
+  showOnCanvas: false,
+  showTable: false,
+  knownWidthMM: null,
+  autoDetected: false,
 };
 
 /** Round brilliant, published estimate. Applied to every shape — see file header. */

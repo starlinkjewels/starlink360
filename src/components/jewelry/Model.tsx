@@ -49,6 +49,14 @@ export interface Fit {
   width: number;
   height: number;
   depth: number;
+  /**
+   * Millimetres per one model unit, read straight from the source file
+   * (Rhino's own document unit, or glTF's guaranteed metre) rather than
+   * typed in as a guess. Undefined when the format carries no reliable unit
+   * (.obj/.stl, or a piece that was already rescaled before it reached this
+   * codebase) — Model Dimensions falls back to asking for a manual width.
+   */
+  detectedMMPerUnit?: number;
 }
 
 interface DressedProps {
@@ -238,6 +246,12 @@ export function DressedScene({
     // Applied to the inner root so the wrapper stays free for the spin, and set
     // before the fit below measures the rotated bounding box.
     root.rotation.set(...upAxisRotation(camera?.upAxis ?? "y"));
+    // Carried onto the wrapper — the fit effect below only has `object`, not
+    // `root` — so a real, file-derived scale (see loadJewelryFile.ts) reaches
+    // Model Dimensions without anyone having to guess a width by hand.
+    if (typeof root.userData.detectedMMPerUnit === "number") {
+      wrapper.userData.detectedMMPerUnit = root.userData.detectedMMPerUnit;
+    }
     return { object: wrapper, owned, stones };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, camera?.rawGeometry, camera?.upAxis]);
@@ -260,6 +274,8 @@ export function DressedScene({
     // portrait phone that difference is what keeps the piece from looking tiny.
     const halfX = Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
     const halfZ = Math.max(Math.abs(box.min.z), Math.abs(box.max.z));
+    const detectedMMPerUnit = (object.userData as { detectedMMPerUnit?: number })
+      .detectedMMPerUnit;
     onFit({
       radius,
       radiusXZ: Math.hypot(halfX, halfZ) || radius,
@@ -267,6 +283,7 @@ export function DressedScene({
       width: size.x,
       height: size.y,
       depth: size.z,
+      ...(detectedMMPerUnit !== undefined && { detectedMMPerUnit }),
     });
   }, [object, onFit]);
 

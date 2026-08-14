@@ -426,6 +426,12 @@ async function shadeGem(geometries: THREE.BufferGeometry[]): Promise<THREE.Buffe
 export async function compressToJewelryScene(
   root: THREE.Object3D,
   onProgress?: (p: LoadProgress) => void,
+  /**
+   * True for glTF/GLB, whose spec guarantees 1 unit = 1 metre regardless of
+   * what authored it — real width is then derivable with no guessing, unlike
+   * OBJ/STL, which carry no unit convention at all.
+   */
+  sourceUnitsAreMeters = false,
 ): Promise<THREE.Group> {
   root.updateMatrixWorld(true);
   const layers = getLayers(root);
@@ -477,6 +483,15 @@ export async function compressToJewelryScene(
   const bounds = new THREE.Box3();
   for (const c of candidates) bounds.union(c.box);
   const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+  /*
+   * Millimetres per model unit, once normalised. 1 unit post-normalisation is
+   * `sphere.radius` pre-normalisation units — a bounding sphere's radius is
+   * unaffected by the rotation Model.tsx applies later for up-axis
+   * correction, so this stays correct whichever axis a piece is rotated
+   * about, unlike deriving it from any one edge of the box.
+   */
+  const detectedMMPerUnit =
+    sourceUnitsAreMeters && sphere.radius > 0 ? sphere.radius * 1000 : null;
   const scale = 1 / (sphere.radius || 1);
   const normalise = new THREE.Matrix4()
     .makeScale(scale, scale, scale)
@@ -521,6 +536,7 @@ export async function compressToJewelryScene(
 
   const notice = missingMeshNotice(root);
   if (notice) group.userData.notices = [notice];
+  if (detectedMMPerUnit !== null) group.userData.detectedMMPerUnit = detectedMMPerUnit;
 
   group.updateMatrixWorld(true);
   return group;
@@ -655,6 +671,12 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
   group.updateMatrixWorld(true);
 
   if (decoded.notices.length) group.userData.notices = decoded.notices;
+  // Same reasoning as the GLB path: a bounding sphere's radius survives the
+  // later up-axis rotation intact, so this stays correct regardless of which
+  // axis a piece gets rotated about.
+  if (decoded.mmPerUnit !== null && sphere.radius > 0) {
+    group.userData.detectedMMPerUnit = decoded.mmPerUnit * sphere.radius;
+  }
   return group;
 }
 
@@ -743,7 +765,7 @@ export async function loadJewelryFile(
 
   onProgress?.({ phase: "Sorting layers", percent: 70 });
   await yieldToBrowser();
-  const scene = await compressToJewelryScene(root, onProgress);
+  const scene = await compressToJewelryScene(root, onProgress, ext === "glb" || ext === "gltf");
 
   /*
    * Say what the format could not carry, rather than letting it look like the

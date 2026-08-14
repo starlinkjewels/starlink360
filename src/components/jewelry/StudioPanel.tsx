@@ -706,7 +706,7 @@ export function StudioPanel({
          * already right; only the metadata was wrong.
          */
         const tagged = await withDpi(blob, ext, exportOptions.dpi);
-        downloadBlob(
+        await downloadBlob(
           tagged,
           resolveFileName(
             exportOptions.imageName,
@@ -763,7 +763,7 @@ export function StudioPanel({
         setProgress(Math.round((++done / total) * 100));
         await new Promise((r) => setTimeout(r, 0));
       }
-      downloadBlob(
+      await downloadBlob(
         await zip.generateAsync({ type: "blob" }),
         exportName(productRef, "all", imageDims.height, "zip"),
       );
@@ -864,7 +864,7 @@ export function StudioPanel({
       const blob = chosen === "mp4" ? await encodeMp4(opts) : await encodeWebm(opts);
       const name = shot.id === "journey" ? "tour" : part.label;
       const vext = chosen === "mp4" ? "mp4" : "webm";
-      downloadBlob(
+      await downloadBlob(
         blob,
         resolveFileName(exportOptions.videoName, exportName(productRef, name, height, vext), vext),
       );
@@ -1243,11 +1243,11 @@ export function StudioPanel({
         icon={<Ruler className="size-4" />}
         title="Model Dimensions"
         subtitle={
-          dimensions.knownWidthMM === DEFAULT_DIMENSIONS.knownWidthMM
-            ? "Estimated"
-            : dimensions.knownWidthMM
-              ? "Calibrated"
-              : "Uncalibrated"
+          dimensions.knownWidthMM === null
+            ? "Uncalibrated"
+            : dimensions.autoDetected
+              ? "Detected"
+              : "Calibrated"
         }
         open={open === "dimensions"}
         onToggle={() => toggle("dimensions")}

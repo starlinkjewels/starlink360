@@ -523,7 +523,46 @@ export function canvasToBlob(
   );
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
+/**
+ * Hands a finished export to the user: the OS share sheet on a phone, a
+ * plain `<a download>` everywhere else.
+ *
+ * Every export here runs an async render or encode first — seconds for a
+ * photo, up to minutes for a long video — so by the time the blob exists,
+ * the tap that started it is long over. Mobile Safari (and, more quietly,
+ * mobile Chrome) only allows an `<a download>` click to actually save a
+ * file when it happens synchronously inside the gesture that triggered it;
+ * fired from async code afterwards, it is silently ignored — the render
+ * completes, the code runs, and nothing lands in Photos or Files. That is
+ * "nothing downloads," and no exception is ever thrown for it, so the old
+ * code had nothing to catch. The Web Share API exists specifically for a
+ * file produced after the fact: it is allowed well outside the originating
+ * gesture, and its target genuinely is a save when the user picks
+ * "Save to Files"/"Save Video", not just another tab showing the file.
+ *
+ * Scoped to touch devices only. Several desktop browsers now implement
+ * `share()` too, but without asking first would replace a one-click download
+ * anyone is used to with an OS picker nobody asked for, for a platform where
+ * the plain link already works every time.
+ */
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  const isMobile =
+    typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+
+  if (isMobile && typeof navigator !== "undefined" && navigator.share && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (e) {
+        // The user dismissing the share sheet is a "no", not a failure to
+        // recover from — anything else falls through to the plain download.
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

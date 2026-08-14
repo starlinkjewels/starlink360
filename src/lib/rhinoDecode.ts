@@ -67,6 +67,53 @@ export interface DecodedDocument {
   notices: string[];
   /** Objects skipped because Rhino stored no render mesh for them. */
   missingMesh: number;
+  /**
+   * Millimetres per one native Rhino model unit, read straight from the
+   * file's own document settings — not a guess. Null when the file has no
+   * unit set, or uses a unit with no fixed length (Rhino's `CustomUnits`),
+   * in which case there is nothing reliable to convert from.
+   */
+  mmPerUnit: number | null;
+}
+
+/**
+ * Millimetres per Rhino model unit, indexed by rhino3dm's `UnitSystem` enum
+ * (None=0 ... Unset=26 — see rhino3dm.d.ts). `None`, `CustomUnits` and
+ * `Unset` carry no fixed length; astronomical units are never a jewellery
+ * file and are left out for the same reason.
+ */
+const MM_PER_RHINO_UNIT: (number | null)[] = [
+  null, // 0 None
+  1e-7, // 1 Angstroms
+  1e-6, // 2 Nanometers
+  1e-3, // 3 Microns
+  1, // 4 Millimeters
+  10, // 5 Centimeters
+  100, // 6 Decimeters
+  1000, // 7 Meters
+  10000, // 8 Dekameters
+  100000, // 9 Hectometers
+  1e6, // 10 Kilometers
+  1e9, // 11 Megameters
+  1e12, // 12 Gigameters
+  25.4e-6, // 13 Microinches
+  0.0254, // 14 Mils
+  25.4, // 15 Inches
+  304.8, // 16 Feet
+  914.4, // 17 Yards
+  1609344, // 18 Miles
+  25.4 / 72, // 19 PrinterPoints
+  25.4 / 6, // 20 PrinterPicas
+  1852000, // 21 NauticalMiles
+  null, // 22 AstronomicalUnits
+  null, // 23 LightYears
+  null, // 24 Parsecs
+  null, // 25 CustomUnits
+  null, // 26 Unset
+];
+
+function mmPerRhinoUnit(unitSystem: number): number | null {
+  return MM_PER_RHINO_UNIT[unitSystem] ?? null;
 }
 
 export interface DecodeRules {
@@ -116,6 +163,15 @@ self.onmessage = function (e) {
 
     var doc = rhino.File3dm.fromByteArray(new Uint8Array(buffer));
     if (!doc) throw new Error("This file could not be read as a Rhino model.");
+
+    // The document's own real-world unit, read while the doc is still alive.
+    // The mm conversion table lives outside the worker string, in real TS.
+    var modelUnitSystem = -1;
+    try {
+      modelUnitSystem = doc.settings().modelUnitSystem;
+    } catch (err) {
+      modelUnitSystem = -1;
+    }
 
     /*
      * ── material table ──
@@ -868,7 +924,16 @@ self.onmessage = function (e) {
       );
     }
 
-    post({ type: "done", metals: metals, gems: gems, missingMesh: missingMesh }, transfer);
+    post(
+      {
+        type: "done",
+        metals: metals,
+        gems: gems,
+        missingMesh: missingMesh,
+        unitSystem: modelUnitSystem,
+      },
+      transfer,
+    );
   }
 };
 `;
@@ -922,6 +987,7 @@ export function decodeRhinoDocument(
             gems: data.gems ?? [],
             notices,
             missingMesh: data.missingMesh,
+            mmPerUnit: typeof data.unitSystem === "number" ? mmPerRhinoUnit(data.unitSystem) : null,
           }),
         );
       }
