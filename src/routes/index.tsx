@@ -23,6 +23,7 @@ import {
   type Assignments,
   type Brush,
 } from "@/components/jewelry/assign";
+import type { ProngHeights } from "@/components/jewelry/prongs";
 import {
   DEFAULT_STAMP,
   addStamp,
@@ -294,6 +295,9 @@ function Index() {
    */
   const [brush, setBrush] = useState<Brush | null>(null);
 
+  /** Height factor per prong solid id, the same shape as the material assignments. */
+  const [prongHeights, setProngHeights] = useState<ProngHeights>({});
+
   /*
    * Hallmarks, and the punch waiting to be struck.
    *
@@ -366,6 +370,9 @@ function Index() {
     // Same reasoning for assigned materials — the ids are per piece.
     setAssignments({});
     setTextures({});
+    // Same reasoning again — a solid id from the last piece names nothing on
+    // this one, and its own geometry has never been touched.
+    setProngHeights({});
     setStamps([]);
     resetStampIds();
     setSelectedStamp(null);
@@ -855,11 +862,13 @@ function Index() {
                   stoneColors={effectiveStoneColors}
                   metalOverrides={metalOverrides}
                   gemOverrides={gemOverrides}
+                  prongHeights={prongHeights}
                   onStones={handleStones}
                   onStoneTap={setSelectedStone}
                   onParts={setParts}
                   selected={selected}
                   selecting={tool === "select"}
+                  prongPicking={brush?.tool === "prong"}
                   onSelected={setSelected}
                   onCameraMoved={setLivePosition}
                   animation={animation ? animationById(animation) : null}
@@ -1067,6 +1076,8 @@ function Index() {
             onAssignments={setAssignments}
             armed={brush}
             onArm={setBrush}
+            prongHeights={prongHeights}
+            onProngHeights={setProngHeights}
             textures={textures}
             onTextures={setTextures}
             stamps={stamps}

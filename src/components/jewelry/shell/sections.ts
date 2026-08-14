@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   Layers,
   Lightbulb,
+  MoveVertical,
   Palette,
   Sparkles,
   Stamp,
@@ -50,6 +51,7 @@ export const SECTIONS: SectionDef[] = [
    * into every render — not something added to a photograph of it.
    */
   { id: "stamp", title: "Stamping", hint: "Hallmarks struck into the metal", icon: Stamp },
+  { id: "prongs", title: "Prongs", hint: "Raise or lower a claw", icon: MoveVertical },
   { id: "bg", title: "Environment", hint: "HDRI, gem HDRI and the backdrop", icon: ImageIcon },
   { id: "light", title: "Lighting", hint: "The light rig", icon: Sun },
   { id: "shadow", title: "Shadows", hint: "Contact pool or a real shadow camera", icon: Triangle },

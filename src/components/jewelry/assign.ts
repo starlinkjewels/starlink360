@@ -151,7 +151,16 @@ export type Brush =
    * same size and depth as the first, and reloading them onto the brush every
    * time would be work the jeweller already did.
    */
-  | { tool: "stamp"; kind: "metal" };
+  | { tool: "stamp"; kind: "metal" }
+  /*
+   * Picks prongs, and nothing else. Sharing this slot with the others means
+   * arming it disarms whatever material/finish/stamp brush was live — a
+   * click can only mean one thing — and, just as important, that leaving it
+   * armed is a state the rest of the app already knows how to show and clear,
+   * rather than a second, independent "am I in prong mode" flag to keep in
+   * sync with everything else that also wants the click.
+   */
+  | { tool: "prong"; kind: "metal" };
 
 /** Puts a surface finish on one part, leaving its other texture settings be. */
 export function finishToPart<T extends { finish: string }>(

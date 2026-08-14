@@ -13,6 +13,7 @@ import {
   Video,
   Lightbulb,
   Layers,
+  MoveVertical,
   Triangle,
   Type,
   Waves,
@@ -37,6 +38,8 @@ import { MaterialsPanel } from "./panels/MaterialsPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
 import type { Stamp } from "./stamps";
+import { ProngsPanel } from "./panels/ProngsPanel";
+import type { ProngHeights } from "./prongs";
 import { LightsPanel } from "./panels/LightsPanel";
 import { ShadowsPanel } from "./panels/ShadowsPanel";
 import { EnvironmentPanel } from "./panels/EnvironmentPanel";
@@ -333,6 +336,9 @@ export interface StudioPanelProps {
   /** The brush, and how to load it. Null means not painting. */
   armed?: Brush | null;
   onArm?: (brush: Brush | null) => void;
+  /** Height factor per prong solid id. 1 is unchanged. */
+  prongHeights?: ProngHeights;
+  onProngHeights?: (next: ProngHeights) => void;
   /** Hallmarks struck into the metal, and the punch waiting to be struck. */
   stamps: Stamp[];
   onStamps?: (next: Stamp[]) => void;
@@ -416,6 +422,8 @@ export function StudioPanel({
   onAssignments,
   armed = null,
   onArm,
+  prongHeights = {},
+  onProngHeights,
   stamps,
   onStamps,
   stampDraft,
@@ -1354,6 +1362,30 @@ export function StudioPanel({
           onFont={onStampFont ?? (() => {})}
           selectedId={selectedStamp}
           onSelect={onSelectStamp ?? (() => {})}
+          armed={armed}
+          onArm={onArm}
+        />
+      </Section>
+
+      {/* ── Prongs ────────────────────────────────────────────────
+          Beside the other material sections for the same reason as Stamping:
+          a prong is part of the piece, not a shot of it. The only section so
+          far that edits geometry rather than a render parameter. */}
+      <Section
+        icon={<MoveVertical className="size-4" />}
+        title="Prongs"
+        subtitle={
+          Object.keys(prongHeights).length ? `${Object.keys(prongHeights).length} adjusted` : "None"
+        }
+        open={open === "prongs"}
+        onToggle={() => toggle("prongs")}
+      >
+        <ProngsPanel
+          parts={parts}
+          selected={selectedParts}
+          prongHeights={prongHeights}
+          onProngHeights={onProngHeights ?? (() => {})}
+          onSelect={onSelectParts}
           armed={armed}
           onArm={onArm}
         />

@@ -57,6 +57,7 @@ import {
   type ObjectMove,
 } from "./animation";
 import { DEFAULT_SHADOWS, shadowFrustum, type ShadowSettings } from "./shadows";
+import { isReasonablySized, type ProngHeights } from "./prongs";
 
 /** Rebuilt per call rather than shared — a module-scope instance is the hazard. */
 const origin = () => new THREE.Vector3();
@@ -584,6 +585,8 @@ export interface ViewerProps {
   metalOverrides?: Record<string, { color: string; roughness: number; metalness: number }>;
   /** Library optics resolved per stone group id, from the Materials panel. */
   gemOverrides?: Record<string, GemOptics>;
+  /** Height factor per prong solid id, from the Prongs panel. 1 is unchanged. */
+  prongHeights?: ProngHeights;
   /** The selectable stone groups in the loaded piece. */
   onStones?: (groups: StoneGroup[]) => void;
   /** Fired when a stone is tapped on the piece, so the picker can follow. */
@@ -597,6 +600,13 @@ export interface ViewerProps {
    * and nothing is picked. On, a tap picks and the camera holds still.
    */
   selecting?: boolean;
+  /**
+   * The prong brush is armed. A click is then exclusively a prong pick — add
+   * or remove one shape-qualifying solid from the selection, or do nothing —
+   * never a paint, a stamp, a stone tap, or a tap-to-focus. Independent of
+   * `selecting`: this is its own tool, not a mode of the Select tool.
+   */
+  prongPicking?: boolean;
   /** Ids currently selected, and how to change them. */
   selected?: ReadonlySet<string>;
   onSelected?: (next: Set<string>) => void;
@@ -650,11 +660,13 @@ export default function Viewer({
   locked = false,
   stoneColors,
   metalOverrides,
+  prongHeights,
   gemOverrides,
   onStones,
   onStoneTap,
   onParts,
   selecting = false,
+  prongPicking = false,
   selected,
   onSelected,
   onPaintPart,
@@ -739,6 +751,23 @@ export default function Viewer({
    */
   const handledTap = useRef<MouseEvent | null>(null);
 
+  /*
+   * A click that hits nothing — the backdrop, not the piece — clears
+   * whatever is selected. R3F's own miss event, so it fires only for a
+   * click, never for an orbit drag; the same "did the pointer actually
+   * move" guard as `handleModelTap` still applies, because a drag that
+   * happens to end over empty space dispatches one too.
+   */
+  const handleBackgroundMiss = useCallback(
+    (e: MouseEvent) => {
+      const from = downAt.current;
+      const moved = from ? Math.hypot(e.clientX - from.x, e.clientY - from.y) : 0;
+      if (moved > 8) return;
+      if (selected?.size) onSelected?.(new Set());
+    },
+    [selected, onSelected],
+  );
+
   const handleModelTap = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       if (!fit) return;
@@ -784,6 +813,38 @@ export default function Viewer({
       const solids = (e.object?.userData?.solids as ArrayLike<number> | undefined) ?? undefined;
       const hit = e.faceIndex == null ? null : solidAt(solids, e.faceIndex);
       const part = group === undefined ? undefined : hit === null ? group : solidId(group, hit);
+
+      /*
+       * Picking prongs is its own exclusive tool, armed from the Prongs
+       * panel's brush — not a mode of Select, and not open to painting,
+       * stamping or the stone picker. A click toggles the clicked METAL
+       * solid in the selection or does nothing (a stone, or the backdrop);
+       * it never falls through to anything else.
+       *
+       * Deliberately not gated on shape (aspect ratio, stone proximity) —
+       * that was tried, tuned against a real piece, and never worked. Size
+       * is the one check kept: on a piece where a whole pavé face turned out
+       * to be one connected sheet of metal, clicking it selected the entire
+       * sheet, which no shape test would have caught since it never claimed
+       * to check size. A person's own click is still trusted for WHICH small
+       * solid is a prong; this only refuses something clearly too large to
+       * be one.
+       */
+      if (prongPicking) {
+        if (group && info?.kind === "metal" && hit !== null && part && selected && onSelected) {
+          const pseudoPart: Part = {
+            id: group,
+            label: "",
+            kind: "metal",
+            mesh: e.object as THREE.Mesh,
+            solids,
+          };
+          if (isReasonablySized(pseudoPart, hit)) {
+            onSelected(applyClick(selected, part, true));
+          }
+        }
+        return;
+      }
 
       /*
        * Painting is tried first, in ANY mode.
@@ -848,7 +909,7 @@ export default function Viewer({
         dist: Math.min(current, fit.radius * 0.55),
       });
     },
-    [fit, selecting, onStoneTap, selected, onSelected, onPaintPart, onPlaceStamp],
+    [fit, selecting, prongPicking, onStoneTap, selected, onSelected, onPaintPart, onPlaceStamp],
   );
 
   const clearFocus = useCallback(() => setFocus(null), []);
@@ -920,6 +981,7 @@ export default function Viewer({
         gl={glConfig}
         style={{ background: "transparent" }}
         shadows={{ type: THREE.PCFShadowMap }}
+        onPointerMissed={handleBackgroundMiss}
       >
         {/*
           Two real cameras, not one faked with a long lens. Swapping the default
@@ -988,6 +1050,7 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
+                prongHeights={prongHeights}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}
@@ -1004,6 +1067,7 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
+                prongHeights={prongHeights}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}
@@ -1022,6 +1086,7 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
+                prongHeights={prongHeights}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}

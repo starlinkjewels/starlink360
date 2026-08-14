@@ -12,6 +12,7 @@ import { StampDecals } from "./StampDecals";
 import type { Stamp } from "./stamps";
 import { collectParts, ensurePart, ensureSolids, parseId, type Part } from "./selection";
 import { assignmentsFor, planRuns, runMaterials, runSlots, drawableCount } from "./plan";
+import { applyProngHeights, type ProngHeights } from "./prongs";
 import { upAxisRotation, type CameraSettings } from "./camera";
 import {
   DEFAULT_TEXTURE,
@@ -30,6 +31,10 @@ import { useFallbackScene } from "./FallbackPendant";
  * second.
  */
 const EMPTY_STAMPS: Stamp[] = [];
+
+/** Same reasoning as `EMPTY_STAMPS`: a fresh `{}` every render would re-run
+ *  the prong effect for no reason. */
+const EMPTY_PRONG_HEIGHTS: ProngHeights = {};
 
 /** What the camera needs to frame a piece. */
 export interface Fit {
@@ -69,6 +74,8 @@ interface DressedProps {
   >;
   /** Library optics resolved per stone group id, from the Materials panel. */
   gemOverrides?: Record<string, GemOptics>;
+  /** Height factor per prong solid id, from the Prongs panel. 1 is unchanged. */
+  prongHeights?: ProngHeights;
   /** Reports the selectable stone groups once the piece is built. */
   onStones?: (groups: StoneGroup[]) => void;
   /** Reports every selectable part — metal and stone alike. */
@@ -97,6 +104,7 @@ export function DressedScene({
   stoneColors,
   metalOverrides,
   gemOverrides,
+  prongHeights = EMPTY_PRONG_HEIGHTS,
   onStones,
   onParts,
   stamps,
@@ -395,6 +403,40 @@ export function DressedScene({
     };
   }, [object, finish, metalOverrides]);
 
+  /*
+   * Prong height, applied straight to geometry.
+   *
+   * Its own effect rather than folded into the one above: that one rebuilds
+   * materials and draw-call groups, this one moves vertices, and the two
+   * changing on different occasions (a colour click vs. a height drag) would
+   * otherwise make each pay for the other's re-run.
+   *
+   * Spread over frames rather than done in one pass: `applyProngHeights`
+   * only touches a bounded batch per call and says whether any are left, so
+   * "Select all prongs" on a dense pavé face — hundreds of solids moving at
+   * once — cannot land as a single oversized synchronous update.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let frame: number | undefined;
+    const metalParts = collectParts(object).filter((p) => p.kind === "metal");
+
+    const step = () => {
+      if (cancelled) return;
+      let more = false;
+      for (const part of metalParts) {
+        if (applyProngHeights(part, prongHeights)) more = true;
+      }
+      if (more) frame = requestAnimationFrame(step);
+    };
+    step();
+
+    return () => {
+      cancelled = true;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [object, prongHeights]);
+
   useEffect(() => {
     return () => {
       object.traverse((child) => {
@@ -455,6 +497,7 @@ export function GLBModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
+  prongHeights,
   onStones,
   onParts,
   stamps,
@@ -469,6 +512,7 @@ export function GLBModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
+  prongHeights?: ProngHeights;
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -489,6 +533,7 @@ export function GLBModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
+      prongHeights={prongHeights}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}
@@ -506,6 +551,7 @@ export function FallbackModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
+  prongHeights,
   onStones,
   onParts,
   stamps,
@@ -519,6 +565,7 @@ export function FallbackModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
+  prongHeights?: ProngHeights;
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -536,6 +583,7 @@ export function FallbackModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
+      prongHeights={prongHeights}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}
@@ -555,6 +603,7 @@ export function ObjectModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
+  prongHeights,
   onStones,
   onParts,
   stamps,
@@ -569,6 +618,7 @@ export function ObjectModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
+  prongHeights?: ProngHeights;
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -585,6 +635,7 @@ export function ObjectModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
+      prongHeights={prongHeights}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}
