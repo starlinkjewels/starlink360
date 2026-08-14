@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 // Aliased: `Stamp` is the hallmark type in this codebase.
 import {
+  Bot,
   Camera,
   ChevronDown,
   Stamp as StampIcon,
-  Moon,
   Download,
   Film,
   Gem,
@@ -22,13 +22,11 @@ import {
   Pause,
   Play,
   RotateCcw,
-  Sun,
   Trash2,
   X,
 } from "lucide-react";
 import { finishById, finishes, type Finish } from "@/data/finishes";
 import { Select } from "./Select";
-import { useTheme } from "@/hooks/useTheme";
 import type { StoneGroup } from "./stones";
 import type { Part, PartKind } from "./selection";
 import type { Assignments, Brush } from "./assign";
@@ -39,6 +37,8 @@ import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
 import type { Stamp } from "./stamps";
 import { ProngsPanel } from "./panels/ProngsPanel";
+import { AIChat } from "./AIChat";
+import type { ChatAction } from "./chatProtocol";
 import type { ProngHeights } from "./prongs";
 import { LightsPanel } from "./panels/LightsPanel";
 import { ShadowsPanel } from "./panels/ShadowsPanel";
@@ -178,6 +178,7 @@ function Section({
   subtitle,
   open,
   children,
+  fill,
 }: {
   icon?: React.ReactNode;
   title?: string;
@@ -185,10 +186,14 @@ function Section({
   open: boolean;
   onToggle?: () => void;
   children: React.ReactNode;
+  /** Stretches the section to fill the panel instead of sizing to its own
+   *  content — for the assistant section, so its input can pin to the
+   *  bottom. See `.sect-panel-fill` in styles.css. */
+  fill?: boolean;
 }) {
   if (!open) return null;
   return (
-    <section className="sect-panel">
+    <section className={fill ? "sect-panel-fill" : "sect-panel"}>
       {subtitle && <p className="sect-caption">{subtitle}</p>}
       {children}
     </section>
@@ -301,6 +306,10 @@ export interface StudioPanelProps {
   /** Section the rail has selected. */
   active?: string;
   onActive?: (id: string) => void;
+  /** Applies one action the AI chat requested. See routes/index.tsx. */
+  onChatAction?: (action: ChatAction) => { ok: boolean; note?: string };
+  /** One line describing the piece's current state, for the AI chat. */
+  chatContext?: string;
   /** Projection, lens, clipping and object spin. */
   camera?: CameraSettings;
   /** Environment, light levels and ground shadow. */
@@ -396,6 +405,8 @@ export function StudioPanel({
   productRef,
   active,
   onActive,
+  onChatAction,
+  chatContext,
   camera = DEFAULT_CAMERA,
   onCamera,
   lighting = DEFAULT_LIGHTING,
@@ -455,7 +466,6 @@ export function StudioPanel({
   onBusyChange,
   onClose,
 }: StudioPanelProps) {
-  const [theme, setTheme] = useTheme();
   /*
    * Which section is showing. Owned by the shell so the icon rail and the panel
    * cannot disagree; the internal state is only a fallback for any caller that
@@ -879,25 +889,6 @@ export function StudioPanel({
   return (
     <div className="studio-sections">
       <div className="studio-head">
-        <h2 className="studio-title">Studio</h2>
-        <div className="theme-toggle" role="group" aria-label="Theme">
-          <button
-            className={`theme-btn ${theme === "dark" ? "theme-btn-active" : ""}`}
-            onClick={() => setTheme("dark")}
-            aria-pressed={theme === "dark"}
-            title="Dark theme"
-          >
-            <Moon className="size-3.5" />
-          </button>
-          <button
-            className={`theme-btn ${theme === "light" ? "theme-btn-active" : ""}`}
-            onClick={() => setTheme("light")}
-            aria-pressed={theme === "light"}
-            title="Light theme"
-          >
-            <Sun className="size-3.5" />
-          </button>
-        </div>
         {onClose && (
           <button className="sheet-close" onClick={onClose} aria-label="Close studio">
             <X className="size-4" aria-hidden="true" />
@@ -1257,6 +1248,19 @@ export function StudioPanel({
             e.target.value = "";
           }}
         />
+      </Section>
+      {/* ── Assistant ─────────────────────────────────────────────
+          First on the rail rather than last: it is a second way to reach
+          every other section, not one more setting to find after them. */}
+      <Section
+        icon={<Bot className="size-4" />}
+        title="Assistant"
+        subtitle="Ask it to change a setting"
+        open={open === "assistant"}
+        onToggle={() => toggle("assistant")}
+        fill
+      >
+        <AIChat onAction={onChatAction ?? (() => ({ ok: false }))} context={chatContext} />
       </Section>
       {/* ── 1. Metals ──────────────────────────────────────────────
           Metals and stones are two sections again, one per rail icon. They

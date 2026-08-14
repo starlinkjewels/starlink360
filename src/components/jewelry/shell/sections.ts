@@ -1,4 +1,5 @@
 import {
+  Bot,
   Camera,
   Clapperboard,
   Film,
@@ -42,6 +43,12 @@ export interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
+  {
+    id: "assistant",
+    title: "Assistant",
+    hint: "Ask the AI to change a setting or explain the app",
+    icon: Bot,
+  },
   { id: "metal", title: "Metals", hint: "Metal for the whole piece or one part", icon: Palette },
   { id: "stones", title: "Stones", hint: "Select one stone or all, and set the gem", icon: Gem },
   { id: "textures", title: "Textures", hint: "Surface finish, per part", icon: Waves },

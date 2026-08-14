@@ -529,7 +529,11 @@
 @utility studio-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* The title and theme toggle that used to share this row are gone; the
+     close button (mobile only) is now the sole possible child, so it sits
+     at the end rather than being spaced against siblings that no longer
+     exist. */
+  justify-content: flex-end;
   margin-bottom: 1rem;
 }
 
@@ -1447,6 +1451,151 @@
   box-shadow: var(--menu-shadow);
 }
 
+/*
+ * The AI chat.
+ *
+ * Lives inline in its own rail section, like every other panel — not a
+ * floating overlay. It used to be one, anchored off the top bar, but that
+ * meant a second, independent piece of viewport furniture to keep clear of
+ * the rail and the corner buttons. As a section it inherits the same
+ * scrolling frame (`.panel-body`) every other section already uses, for
+ * free, and "closing" it is just clicking a different rail icon.
+ *
+ * Unlike every other section, this one needs the input pinned to the bottom
+ * of the panel rather than sitting wherever the content ends — a short
+ * conversation must not leave the input stranded near the top with empty
+ * space under it. That takes a real height, not just a scroll cap, so the
+ * chain from `.studio-sections` down through `.sect-panel-fill` (used only
+ * here, via `Section`'s `fill` prop) to this element is each given an
+ * explicit height instead of the `auto` every other section relies on. The
+ * log is the one flexible part of that chain — it grows to fill whatever is
+ * left above the input and scrolls internally once messages exceed that.
+ */
+@utility ai-chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  /*
+   * `flex: 1`, not `height: 100%` — this sits beside `.sect-caption` inside
+   * `.sect-panel-fill`, a flex column, so it must grow to take whatever that
+   * sibling's natural height leaves rather than both trying to claim 100%.
+   */
+  flex: 1;
+  min-height: 0;
+}
+
+@utility ai-chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.15rem;
+}
+
+@utility ai-chat-bubble {
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+@utility ai-chat-bubble-assistant {
+  align-self: flex-start;
+  background: color-mix(in oklab, var(--color-foreground) 6%, transparent);
+  color: var(--color-foreground);
+}
+
+@utility ai-chat-bubble-user {
+  align-self: flex-end;
+  background: var(--gold);
+  color: var(--color-background);
+}
+
+@utility ai-chat-typing {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.65rem 0.75rem;
+}
+
+@utility ai-chat-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.4;
+  animation: ai-chat-dot-bounce 1.1s ease-in-out infinite;
+
+  &:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+
+@utility ai-chat-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+@utility ai-chat-error {
+  align-self: center;
+  font-size: 0.8rem;
+  color: var(--color-destructive);
+}
+
+@utility ai-chat-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+@utility ai-chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-size: 0.85rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+}
+
+@utility ai-chat-send {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--menu-surface);
+  color: var(--color-muted-foreground);
+
+  &:hover:not(:disabled) {
+    color: var(--gold);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
 @utility loader-brand {
   display: flex;
   align-items: center;
@@ -1498,6 +1647,19 @@
   50% {
     opacity: 1;
     transform: scale(1.08);
+  }
+}
+
+@keyframes ai-chat-dot-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.15rem);
   }
 }
 
@@ -5032,6 +5194,15 @@ input[type="radio"]:disabled {
   /* No gap. `panel-group` owns the spacing between blocks and resets its own
    * top margin on the first child; a gap here would double every seam. */
   min-width: 0;
+  /*
+   * A real height, not `auto` — the assistant section (`.sect-panel-fill`
+   * below) needs a definite height to flex-grow against, and percentage/flex
+   * sizing only resolves through a chain of ancestors that each have one.
+   * Harmless for every other section: their content still renders at its own
+   * natural height and simply overflows this box (still fully visible,
+   * still scrolled by `.panel-body`) when it runs taller than the panel.
+   */
+  height: 100%;
 }
 
 @utility sect-panel {
@@ -5039,6 +5210,19 @@ input[type="radio"]:disabled {
   /* Same reason: the groups inside space themselves. This exists to be a
    * container with an identity, not to add rhythm of its own. */
   min-width: 0;
+}
+
+/* The assistant section only — see the comment on `.studio-sections` and on
+ * `.ai-chat-panel`. Stretches to fill the space `.studio-head` leaves rather
+ * than sizing to its own content, so the chat's input can pin to the bottom
+ * of the panel instead of trailing right after the last message. */
+@utility sect-panel-fill {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 /*
