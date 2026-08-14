@@ -7,6 +7,14 @@
  * object among 675 on a model too dense to orbit smoothly. Every professional
  * 3D tool answers this with an outliner, and this is ours.
  *
+ * TOGGLING, not replacing. In the viewport a plain click replaces the selection
+ * and ctrl adds, which is what every 3D tool does and what the cursor implies.
+ * A LIST is not a viewport. Building "metal 1, 5 and 8, plus stones 3, 6 and 9"
+ * out of replacing clicks is impossible without holding a modifier the whole
+ * time, and on a phone — which is most of this audience — there is no modifier
+ * to hold. So a row here behaves like a checkbox: click adds, click again
+ * removes, and nothing is lost by accident.
+ *
  * It invents nothing. `collectParts` already reports every part with its kind,
  * and the decoder already split the metal into its separate solids and the pave
  * into its individual stones. The structure exists; it has simply never been
@@ -14,7 +22,7 @@
  * it has always been, which is what lets a row here feed the material panels,
  * the stamp tool and `groups.ts` without any of them changing.
  */
-import { ChevronRight, Layers } from "lucide-react";
+import { Check, ChevronRight, Layers } from "lucide-react";
 import { useMemo, useState } from "react";
 import { applyClick, solidCount, solidId, type Part, type PartKind } from "../selection";
 import { PanelIntro } from "../ui/Panel";
@@ -78,8 +86,9 @@ export function ObjectsPanel({
   return (
     <>
       <PanelIntro>
-        Everything in this piece, as the file describes it. Click to select one, ctrl or shift to
-        add more — then any material, finish or mark applies to exactly what is selected.
+        Everything in this piece, as the file describes it. Click any row to add it to the
+        selection, click again to remove it — then any material, finish or mark applies to exactly
+        what is selected. Metal and stones can be selected together.
       </PanelIntro>
 
       {parts.length === 0 && <p className="field-hint">Nothing loaded yet.</p>}
@@ -142,16 +151,14 @@ export function ObjectsPanel({
 
                       <button
                         className="obj-name"
-                        onClick={(e) =>
-                          onSelect(
-                            applyClick(selected, part.id, e.ctrlKey || e.metaKey || e.shiftKey),
-                          )
-                        }
+                        // Always additive. See TOGGLING below.
+                        onClick={() => onSelect(applyClick(selected, part.id, true))}
                         aria-pressed={partSelected}
                         title={part.label}
                       >
                         {part.label}
                       </button>
+                      {partSelected && <Check className="obj-tick size-3" />}
                       {n > 1 && <span className="obj-count">{n}</span>}
                     </div>
 
@@ -163,15 +170,12 @@ export function ObjectsPanel({
                             <li key={id}>
                               <button
                                 className={`obj-row obj-sub-row ${selected.has(id) ? "obj-row-on" : ""}`}
-                                onClick={(e) =>
-                                  onSelect(
-                                    applyClick(selected, id, e.ctrlKey || e.metaKey || e.shiftKey),
-                                  )
-                                }
+                                onClick={() => onSelect(applyClick(selected, id, true))}
                                 aria-pressed={selected.has(id)}
                               >
                                 {/* Numbered from 1: nobody counts objects from zero. */}
                                 {part.label} · {i + 1}
+                                {selected.has(id) && <Check className="obj-tick size-3" />}
                               </button>
                             </li>
                           ))}

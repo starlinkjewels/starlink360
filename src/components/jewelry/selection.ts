@@ -236,7 +236,18 @@ export function resolveSelection(
     if (!part) continue;
 
     if (solid === null) {
-      const total = part.mesh.geometry?.index?.count ?? 0;
+      /*
+       * The whole part, counted in whichever units it draws in.
+       *
+       * This read `index.count` alone, and stones have NO INDEX — faceting
+       * de-indexes them for flat shading. So a whole-stone-group selection
+       * resolved to a draw range of zero and highlighted nothing at all, while
+       * picking the stones one at a time worked perfectly, because that path
+       * goes through `solidRange` and the offsets. The fault sat unnoticed
+       * until the Objects panel gave anyone a way to select a whole part.
+       */
+      const geo = part.mesh.geometry;
+      const total = geo?.index?.count ?? geo?.getAttribute("position")?.count ?? 0;
       out.push({ id, mesh: part.mesh, start: 0, count: total });
       continue;
     }

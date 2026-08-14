@@ -5224,3 +5224,10 @@ input[type="radio"]:disabled {
   font-size: 0.55rem;
   color: var(--color-muted-foreground);
 }
+
+/* The tick that makes a row read as a checkbox rather than a link. */
+@utility obj-tick {
+  flex: none;
+  margin-right: 0.3rem;
+  color: var(--gold);
+}
