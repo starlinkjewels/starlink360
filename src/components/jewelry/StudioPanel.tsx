@@ -1290,6 +1290,8 @@ export function StudioPanel({
           parts={parts}
           selected={selectedParts}
           onSelect={onSelectParts ?? (() => {})}
+          groups={groups}
+          onGroups={onGroups}
         />
       </Section>
 

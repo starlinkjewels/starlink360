@@ -7,13 +7,18 @@
  * object among 675 on a model too dense to orbit smoothly. Every professional
  * 3D tool answers this with an outliner, and this is ours.
  *
- * TOGGLING, not replacing. In the viewport a plain click replaces the selection
- * and ctrl adds, which is what every 3D tool does and what the cursor implies.
- * A LIST is not a viewport. Building "metal 1, 5 and 8, plus stones 3, 6 and 9"
- * out of replacing clicks is impossible without holding a modifier the whole
- * time, and on a phone — which is most of this audience — there is no modifier
- * to hold. So a row here behaves like a checkbox: click adds, click again
- * removes, and nothing is lost by accident.
+ * TWO TARGETS PER ROW, which is how every outliner resolves this.
+ *
+ * The two things people want are in direct conflict. Building "metal 1, 5 and
+ * 8, plus stones 3, 6 and 9" needs clicks that ACCUMULATE. Pressing All and
+ * then one object needs a click that REPLACES — that is the convention every
+ * file manager has taught, and anything else feels stuck.
+ *
+ * Making the click mean one of them and a held modifier mean the other fails
+ * both: on a phone there is no modifier, and most of this audience is on a
+ * phone. So the row carries both. The BOX toggles that object in and out; the
+ * NAME selects it alone. Neither needs a keyboard, and which is which is
+ * visible rather than remembered.
  *
  * It invents nothing. `collectParts` already reports every part with its kind,
  * and the decoder already split the metal into its separate solids and the pave
@@ -26,7 +31,7 @@ import { Check, ChevronRight, FolderPlus, Layers, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { applyClick, solidCount, solidId, type Part, type PartKind } from "../selection";
 import { PanelGroup, PanelIntro } from "../ui/Panel";
-import { createGroup, describeGroup, kindOf, removeGroup, type PartGroup } from "../groups";
+import { createGroup, kindOf, removeGroup, renameGroup, type PartGroup } from "../groups";
 
 /**
  * How many individual objects a part lists before it stops.
@@ -59,6 +64,8 @@ export function ObjectsPanel({
 }) {
   /** Which parts are showing their individual objects. */
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  /** The name the next set will be saved under. */
+  const [draftName, setDraftName] = useState("");
 
   const byKind = useMemo(
     () => KINDS.map((k) => ({ ...k, items: parts.filter((p) => p.kind === k.kind) })),
@@ -102,9 +109,10 @@ export function ObjectsPanel({
   return (
     <>
       <PanelIntro>
-        Everything in this piece, as the file describes it. Click any row to add it to the
-        selection, click again to remove it — then any material, finish or mark applies to exactly
-        what is selected. Metal and stones can be selected together.
+        Everything in this piece, as the file describes it. Click a <strong>name</strong> to select
+        just that one; click its <strong>box</strong> to add or remove it from the selection. Metal
+        and stones can be selected together, and any material, finish or mark applies to exactly
+        what is selected.
       </PanelIntro>
 
       {parts.length === 0 && <p className="field-hint">Nothing loaded yet.</p>}
@@ -120,6 +128,19 @@ export function ObjectsPanel({
        */}
       {onGroups && parts.length > 0 && (
         <PanelGroup title="Saved sets">
+          {/*
+           * Named on the way in. A list of "Set 1, Set 2, Set 3" is a list
+           * nobody can use an hour later, and asking for the name afterwards
+           * means everyone skips it.
+           */}
+          <input
+            className="text-field"
+            value={draftName}
+            maxLength={40}
+            placeholder="Centre cluster, Prongs, Bail…"
+            aria-label="Name for this set"
+            onChange={(e) => setDraftName(e.target.value)}
+          />
           <button
             className="btn-ghost"
             disabled={selected.size === 0 || selectionKind === null}
@@ -158,12 +179,25 @@ export function ObjectsPanel({
               {groups.map((g) => (
                 <li key={g.id} className="obj-row">
                   <button
-                    className="obj-name"
+                    className="obj-pick"
                     onClick={() => onSelect(new Set(g.memberIds))}
                     title={`Select the ${g.memberIds.length} objects in ${g.name}`}
+                    aria-label={`Select ${g.name}`}
                   >
-                    {describeGroup(g)}
+                    <Check className="size-3" />
                   </button>
+                  {/*
+                   * Renamed in place. A separate dialog for one short string is
+                   * more ceremony than the thing is worth.
+                   */}
+                  <input
+                    className="obj-rename"
+                    value={g.name}
+                    maxLength={40}
+                    aria-label={`Rename ${g.name}`}
+                    onChange={(e) => onGroups(renameGroup(groups, g.id, e.target.value))}
+                  />
+                  <span className="obj-count">{g.memberIds.length}</span>
                   <button
                     className="obj-del"
                     onClick={() => onGroups(removeGroup(groups, g.id))}
@@ -236,15 +270,21 @@ export function ObjectsPanel({
                       )}
 
                       <button
-                        className="obj-name"
-                        // Always additive. See TOGGLING below.
+                        className={`obj-box ${partSelected ? "obj-box-on" : ""}`}
                         onClick={() => onSelect(applyClick(selected, part.id, true))}
                         aria-pressed={partSelected}
-                        title={part.label}
+                        aria-label={`${partSelected ? "Remove" : "Add"} ${part.label}`}
+                        title={partSelected ? "Remove from selection" : "Add to selection"}
+                      >
+                        {partSelected && <Check className="size-3" />}
+                      </button>
+                      <button
+                        className="obj-name"
+                        onClick={() => onSelect(new Set([part.id]))}
+                        title={`Select only ${part.label}`}
                       >
                         {part.label}
                       </button>
-                      {partSelected && <Check className="obj-tick size-3" />}
                       {n > 1 && <span className="obj-count">{n}</span>}
                     </div>
 
@@ -254,15 +294,27 @@ export function ObjectsPanel({
                           .slice(0, VISIBLE_SOLIDS)
                           .map((id, i) => (
                             <li key={id}>
-                              <button
-                                className={`obj-row obj-sub-row ${selected.has(id) ? "obj-row-on" : ""}`}
-                                onClick={() => onSelect(applyClick(selected, id, true))}
-                                aria-pressed={selected.has(id)}
-                              >
-                                {/* Numbered from 1: nobody counts objects from zero. */}
-                                {part.label} · {i + 1}
-                                {selected.has(id) && <Check className="obj-tick size-3" />}
-                              </button>
+                              <div className={`obj-row ${selected.has(id) ? "obj-row-on" : ""}`}>
+                                <button
+                                  className={`obj-box ${selected.has(id) ? "obj-box-on" : ""}`}
+                                  onClick={() => onSelect(applyClick(selected, id, true))}
+                                  aria-pressed={selected.has(id)}
+                                  aria-label={`${selected.has(id) ? "Remove" : "Add"} object ${i + 1}`}
+                                  title={
+                                    selected.has(id) ? "Remove from selection" : "Add to selection"
+                                  }
+                                >
+                                  {selected.has(id) && <Check className="size-3" />}
+                                </button>
+                                <button
+                                  className="obj-name obj-sub-row"
+                                  onClick={() => onSelect(new Set([id]))}
+                                  title={`Select only ${part.label} ${i + 1}`}
+                                >
+                                  {/* Numbered from 1: nobody counts objects from zero. */}
+                                  {part.label} · {i + 1}
+                                </button>
+                              </div>
                             </li>
                           ))}
                         {n > VISIBLE_SOLIDS && (
