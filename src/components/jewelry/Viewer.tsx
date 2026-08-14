@@ -1273,6 +1273,15 @@ export default function Viewer({
         />
         <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
         <InteractionQuality controlsRef={controlsRef} />
+        {/*
+          Bloom was written, tuned and given a panel, and then never mounted.
+          Nothing drew through the composer, so every control in Post moved a
+          number that reached no pixel — which is why the highlights on a stone
+          were the size of the stone and no larger. A real diamond blows out
+          the sensor around each flash, and that halo is most of what makes a
+          photograph of one look like a photograph.
+        */}
+        {post && <BloomRig settings={post} onRenderer={setSceneRenderer} />}
         <PickAcceleration />
         {/*
           Bottom-left orientation ball, and a way to snap to an axis.

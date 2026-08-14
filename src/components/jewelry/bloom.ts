@@ -51,9 +51,22 @@ export interface BloomSettings {
   threshold: number;
 }
 
-/** Off, so nothing changes and nothing is paid for until asked. */
+/*
+ * On, because on a jewellery viewer this is not an effect — it is the product.
+ *
+ * It defaulted to off so that nothing changed and nothing was paid for until
+ * asked, which was the right instinct for an optional flourish and the wrong
+ * one here. A diamond in a photograph blows out the sensor around each flash,
+ * and that halo is most of what makes the photograph read as real. Without it
+ * a stone renders as a small grey dot, which is exactly what a client compared
+ * against a competitor and called an obvious render.
+ *
+ * Nobody was ever going to find this in a panel. The threshold does the work
+ * of keeping it honest: at 0.95 only pixels already brighter than white glow,
+ * so the stones bloom and the metal does not turn to fog.
+ */
 export const DEFAULT_BLOOM: BloomSettings = {
-  enabled: false,
+  enabled: true,
   strength: 0.35,
   radius: 0.4,
   threshold: 0.95,

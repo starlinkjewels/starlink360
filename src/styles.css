@@ -432,14 +432,36 @@
  * nothing here is dragged by its scrollbar, and on a touch screen the bar is
  * decoration for a gesture that has already happened.
  */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--gold) 45%, transparent) transparent;
+/*
+ * The two ways of styling a scrollbar are mutually exclusive, and the standard
+ * one wins by default.
+ *
+ * Setting `scrollbar-width` makes Chrome discard every ::-webkit-scrollbar
+ * rule on the page, and the standard property has no length — `thin` is
+ * whatever the engine says, around eight pixels. So asking for 1px in the
+ * pseudo-element while `thin` sat on `*` left a fat gold bar and no way to
+ * narrow it: the rule that could set a width was the one being ignored.
+ *
+ * The pseudo-elements are therefore left alone to do the work, and the
+ * standard properties are given only to engines with no pseudo-elements of
+ * their own — Firefox, where `thin` is the narrowest that exists and the bar
+ * stays a little wider than it is elsewhere.
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--gold) 45%, transparent) transparent;
+  }
 }
 
 *::-webkit-scrollbar {
   width: 2px;
   height: 2px;
+}
+
+/* The stepper arrows at each end, which no amount of width will thin. */
+*::-webkit-scrollbar-button {
+  display: none;
 }
 
 *::-webkit-scrollbar-track {

@@ -33,13 +33,25 @@ const withBloom = (patch) => ({ ...DEFAULT_POST, bloom: { ...DEFAULT_BLOOM, ...p
 const withDof = (patch) => ({ ...DEFAULT_POST, dof: { ...DEFAULT_DOF, ...patch } });
 const withSsr = (patch) => ({ ...DEFAULT_POST, ssr: { ...DEFAULT_SSR, ...patch } });
 
-console.log("=== everything is off by default ===");
-check(!DEFAULT_BLOOM.enabled, "bloom is off");
+/*
+ * Bloom is the exception, and deliberately so. On a jewellery viewer the halo
+ * around a stone is not an effect to opt into, it is what makes the stone read
+ * as a stone — a client compared the old flat dots against a competitor and
+ * called them an obvious render. Everything else still costs nothing until it
+ * is asked for.
+ */
+console.log("=== bloom is on, the rest is off ===");
+check(DEFAULT_BLOOM.enabled, "bloom is on, because sparkle is the product");
+check(
+  DEFAULT_BLOOM.threshold > 0.9,
+  "and kept honest by a high threshold, so metal does not glow",
+  `${DEFAULT_BLOOM.threshold}`,
+);
 check(!DEFAULT_DOF.enabled, "depth of field is off");
 check(!DEFAULT_SSR.enabled, "SSR is off");
 check(
-  !usesComposer(DEFAULT_POST),
-  "so no composer is built at all, and the render path stays a plain gl.render",
+  usesComposer(DEFAULT_POST),
+  "so a composer is built, which is what puts bloom on screen at all",
 );
 check(
   DEFAULT_BLOOM.resolutionX === 0 && DEFAULT_BLOOM.resolutionY === 0,
@@ -93,8 +105,8 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
    * nothing, which is the failure that looks like a broken control.
    */
   check(
-    composerKey(base) !== composerKey(withBloom({ enabled: true })),
-    "turning an effect on changes which passes exist",
+    composerKey(base) !== composerKey(withBloom({ enabled: false })),
+    "turning an effect off changes which passes exist",
   );
   check(
     composerKey(withBloom({ enabled: true })) !==
@@ -130,7 +142,16 @@ console.log("\n=== the warnings are honest about the cost ===");
     ssr?.slice(0, 48),
   );
 
-  const dof = postWarning(withDof({ enabled: true }));
+  /*
+   * Bloom is turned off here on purpose. With it on — the default now — depth
+   * of field is the second full-screen pass and the warning that matters is
+   * the one about frame rate, which is checked above. The focus advice is what
+   * a person sees when depth of field is the only pass they have added.
+   */
+  const dof = postWarning({
+    ...withDof({ enabled: true }),
+    bloom: { ...DEFAULT_BLOOM, enabled: false },
+  });
   check(!!dof && /focus/.test(dof), "depth of field explains what the focus distance means");
 
   const both = postWarning({
