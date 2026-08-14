@@ -5231,3 +5231,15 @@ input[type="radio"]:disabled {
   margin-right: 0.3rem;
   color: var(--gold);
 }
+
+/* Delete, on a saved-set row. Quiet until hovered — it is destructive. */
+@utility obj-del {
+  flex: none;
+  padding: 0.25rem;
+  border-radius: 0.3rem;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: #ef4444;
+  }
+}

@@ -40,6 +40,7 @@ import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
 import { ObjectsPanel } from "./panels/ObjectsPanel";
 import type { Stamp } from "./stamps";
+import type { PartGroup } from "./groups";
 import { ProngsPanel } from "./panels/ProngsPanel";
 import type { ProngHeights } from "./prongs";
 import { LightsPanel } from "./panels/LightsPanel";
@@ -344,6 +345,9 @@ export interface StudioPanelProps {
   /** Hallmarks struck into the metal, and the punch waiting to be struck. */
   stamps: Stamp[];
   onStamps?: (next: Stamp[]) => void;
+  /** Named sets of parts the user has saved. */
+  groups?: PartGroup[];
+  onGroups?: (next: PartGroup[]) => void;
   stampDraft: StampDraft;
   onStampDraft?: (next: StampDraft) => void;
   stampFont: string;
@@ -428,6 +432,8 @@ export function StudioPanel({
   onProngHeights,
   stamps,
   onStamps,
+  groups = [],
+  onGroups,
   stampDraft,
   onStampDraft,
   stampFont,

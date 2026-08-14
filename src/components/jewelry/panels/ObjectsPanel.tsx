@@ -22,10 +22,11 @@
  * it has always been, which is what lets a row here feed the material panels,
  * the stamp tool and `groups.ts` without any of them changing.
  */
-import { Check, ChevronRight, Layers } from "lucide-react";
+import { Check, ChevronRight, FolderPlus, Layers, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { applyClick, solidCount, solidId, type Part, type PartKind } from "../selection";
-import { PanelIntro } from "../ui/Panel";
+import { PanelGroup, PanelIntro } from "../ui/Panel";
+import { createGroup, describeGroup, kindOf, removeGroup, type PartGroup } from "../groups";
 
 /**
  * How many individual objects a part lists before it stops.
@@ -46,10 +47,15 @@ export function ObjectsPanel({
   parts,
   selected,
   onSelect,
+  groups = [],
+  onGroups,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
   onSelect: (next: Set<string>) => void;
+  /** Named sets the user has saved. */
+  groups?: PartGroup[];
+  onGroups?: (next: PartGroup[]) => void;
 }) {
   /** Which parts are showing their individual objects. */
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -58,6 +64,16 @@ export function ObjectsPanel({
     () => KINDS.map((k) => ({ ...k, items: parts.filter((p) => p.kind === k.kind) })),
     [parts],
   );
+
+  /*
+   * Which kind the selection is, or null when it mixes. Computed from the
+   * parts list rather than from the id, because a solid id carries no kind.
+   */
+  const kindById = useMemo(() => {
+    const map = new Map(parts.map((p) => [p.id, p.kind]));
+    return (id: string) => map.get(id.split("#solid")[0]);
+  }, [parts]);
+  const selectionKind = useMemo(() => kindOf(selected, kindById), [selected, kindById]);
 
   const toggleOpen = (id: string) => {
     const next = new Set(open);
@@ -92,6 +108,76 @@ export function ObjectsPanel({
       </PanelIntro>
 
       {parts.length === 0 && <p className="field-hint">Nothing loaded yet.</p>}
+
+      {/*
+       * Saved sets.
+       *
+       * A group SELECTS ITS MEMBERS rather than being a thing the renderers
+       * understand. That is the whole trick: choosing one is identical to
+       * having clicked those rows by hand, so every material panel, the stamp
+       * tool and the export path keep working with no knowledge that groups
+       * exist. Nothing downstream changed to support this.
+       */}
+      {onGroups && parts.length > 0 && (
+        <PanelGroup title="Saved sets">
+          <button
+            className="btn-ghost"
+            disabled={selected.size === 0 || selectionKind === null}
+            title={
+              selected.size === 0
+                ? "Select some objects first"
+                : selectionKind === null
+                  ? "A set is metal or stones, not both — a material only applies to one"
+                  : "Save the current selection as a named set"
+            }
+            onClick={() => {
+              if (!selectionKind) return;
+              onGroups(
+                createGroup(groups, `Set ${groups.length + 1}`, [...selected], selectionKind),
+              );
+            }}
+          >
+            <FolderPlus className="size-3.5" />
+            Group selection ({selected.size})
+          </button>
+
+          {/*
+           * Refused rather than allowed, and said out loud. The metal renderer
+           * ignores stone ids and the gem renderer ignores metal ones, so a
+           * mixed set given a gold would apply to half of it with nothing on
+           * screen to explain the rest.
+           */}
+          {selected.size > 0 && selectionKind === null && (
+            <p className="field-hint">
+              This selection mixes metal and stones. A set has to be one or the other.
+            </p>
+          )}
+
+          {groups.length > 0 && (
+            <ul className="obj-list">
+              {groups.map((g) => (
+                <li key={g.id} className="obj-row">
+                  <button
+                    className="obj-name"
+                    onClick={() => onSelect(new Set(g.memberIds))}
+                    title={`Select the ${g.memberIds.length} objects in ${g.name}`}
+                  >
+                    {describeGroup(g)}
+                  </button>
+                  <button
+                    className="obj-del"
+                    onClick={() => onGroups(removeGroup(groups, g.id))}
+                    aria-label={`Delete ${g.name}`}
+                    title="Delete"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </PanelGroup>
+      )}
 
       {byKind.map(({ kind, label, unit, items }) => {
         if (!items.length) return null;
