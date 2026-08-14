@@ -1,11 +1,16 @@
 /*
  * Post processing.
  *
- * Three effects, all off by default, each costing a full-screen pass on top of
- * the render. That cost is stated on screen rather than discovered, and so is
- * the one honest caveat: SSR does not work properly on transmissive materials,
- * which is most of what this product renders. It is here because a product
- * competing on a feature list needs it — warned about, not hidden.
+ * Four effects. Depth of field and SSR are off by default, each costing a
+ * full-screen pass on top of the render — that cost is stated on screen
+ * rather than discovered, and so is the one honest caveat: SSR does not work
+ * properly on transmissive materials, which is most of what this product
+ * renders. It is here because a product competing on a feature list needs
+ * it — warned about, not hidden.
+ *
+ * Bloom and Film are on by default. Neither is a flourish here: a stone
+ * without bloom is a grey dot, and a frame without grain, vignette or lens
+ * aberration is a render, not a photograph.
  */
 import { RotateCcw } from "lucide-react";
 import { DEFAULT_POST, postWarning, type PostSettings } from "../bloom";
@@ -60,15 +65,63 @@ export function PostPanel({
     onPost({ ...post, dof: { ...post.dof, ...patch } });
   const ssr = (patch: Partial<PostSettings["ssr"]>) =>
     onPost({ ...post, ssr: { ...post.ssr, ...patch } });
+  const film = (patch: Partial<PostSettings["film"]>) =>
+    onPost({ ...post, film: { ...post.film, ...patch } });
 
   return (
     <>
       <PanelIntro>
         Effects applied to the finished frame. Each is a full-screen pass on top of the render, so
-        each costs frame time — which is why all three start off.
+        each costs frame time. Bloom and Film stay on because without them a stone loses its sparkle
+        and the whole frame reads as computed rather than photographed.
       </PanelIntro>
 
       {warning && <p className="field-hint field-warn">{warning}</p>}
+
+      {/* ── Film ── */}
+      <label className="tex-toggle">
+        <input
+          type="checkbox"
+          checked={post.film.enabled}
+          onChange={(e) => film({ enabled: e.target.checked })}
+        />
+        <span>Film (grain, vignette, lens)</span>
+      </label>
+
+      {post.film.enabled && (
+        <div className="mat-editor">
+          <NumberField
+            label="Grain"
+            value={post.film.grain}
+            min={0}
+            max={0.3}
+            step={0.005}
+            precision={3}
+            hint="Sensor noise. A perfectly clean image is what no camera actually produces."
+            onChange={(v) => film({ grain: v })}
+          />
+          <NumberField
+            label="Vignette"
+            value={post.film.vignette}
+            min={0}
+            max={1}
+            step={0.01}
+            precision={2}
+            hint="Corner falloff, as a lens has. Darkens the edges of the frame, not the piece."
+            onChange={(v) => film({ vignette: v })}
+          />
+          <NumberField
+            label="Lens aberration"
+            value={post.film.aberration}
+            min={0}
+            max={1}
+            step={0.01}
+            precision={2}
+            hint="Colour fringing toward the frame edge — the lens, not a stone's own fire."
+            onChange={(v) => film({ aberration: v })}
+          />
+        </div>
+      )}
 
       {/* ── Bloom ── */}
       <label className="tex-toggle">

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { BokehPass } from "three/examples/jsm/postprocessing/BokehPass.js";
 import { SSRPass } from "three/examples/jsm/postprocessing/SSRPass.js";
@@ -139,17 +140,119 @@ export const DEFAULT_SSR: SsrSettings = {
   distanceAttenuation: true,
 };
 
+/**
+ * The camera, not the scene.
+ *
+ * Everything else in this file is physically correct light arriving at a lens.
+ * This is what happens after that: a lens bends colour apart slightly toward
+ * the frame edge, falls off in brightness at the corners, and lands on a
+ * sensor that is never perfectly quiet. A render with none of that is not
+ * wrong, exactly — it is a photograph of nothing, which is precisely the
+ * "obviously CG" complaint. Real product photography carries a small amount
+ * of all three even in a clean studio shot; their absence reads as synthetic
+ * regardless of how correct the optics underneath are.
+ *
+ * On by default, at the studio-shot end of subtle rather than the toy-camera
+ * end of obvious: enough that a frame stops looking printed, never enough
+ * that someone notices the effect before the piece.
+ */
+export interface FilmSettings {
+  enabled: boolean;
+  /** Sensor noise. 0 is a mathematically clean image, which no camera makes. */
+  grain: number;
+  /** Corner falloff, as a lens has. 0 is no darkening at all. */
+  vignette: number;
+  /** Lateral colour fringing toward the frame edge. Separate from a gem's own
+   *  internal dispersion — this is the lens, not the stone. */
+  aberration: number;
+}
+
+export const DEFAULT_FILM: FilmSettings = {
+  enabled: true,
+  grain: 0.035,
+  vignette: 0.35,
+  aberration: 0.15,
+};
+
 /** Everything the composer draws, in one object. */
 export interface PostSettings {
   bloom: BloomSettings;
   dof: DofSettings;
   ssr: SsrSettings;
+  film: FilmSettings;
 }
 
 export const DEFAULT_POST: PostSettings = {
   bloom: DEFAULT_BLOOM,
   dof: DEFAULT_DOF,
   ssr: DEFAULT_SSR,
+  film: DEFAULT_FILM,
+};
+
+/**
+ * Grain, vignette and lens aberration in one pass, because they are all the
+ * same kind of thing — a cheap look-up next to the render itself — and three
+ * separate passes would be three separate full-screen texture reads to do
+ * work this shader does in one.
+ *
+ * Runs after `OutputPass`, deliberately: these are what happens to a frame
+ * AFTER it leaves the sensor as a viewable image, not more light transport,
+ * so they belong in display space (already tone-mapped and sRGB-encoded)
+ * rather than the linear HDR space every earlier pass works in.
+ */
+const FilmShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    vignette: { value: DEFAULT_FILM.vignette },
+    aberration: { value: DEFAULT_FILM.aberration },
+    grain: { value: DEFAULT_FILM.grain },
+    time: { value: 0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float vignette;
+    uniform float aberration;
+    uniform float grain;
+    uniform float time;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
+    }
+
+    void main() {
+      vec2 centered = vUv - 0.5;
+      float dist = length(centered);
+      vec4 base = texture2D(tDiffuse, vUv);
+
+      // Lens chromatic aberration: red and blue shift outward from centre by
+      // an amount that grows toward the edge, as a real lens element does.
+      vec2 dir = dist > 0.0001 ? centered / dist : vec2(0.0);
+      float shift = aberration * 0.006 * dist * dist;
+      float r = texture2D(tDiffuse, vUv - dir * shift).r;
+      float b = texture2D(tDiffuse, vUv + dir * shift).b;
+      vec3 color = vec3(r, base.g, b);
+
+      // Vignette: natural corner falloff, not a lighting choice — so it is
+      // multiplicative on the finished image rather than a light in the scene.
+      float fall = 1.0 - smoothstep(0.28, 0.75, dist);
+      color *= mix(1.0, fall, vignette);
+
+      // Grain: sensor noise, re-rolled per frame so it reads as noise rather
+      // than a texture printed on the glass.
+      float noise = hash(vUv * vec2(1600.0, 900.0) + time) - 0.5;
+      color += noise * grain * 0.09;
+
+      gl_FragColor = vec4(color, base.a);
+    }
+  `,
 };
 
 /**
@@ -258,8 +361,19 @@ export function createSceneRenderer(
     composer.addPass(dof);
   }
 
-  // Last, always: tone mapping and sRGB conversion for the composed frame.
+  // Tone mapping and sRGB conversion for the composed frame.
   composer.addPass(new OutputPass());
+
+  // Last of all: the camera, not the scene — see FilmShader.
+  let film: ShaderPass | null = null;
+  let filmFrame = 0;
+  if (post.film.enabled) {
+    film = new ShaderPass(FilmShader);
+    film.uniforms.vignette.value = post.film.vignette;
+    film.uniforms.aberration.value = post.film.aberration;
+    film.uniforms.grain.value = post.film.grain;
+    composer.addPass(film);
+  }
 
   return {
     render() {
@@ -281,6 +395,7 @@ export function createSceneRenderer(
         appliedRatio = ratio;
         composer.setPixelRatio(ratio);
       }
+      if (film) film.uniforms.time.value = filmFrame++ * 0.033;
       composer.render();
     },
     setSize(width, height) {
@@ -319,6 +434,11 @@ export function createSceneRenderer(
          * `composerKey` is what tells the caller when that is necessary.
          */
       }
+      if (film) {
+        film.uniforms.vignette.value = next.film.vignette;
+        film.uniforms.aberration.value = next.film.aberration;
+        film.uniforms.grain.value = next.film.grain;
+      }
     },
     dispose() {
       ssr?.dispose();
@@ -346,6 +466,7 @@ export function composerKey(post: PostSettings): string {
     post.ssr.bouncing ? 1 : 0,
     post.ssr.width,
     post.ssr.height,
+    post.film.enabled ? 1 : 0,
   ].join("|");
 }
 
@@ -356,5 +477,10 @@ export function composerKey(post: PostSettings): string {
  * test has one thing to assert.
  */
 export function usesComposer(post: PostSettings): boolean {
-  return (post.bloom.enabled && post.bloom.strength > 0) || post.dof.enabled || post.ssr.enabled;
+  return (
+    (post.bloom.enabled && post.bloom.strength > 0) ||
+    post.dof.enabled ||
+    post.ssr.enabled ||
+    post.film.enabled
+  );
 }

@@ -5,18 +5,23 @@
  * wants one or the other depending on the shot:
  *
  *  - CONTACT is the soft dark pool under the piece. It is not a real shadow —
- *    it is a blurred render of the silhouette from directly below — and it is
- *    what every render of this product has used so far. It is cheap, it always
- *    looks reasonable, and it cannot show the SHAPE of anything.
+ *    it is a blurred render of the silhouette from directly below. It is
+ *    cheap, it always looks reasonable, and it cannot show the SHAPE of
+ *    anything — which is exactly the tell that separates a render from a
+ *    photograph of a chain lying on a surface.
  *
  *  - DIRECTIONAL is a real shadow camera: the scene rendered from the light's
  *    point of view into a depth map. It casts the actual outline of a shank
  *    across the ground and through the gallery, which is what makes a render
  *    look photographed rather than composited.
  *
- * Contact stays the default deliberately. Switching the mechanism changes every
- * existing render, and quietly restyling work a client has already approved is
- * not a change to make on the user's behalf — it is one click away instead.
+ * Directional is the default. It was not for a long time, deliberately —
+ * switching the mechanism changes every existing render, and quietly
+ * restyling work a client has already approved is not a change to make on
+ * the user's behalf. That default was itself the problem: a dealer's first
+ * look is the default, not a control they had to find, and a shapeless
+ * shadow was reading as the giveaway that the piece was never actually
+ * photographed. Contact is still one click away in the panel.
  */
 
 export type ShadowMode = "contact" | "directional";
@@ -58,7 +63,7 @@ export interface ShadowSettings {
 
 export const DEFAULT_SHADOWS: ShadowSettings = {
   enabled: true,
-  mode: "contact",
+  mode: "directional",
 
   // Transcribed from DEFAULT_LIGHTING, which is where these lived before.
   opacity: 0.42,

@@ -16,6 +16,7 @@
 import {
   DEFAULT_BLOOM,
   DEFAULT_DOF,
+  DEFAULT_FILM,
   DEFAULT_POST,
   DEFAULT_SSR,
   composerKey,
@@ -32,6 +33,7 @@ const check = (ok, label, detail) => {
 const withBloom = (patch) => ({ ...DEFAULT_POST, bloom: { ...DEFAULT_BLOOM, ...patch } });
 const withDof = (patch) => ({ ...DEFAULT_POST, dof: { ...DEFAULT_DOF, ...patch } });
 const withSsr = (patch) => ({ ...DEFAULT_POST, ssr: { ...DEFAULT_SSR, ...patch } });
+const withFilm = (patch) => ({ ...DEFAULT_POST, film: { ...DEFAULT_FILM, ...patch } });
 
 /*
  * Bloom is the exception, and deliberately so. On a jewellery viewer the halo
@@ -58,23 +60,61 @@ check(
   "and bloom's buffer follows the renderer, exactly as it did before",
 );
 
+/*
+ * Film — grain, vignette, lens aberration — is the other effect that is on by
+ * default and for the same reason bloom is: without it the frame is a
+ * mathematically clean image, which is not what any camera actually produces,
+ * and that absence alone is enough to read a correct render as computed.
+ */
+console.log("\n=== film is on, subtly ===");
+check(DEFAULT_FILM.enabled, "film is on — a frame with none of this reads as computed");
+check(
+  DEFAULT_FILM.grain > 0 && DEFAULT_FILM.grain < 0.1,
+  "grain is present but subtle",
+  `${DEFAULT_FILM.grain}`,
+);
+check(
+  DEFAULT_FILM.vignette > 0 && DEFAULT_FILM.vignette < 0.6,
+  "vignette darkens the corners without being obvious",
+  `${DEFAULT_FILM.vignette}`,
+);
+check(
+  DEFAULT_FILM.aberration >= 0 && DEFAULT_FILM.aberration < 0.5,
+  "lens aberration is a hint of fringing, not a toy-camera effect",
+  `${DEFAULT_FILM.aberration}`,
+);
+
 console.log("\n=== a composer exists only when something needs one ===");
 check(usesComposer(withBloom({ enabled: true })), "bloom needs one");
 check(usesComposer(withDof({ enabled: true })), "depth of field needs one");
 check(usesComposer(withSsr({ enabled: true })), "SSR needs one");
+check(usesComposer(withFilm({ enabled: true })), "film needs one too");
+check(
+  !usesComposer({
+    ...withBloom({ enabled: false }),
+    dof: { ...DEFAULT_DOF, enabled: false },
+    ssr: { ...DEFAULT_SSR, enabled: false },
+    film: { ...DEFAULT_FILM, enabled: false },
+  }),
+  "and none at all when every effect, film included, is off",
+);
 /*
  * Enabled with zero strength draws nothing, so building the whole chain for it
  * is pure cost — a full extra render target and three passes to composite an
  * unchanged image.
  */
 check(
-  !usesComposer(withBloom({ enabled: true, strength: 0 })),
-  "but bloom at zero strength does not — it would build a chain to change nothing",
+  !usesComposer({
+    ...withBloom({ enabled: true, strength: 0 }),
+    film: { ...DEFAULT_FILM, enabled: false },
+  }),
+  "but bloom at zero strength does not, on its own — it would build a chain to change nothing",
 );
 check(
   usesComposer({
     ...withBloom({ enabled: true, strength: 0 }),
     dof: { ...DEFAULT_DOF, enabled: true },
+    film: { ...DEFAULT_FILM, enabled: false },
   }),
   "though another effect still brings one back",
 );
@@ -99,6 +139,10 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
       composerKey(withSsr({ enabled: true, thickness: 0.5, opacity: 0.2, fresnel: false })),
     "and SSR's thickness, opacity and fresnel",
   );
+  check(
+    composerKey(base) === composerKey(withFilm({ grain: 0.2, vignette: 0.9, aberration: 0.8 })),
+    "and film's grain, vignette and aberration are uniforms too",
+  );
 
   /*
    * Baked in at construction. Changing any of these in place silently does
@@ -122,6 +166,10 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
     composerKey(withSsr({ enabled: true })) !==
       composerKey(withSsr({ enabled: true, width: 1024 })),
     "and its buffer size",
+  );
+  check(
+    composerKey(base) !== composerKey(withFilm({ enabled: false })),
+    "turning film off changes which passes exist too",
   );
 }
 

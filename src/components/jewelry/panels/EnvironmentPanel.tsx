@@ -272,10 +272,27 @@ export function EnvironmentPanel({
               ariaLabel="Gem environment"
             />
           ) : (
-            <p className="field-hint">
-              The stones are sharing the metal&rsquo;s environment. Switching this on holds a second
-              environment map in memory, which is why it is not the default.
-            </p>
+            <>
+              <p className="field-hint">
+                The stones are sharing the metal&rsquo;s environment, which is where a diamond loses
+                its fire — this holds a second environment map in memory, which is worth it.
+              </p>
+              {/*
+                The two clicks above (check the box, then pick "Studio light
+                tent" out of twelve) are the single biggest lever on whether a
+                stone reads as a real diamond — this is that in one click,
+                for someone who wants just this and not the rest of what
+                "Best look" also changes (shadows, theme).
+              */}
+              <button
+                className="chip mt-2"
+                onClick={() =>
+                  onLighting({ ...lighting, separateGemEnvironment: true, gemEnvironment: "tent" })
+                }
+              >
+                Use the light tent
+              </button>
+            </>
           )}
         </>
       )}

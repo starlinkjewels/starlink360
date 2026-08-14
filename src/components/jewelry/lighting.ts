@@ -33,9 +33,12 @@ export interface EnvironmentOption {
 }
 
 /*
- * Ten of these ship with drei and cost nothing to add. "Warehouse" is first and
- * is the default because it is what the current look was signed off against —
- * everything else is an alternative, not a replacement.
+ * Ten of these ship with drei and cost nothing to add. "Warehouse" is first
+ * and is the default because it is what the current look was signed off
+ * against — and, tried against the alternative, for a real reason: at this
+ * product's boosted envMapIntensity, "Studio"'s near-black inter-panel gaps
+ * punch black crescents into every chain link and pavé facet. Warehouse does
+ * not have that failure mode.
  */
 export const ENVIRONMENTS: EnvironmentOption[] = [
   {
@@ -148,9 +151,12 @@ export interface LightingSettings {
   /**
    * Lets the stones sample a different environment from the metal.
    *
-   * Not a gimmick: it is how the photograph is actually taken, with the piece in
-   * a room and the stone in a light tent. Off by default, because on means two
-   * environment maps in memory at once.
+   * Not a gimmick: it is how the photograph is actually taken, with the piece
+   * in a room and the stone in a light tent. On by default despite the extra
+   * environment map in memory, because a diamond's fire needs small, bright,
+   * concentrated sources to split into visible colour — a diffuse room like
+   * Studio or Warehouse starves it, and a stone with no fire is the single
+   * biggest reason a render reads as a grey glass dot instead of a diamond.
    */
   separateGemEnvironment: boolean;
   gemEnvironment: string;
@@ -177,15 +183,32 @@ export interface LightingSettings {
 }
 
 /**
- * Exactly what the viewer rendered before this section existed.
+ * The photographic combination, not the legacy one — except `environment`.
  *
- * These are not tasteful round numbers — they are the values that were on
- * screen when the current look was approved, transcribed. Changing any of them
- * changes a signed-off render, so the test suite asserts them.
+ * `separateGemEnvironment` used to be off specifically so this file could
+ * never be the thing that changed a signed-off render. That reasoning stopped
+ * holding once the problem was the default itself: a first look — a dealer's
+ * demo — is the default, not a preset someone has to already know to reach.
+ * On, it is what lets a diamond throw real fire instead of sitting there as a
+ * sparkle-free grey dot.
+ *
+ * `environment` was tried at "studio" for the same reason and reverted: at
+ * this product's `envMapIntensity` (materials.ts boosts it well past 1 for
+ * the polished/lacquered look), drei's studio HDRI has near-black gaps
+ * between its panels that a chain's concave link interiors and a pavé
+ * bezel's facets catch directly — every link went from warm gold to gold
+ * with a black crescent punched into it. That reads as a lighting bug, which
+ * is worse than the problem this whole change exists to fix. Warehouse does
+ * not have that failure mode and is what the original look was built on, so
+ * it stays.
+ *
+ * `environmentRotation` and `environmentIntensity` are the untouched original
+ * values — rotating or dimming the room is a per-piece framing choice, not
+ * part of "does this look photographed at all".
  */
 export const DEFAULT_LIGHTING: LightingSettings = {
   environment: "warehouse",
-  separateGemEnvironment: false,
+  separateGemEnvironment: true,
   gemEnvironment: "tent",
   // Zero and one: the environment exactly as it was before these existed.
   environmentRotation: 0,

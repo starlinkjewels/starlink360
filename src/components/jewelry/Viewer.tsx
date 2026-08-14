@@ -196,6 +196,15 @@ function Ground({ fit, settings }: { fit: Fit; settings: GroundSettings }) {
  * The renderer is handed upward as well, because exports call it directly. Any
  * other arrangement gives bloom on screen and none in the download.
  */
+/** Keeps the renderer's exposure in sync with the Environment panel's slider. */
+function ExposureSync({ exposure }: { exposure: number }) {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    gl.toneMappingExposure = exposure;
+  }, [gl, exposure]);
+  return null;
+}
+
 function BloomRig({
   settings,
   onRenderer,
@@ -1089,6 +1098,13 @@ export default function Viewer({
           seeded with exactly those five, so the default render is unchanged.
         */}
         <LightRig lights={lights} fit={fit} shadows={shadows} debug={debugLights} />
+
+        {/*
+          `gl` only takes an initial exposure at construction — it is not a
+          prop that stays wired up, so the slider in Environment moved state
+          and nothing else. This is the only thing that ever writes it after.
+        */}
+        <ExposureSync exposure={lighting.exposure} />
 
         {/*
           What the metal reflects. The stones do NOT use this unless the gem

@@ -153,7 +153,10 @@ check(!fieldsFor("point").shadow, "and a point light is not offered as the caste
 
 console.log("\n=== shadow settings are brought into range ===");
 {
-  check(DEFAULT_SHADOWS.mode === "contact", "contact stays the default, so no render restyles");
+  check(
+    DEFAULT_SHADOWS.mode === "directional",
+    "directional is the default — a real shadow camera, not a shapeless blob",
+  );
   check(
     DEFAULT_SHADOWS.opacity === 0.42 &&
       DEFAULT_SHADOWS.blur === 2.6 &&

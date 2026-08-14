@@ -3,10 +3,10 @@
  *
  * Two jobs.
  *
- * 1. The defaults must reproduce the look that was signed off. Every value in
- *    DEFAULT_LIGHTING was transcribed from what the viewer hard-coded before
- *    this section existed, and a stray edit to one of them silently changes an
- *    approved render. They are asserted literally.
+ * 1. The defaults are the photographic combination — studio environment, gem
+ *    fire on — chosen deliberately rather than transcribed from whatever was
+ *    already on screen. They are asserted literally so a stray edit cannot
+ *    quietly drift the default look away from what was decided.
  *
  * 2. The tent is measured through the display path it will actually go through
  *    — ACES tone mapping at the viewer's exposure, then sRGB — because linear
@@ -30,10 +30,12 @@ const check = (ok, label, detail) => {
   if (!ok) fail++;
 };
 
-console.log("=== defaults reproduce the approved look ===");
+console.log("=== defaults are the photographic combination ===");
 const APPROVED = {
+  // Studio was tried here and reverted — see lighting.ts. At this product's
+  // boosted envMapIntensity it punches black crescents into every chain link.
   environment: "warehouse",
-  separateGemEnvironment: false,
+  separateGemEnvironment: true,
   exposure: 1.4,
 };
 for (const [k, want] of Object.entries(APPROVED)) {
@@ -65,8 +67,8 @@ for (const k of RETIRED) {
   check(!(k in DEFAULT_LIGHTING), `${k} is gone, not left driving nothing`);
 }
 check(
-  DEFAULT_LIGHTING.separateGemEnvironment === false,
-  "stones share the metal's environment by default, as today",
+  DEFAULT_LIGHTING.separateGemEnvironment === true,
+  "the stones get their own light tent by default, so they show real fire",
 );
 
 console.log("\n=== environment list ===");

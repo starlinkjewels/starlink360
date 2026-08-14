@@ -2,9 +2,8 @@
  * Shadows.
  *
  * Two mechanisms, chosen explicitly rather than swapped underneath anyone. See
- * `shadows.ts` for why contact stays the default — the short version is that
- * changing it restyles every render already approved, and that is the user's
- * call.
+ * `shadows.ts` for why directional is now the default and contact is the
+ * fallback, not the other way around.
  */
 import { RotateCcw } from "lucide-react";
 import {
