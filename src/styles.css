@@ -5536,3 +5536,23 @@ input[type="radio"]:disabled {
 @utility obj-prong-hint {
   margin-left: 1.55rem;
 }
+
+/* A help entry: what it is, how it is driven, and what catches people out. */
+@utility help-topic {
+  display: grid;
+  gap: 0.45rem;
+}
+
+@utility help-watch {
+  padding-left: 0.6rem;
+  border-left: 2px solid color-mix(in oklab, var(--gold) 35%, transparent);
+}
+
+/* The walkthrough inside a help entry: numbered, because order matters. */
+@utility help-steps {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: decimal;
+}

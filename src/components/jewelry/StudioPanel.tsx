@@ -37,6 +37,7 @@ import { MaterialsPanel } from "./panels/MaterialsPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
 import { ObjectsPanel } from "./panels/ObjectsPanel";
+import { HelpPanel } from "./panels/HelpPanel";
 import type { Stamp } from "./stamps";
 import type { PartGroup } from "./groups";
 import { ProngsPanel } from "./panels/ProngsPanel";
@@ -950,6 +951,18 @@ export function StudioPanel({
           imagePixels={dimensionsFor(aspect, imageQuality).width}
           turns={turns}
         />
+      </Section>
+      {/* ── Help ──────────────────────────────────────────────────────
+          The rail has carried a Help entry from the start and nothing ever
+          rendered it, so the section opened empty. */}
+      <Section
+        icon={<Lightbulb className="size-4" />}
+        title="Help"
+        subtitle="Every section, and what it is for"
+        open={open === "help"}
+        onToggle={() => toggle("help")}
+      >
+        <HelpPanel />
       </Section>
       {/* ── Ground ────────────────────────────────────────────────── */}
       <Section
