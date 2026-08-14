@@ -40,11 +40,36 @@ const WELD_TOLERANCE = 1e-4;
 const MAX_WELD_VERTICES = 120_000;
 
 /**
- * Hard ceiling on renderable vertices. At 24 bytes per vertex this is ~96 MB of
- * attribute data before the GPU copy, which a mid-range phone can still hold;
- * well past it the tab is killed mid-decode with no explanation.
+ * Ceiling on renderable vertices, by what the DEVICE can hold.
+ *
+ * This was one number sized for a mid-range phone, and it refused real client
+ * work on a desktop: a 6.4M-vertex .3dm is an ordinary pave necklace at full
+ * render-mesh density, and being told to go and decimate it in Rhino is not an
+ * answer a jeweller can act on mid-demo.
+ *
+ * The failure modes genuinely differ. A phone is killed mid-decode with no
+ * explanation, so its limit has to stay where it is. A desktop merely gets
+ * slower, and slow beats refused — 12M is roughly 290 MB of attribute data
+ * before the GPU copy, which any machine running this has.
  */
-const MAX_TOTAL_VERTICES = 4_000_000;
+export function maxTotalVertices(): number {
+  // No DOM: the suites. Assume the generous limit rather than blocking a test.
+  if (typeof navigator === "undefined" || typeof matchMedia === "undefined") return 12_000_000;
+
+  // Coarse pointer is the honest proxy for a phone or tablet, and matches how
+  // the export panel already decides its own caps.
+  if (matchMedia("(pointer: coarse)").matches) return 4_000_000;
+
+  /*
+   * `deviceMemory` is Chrome-only and rounded down to a power of two, so it is
+   * a floor rather than a measurement. Absent, assume a real machine — refusing
+   * a desktop because Safari declines to say how much RAM it has would be the
+   * original fault in a new costume.
+   */
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  if (memory && memory <= 4) return 6_000_000;
+  return 12_000_000;
+}
 
 /** Let the browser paint the progress bar between blocking phases. */
 const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -432,12 +457,16 @@ export async function compressToJewelryScene(
   // holds far less than a desktop. Failing with a clear instruction beats a
   // silent crash halfway through decoding.
   const totalVerts = candidates.reduce((n, c) => n + c.geometry.attributes.position.count, 0);
-  if (totalVerts > MAX_TOTAL_VERTICES) {
+  const ceiling = maxTotalVertices();
+  if (totalVerts > ceiling) {
     for (const c of candidates) c.geometry.dispose();
+    // Says which device is the constraint, because the same file may well open
+    // on the desktop next to the phone that just refused it.
+    const where = ceiling <= 4_000_000 ? " on this device" : "";
     throw new Error(
       `This model has ${(totalVerts / 1e6).toFixed(1)}M vertices, past the ${(
-        MAX_TOTAL_VERTICES / 1e6
-      ).toFixed(0)}M this viewer can hold. Reduce the render mesh density in Rhino ` +
+        ceiling / 1e6
+      ).toFixed(0)}M this viewer can hold${where}. Reduce the render mesh density in Rhino ` +
         `(Document Properties → Mesh → Jagged & faster) and re-save.`,
     );
   }
@@ -605,12 +634,14 @@ function buildFromDecoded(decoded: DecodedDocument): THREE.Group {
     (n, c) => n + (c as THREE.Mesh).geometry.attributes.position.count,
     0,
   );
-  if (total > MAX_TOTAL_VERTICES) {
+  const objCeiling = maxTotalVertices();
+  if (total > objCeiling) {
     group.traverse((c) => (c as THREE.Mesh).geometry?.dispose?.());
+    const where = objCeiling <= 4_000_000 ? " on this device" : "";
     throw new Error(
-      `This model has ${(total / 1e6).toFixed(1)}M vertices, past the ${(
-        MAX_TOTAL_VERTICES / 1e6
-      ).toFixed(0)}M this viewer can hold. Reduce the render mesh density in Rhino ` +
+      `This model has ${(total / 1e6).toFixed(1)}M vertices, past the ${(objCeiling / 1e6).toFixed(
+        0,
+      )}M this viewer can hold${where}. Reduce the render mesh density in Rhino ` +
         `(Document Properties → Mesh → Jagged & faster) and re-save.`,
     );
   }

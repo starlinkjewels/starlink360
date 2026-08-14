@@ -4,7 +4,7 @@
  * root.userData.layers, layer index on mesh.userData.attributes.layerIndex.
  */
 import * as THREE from "three";
-import { compressToJewelryScene } from "../.tmp-jewelry/loadJewelryFile.js";
+import { compressToJewelryScene, maxTotalVertices } from "../.tmp-jewelry/loadJewelryFile.js";
 
 let failures = 0;
 const check = (name, cond, detail = "") => {
@@ -237,8 +237,15 @@ async function baselineVerts(geometry) {
 {
   console.log("\n9. Oversized model guard");
   const root = makeRoot([{ name: "Metal 01", fullPath: "Metal 01", visible: true }]);
-  // 10 x 402,201 = 4.02M verts, just past the 4M ceiling.
-  for (let i = 0; i < 10; i++) add(root, new THREE.TorusKnotGeometry(1, 0.3, 2000, 200), 0);
+  /*
+   * Sized against the ceiling the environment actually reports, not a constant.
+   * The limit is now per-device — a phone is killed mid-decode and keeps the
+   * old 4M, a desktop merely slows down and gets 12M — so a hard-coded count
+   * tests whichever machine the suite happens to run on.
+   */
+  const PER_KNOT = 402_201;
+  const needed = Math.ceil(maxTotalVertices() / PER_KNOT) + 1;
+  for (let i = 0; i < needed; i++) add(root, new THREE.TorusKnotGeometry(1, 0.3, 2000, 200), 0);
   let msg = "";
   try {
     await compressToJewelryScene(root);
