@@ -17,13 +17,17 @@ import type { StudioApi } from "@/components/jewelry/StudioRig";
 import type { StoneGroup } from "@/components/jewelry/stones";
 import { describeSelection, type Part, type PartKind } from "@/components/jewelry/selection";
 import {
+  applyMaterial,
   assignToPart,
   canPaint,
+  clearMaterial,
+  commonMaterial,
   finishToPart,
   type Assignments,
   type Brush,
 } from "@/components/jewelry/assign";
 import type { ProngHeights } from "@/components/jewelry/prongs";
+import { describeContext, type ChatAction } from "@/components/jewelry/chatProtocol";
 import {
   DEFAULT_STAMP,
   addStamp,
@@ -41,7 +45,12 @@ import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
 import { DEFAULT_TEXTURE, type TextureAssignment } from "@/components/jewelry/textures";
 import { DEFAULT_CAMERA, guessUpAxis, type CameraSettings } from "@/components/jewelry/camera";
 import { ImportOrientation } from "@/components/jewelry/ImportOrientation";
-import { DEFAULT_LIGHTING, type LightingSettings } from "@/components/jewelry/lighting";
+import {
+  DEFAULT_LIGHTING,
+  ENVIRONMENTS,
+  environmentById,
+  type LightingSettings,
+} from "@/components/jewelry/lighting";
 import { resetLights, type LightDef } from "@/components/jewelry/lights";
 import { DEFAULT_SHADOWS, type ShadowSettings } from "@/components/jewelry/shadows";
 import { DEFAULT_GROUND, type GroundSettings } from "@/components/jewelry/ground";
@@ -684,6 +693,169 @@ function Index() {
     });
   }, [lighting, shadows, post, theme, setTheme]);
 
+  /*
+   * What the AI chat is allowed to do, and nothing more.
+   *
+   * Every id the model sends is checked against the real catalogue before
+   * anything changes — the system prompt lists exact valid ids, but a model
+   * can still hallucinate one, and a bad id must fail visibly (a note back
+   * in the chat) rather than silently doing nothing. The changes themselves
+   * are the same setters every panel already calls; the assistant is not a
+   * second way to mutate state, just a second way to reach the first one.
+   */
+  const handleChatAction = useCallback(
+    (action: ChatAction): { ok: boolean; note?: string } => {
+      switch (action.type) {
+        case "setStoneColor":
+          if (!gemById(action.gem)) {
+            return { ok: false, note: `"${action.gem}" isn't a stone in the catalogue.` };
+          }
+          setAssignments((prev) => applyMaterial(prev, parts, new Set(), "stone", action.gem));
+          return { ok: true };
+
+        case "setMetal":
+          if (!metalById(action.metal)) {
+            return { ok: false, note: `"${action.metal}" isn't a metal in the catalogue.` };
+          }
+          setAssignments((prev) => applyMaterial(prev, parts, new Set(), "metal", action.metal));
+          return { ok: true };
+
+        case "setEnvironment":
+          if (!ENVIRONMENTS.some((e) => e.id === action.environment)) {
+            return {
+              ok: false,
+              note: `"${action.environment}" isn't one of the environments here.`,
+            };
+          }
+          setLighting((prev) => ({ ...prev, environment: action.environment }));
+          return { ok: true };
+
+        case "setBackgroundColor":
+          if (!/^#[0-9a-f]{6}$/i.test(action.hex)) {
+            return { ok: false, note: "That didn't come through as a valid colour." };
+          }
+          setBackground((prev) => ({ ...prev, kind: "solid", color: action.hex }));
+          return { ok: true };
+
+        case "toggleBestLook":
+          handleToggleShowcase();
+          return { ok: true };
+
+        case "resetStones":
+          setAssignments((prev) => clearMaterial(prev, parts, new Set(), "stone"));
+          return { ok: true };
+
+        case "resetMetal":
+          setAssignments((prev) => clearMaterial(prev, parts, new Set(), "metal"));
+          return { ok: true };
+
+        case "setTheme":
+          setTheme(action.theme);
+          return { ok: true };
+
+        case "setShadowMode":
+          setShadows((prev) => ({ ...prev, mode: action.mode }));
+          return { ok: true };
+
+        case "toggleGround":
+          setGround((prev) => ({ ...prev, enabled: action.enabled }));
+          return { ok: true };
+
+        case "setGroundStyle":
+          setGround((prev) => ({ ...prev, style: action.style }));
+          return { ok: true };
+
+        case "setBloom":
+          setPost((prev) => ({ ...prev, bloom: { ...prev.bloom, enabled: action.enabled } }));
+          return { ok: true };
+
+        case "setExposure": {
+          if (!Number.isFinite(action.value)) {
+            return { ok: false, note: "That doesn't look like a usable exposure value." };
+          }
+          const value = Math.min(4, Math.max(0.1, action.value));
+          setLighting((prev) => ({ ...prev, exposure: value }));
+          return { ok: true };
+        }
+
+        case "setEnvironmentRotation": {
+          if (!Number.isFinite(action.degrees)) {
+            return { ok: false, note: "That doesn't look like a usable rotation value." };
+          }
+          const degrees = ((action.degrees % 360) + 360) % 360;
+          setLighting((prev) => ({ ...prev, environmentRotation: (degrees * Math.PI) / 180 }));
+          return { ok: true };
+        }
+
+        case "setCameraProjection":
+          setCameraSettings((prev) => ({ ...prev, projection: action.projection }));
+          return { ok: true };
+
+        case "setSpin":
+          setCameraSettings((prev) => ({
+            ...prev,
+            spinAxis: action.enabled ? "y" : "none",
+          }));
+          return { ok: true };
+
+        default:
+          return { ok: false };
+      }
+    },
+    [parts, handleToggleShowcase, setTheme],
+  );
+
+  /*
+   * What the model is told before it answers, so "is this already on" or
+   * "put it back" can be answered from real state instead of guessed from
+   * conversation text alone — the model has no other way to know what the
+   * piece currently looks like.
+   */
+  const chatContext = useMemo(() => {
+    const stoneId = commonMaterial(assignments, parts, new Set(), "stone");
+    const metalId = commonMaterial(assignments, parts, new Set(), "metal");
+    const stoneName = stoneId
+      ? (gemById(stoneId)?.name ?? stoneId)
+      : "the file's original stone colour";
+    const metalName = metalId ? (metalById(metalId)?.name ?? metalId) : finish.name;
+    const backgroundDesc =
+      background.kind === "solid"
+        ? `a solid ${background.color} colour`
+        : `the "${background.kind}" backdrop`;
+    return describeContext({
+      stone: stoneName,
+      metal: metalName,
+      environment: environmentById(lighting.environment).label,
+      background: backgroundDesc,
+      bestLookOn: showcaseOn,
+      theme,
+      shadowMode: shadows.mode,
+      groundOn: ground.enabled,
+      groundStyle: ground.style,
+      bloomOn: post.bloom.enabled,
+      exposure: lighting.exposure,
+      environmentRotationDegrees: Math.round((lighting.environmentRotation * 180) / Math.PI),
+      cameraProjection: cameraSettings.projection,
+      spinOn: cameraSettings.spinAxis !== "none",
+    });
+  }, [
+    assignments,
+    parts,
+    finish,
+    lighting.environment,
+    lighting.exposure,
+    lighting.environmentRotation,
+    background,
+    showcaseOn,
+    theme,
+    shadows.mode,
+    ground.enabled,
+    ground.style,
+    post.bloom.enabled,
+    cameraSettings.projection,
+    cameraSettings.spinAxis,
+  ]);
+
   const handleUploaded = useCallback((p: Product) => {
     setProduct(p);
     setResetSignal((n) => n + 1);
@@ -1030,6 +1202,8 @@ function Index() {
           <StudioPanel
             active={section}
             onActive={setSection}
+            onChatAction={handleChatAction}
+            chatContext={chatContext}
             finish={finish}
             onSelectFinish={setFinish}
             onReset={() => setResetSignal((n) => n + 1)}

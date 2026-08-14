@@ -1,4 +1,5 @@
 import {
+  Bot,
   Camera,
   Clapperboard,
   Film,
@@ -43,6 +44,12 @@ export interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
+  {
+    id: "assistant",
+    title: "Assistant",
+    hint: "Ask the AI to change a setting or explain the app",
+    icon: Bot,
+  },
   /*
    * First, because it answers the question every other section assumes you have
    * already answered: WHICH part. Finding one object among 675 by clicking a
