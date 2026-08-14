@@ -15,7 +15,12 @@ await page.waitForTimeout(400);
 await page.click('button[aria-label="Pick prongs on the piece"]');
 await page.waitForTimeout(300);
 
-const countText = () => page.locator(".shud-count").first().innerText().catch(() => null);
+const countText = () =>
+  page
+    .locator(".shud-count")
+    .first()
+    .innerText()
+    .catch(() => null);
 
 // Zoom into the pendant face (not the chain).
 for (let i = 0; i < 12; i++) {
@@ -30,7 +35,10 @@ await page.screenshot({ path: `${shotDir}/sizecap-0-zoomed.png` });
 // connected lattice, if this piece has one like the user's screenshot.
 await page.mouse.click(535, 450);
 await page.waitForTimeout(300);
-console.log("CLICK_CENTER_OF_GRID (expect no selection if it's the giant plate):", await countText());
+console.log(
+  "CLICK_CENTER_OF_GRID (expect no selection if it's the giant plate):",
+  await countText(),
+);
 await page.screenshot({ path: `${shotDir}/sizecap-1-center-click.png` });
 
 // Scan the grid area broadly and log every distinct hit, to see what (if

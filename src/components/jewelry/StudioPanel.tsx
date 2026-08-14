@@ -13,6 +13,7 @@ import {
   Video,
   Lightbulb,
   Layers,
+  ListTree,
   MoveVertical,
   Triangle,
   Type,
@@ -30,13 +31,14 @@ import { finishById, finishes, type Finish } from "@/data/finishes";
 import { Select } from "./Select";
 import { useTheme } from "@/hooks/useTheme";
 import type { StoneGroup } from "./stones";
-import type { Part, PartKind } from "./selection";
+import { solidCount, type Part, type PartKind } from "./selection";
 import type { Assignments, Brush } from "./assign";
 import { NumberField } from "./ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
 import { MaterialsPanel } from "./panels/MaterialsPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
+import { ObjectsPanel } from "./panels/ObjectsPanel";
 import type { Stamp } from "./stamps";
 import { ProngsPanel } from "./panels/ProngsPanel";
 import type { ProngHeights } from "./prongs";
@@ -1263,6 +1265,28 @@ export function StudioPanel({
           share the same panel component and the same assignment state — the
           duplicate colour state that used to make them disagree is gone — but
           each shows only its own catalogue, so neither is a tab click away. */}
+      {/* ── 0. Objects ──────────────────────────────────────────────
+          Before the material sections, because it answers the question they
+          all assume: which part. On a 675-object piece, finding one by
+          clicking the render is not a workflow. */}
+      <Section
+        icon={<ListTree className="size-4" />}
+        title="Objects"
+        subtitle={
+          parts.length
+            ? `${parts.reduce((n, p) => n + solidCount(p), 0)} objects`
+            : "Nothing loaded"
+        }
+        open={open === "objects"}
+        onToggle={() => toggle("objects")}
+      >
+        <ObjectsPanel
+          parts={parts}
+          selected={selectedParts}
+          onSelect={onSelectParts ?? (() => {})}
+        />
+      </Section>
+
       <Section
         icon={<Palette className="size-4" />}
         title="Metals"
