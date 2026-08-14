@@ -23,6 +23,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Ruler,
   Trash2,
   X,
 } from "lucide-react";
@@ -41,6 +42,9 @@ import { HelpPanel } from "./panels/HelpPanel";
 import type { Stamp } from "./stamps";
 import type { PartGroup } from "./groups";
 import { ProngsPanel } from "./panels/ProngsPanel";
+import { DimensionsPanel } from "./panels/DimensionsPanel";
+import { DEFAULT_DIMENSIONS, type DimensionSettings } from "./dimensions";
+import type { Fit } from "./Model";
 import { AIChat } from "./AIChat";
 import type { ChatAction } from "./chatProtocol";
 import type { ProngHeights } from "./prongs";
@@ -383,6 +387,10 @@ export interface StudioPanelProps {
    * viewport would be threading a constant through four components.
    */
   pieceRadius?: number;
+  /** The piece's real extent, for Model Dimensions. Null until it loads. */
+  fit?: Fit | null;
+  dimensions?: DimensionSettings;
+  onDimensions?: (next: DimensionSettings) => void;
   /** Where the camera is right now, so the position fields show real numbers. */
   livePosition?: [number, number, number];
   /** The chosen camera move, previewed live and used by the video export. */
@@ -472,6 +480,9 @@ export function StudioPanel({
   exportOptions = DEFAULT_EXPORT_OPTIONS,
   onExportOptions,
   pieceRadius = 1,
+  fit = null,
+  dimensions = DEFAULT_DIMENSIONS,
+  onDimensions,
   onBusyChange,
   onClose,
 }: StudioPanelProps) {
@@ -1226,6 +1237,29 @@ export function StudioPanel({
           Reset camera
         </button>
       </Section>
+
+      {/* ── Model Dimensions ─────────────────────────────────────── */}
+      <Section
+        icon={<Ruler className="size-4" />}
+        title="Model Dimensions"
+        subtitle={
+          dimensions.knownWidthMM === DEFAULT_DIMENSIONS.knownWidthMM
+            ? "Estimated"
+            : dimensions.knownWidthMM
+              ? "Calibrated"
+              : "Uncalibrated"
+        }
+        open={open === "dimensions"}
+        onToggle={() => toggle("dimensions")}
+      >
+        <DimensionsPanel
+          dimensions={dimensions}
+          onDimensions={onDimensions ?? (() => {})}
+          fit={fit}
+          parts={parts}
+        />
+      </Section>
+
       {/* ── Environment ───────────────────────────────────────────
           Three tabs, because they are three different jobs people conflate:
           what the METAL reflects, what the STONES refract, and what sits

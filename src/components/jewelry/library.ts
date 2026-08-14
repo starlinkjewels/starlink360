@@ -417,6 +417,14 @@ export interface MaterialPatch {
   ior?: number;
   /** Gems only. 0 is a solid stone, 1 is fully see-through. */
   transmission?: number;
+  /**
+   * Gems only. Overrides the dispersion-derived default from `aberrationFor` —
+   * the rainbow flash a stone throws, not how bright it is. Diamond's fire is
+   * real but genuinely subtle at 0.035; a jeweller wanting a stone to look
+   * more alive reaches for this, the same way Smoothness is metal's version
+   * of "make it look like a real photograph" rather than "make it a fantasy."
+   */
+  aberration?: number;
 }
 
 export const METAL_BY_ID = new Map(METALS.map((m) => [m.id, m]));
@@ -459,11 +467,18 @@ function groupBy<T, K extends string>(items: T[], key: (t: T) => K): { group: K;
 const DIAMOND_DISPERSION = 0.044;
 const DIAMOND_ABERRATION = 0.035;
 
+/**
+ * Floor keeps a low-dispersion stone from going glassy-dead; the ceiling
+ * stops moissanite's real 0.104 from tearing into rainbow fringing. This is a
+ * property of the shader at any input, not just of a catalogue lookup, so a
+ * hand-set Fire patch is clamped to the same range rather than a wider one.
+ */
+const ABERRATION_FLOOR = 0.008;
+const ABERRATION_CEILING = 0.09;
+
 export function aberrationFor(dispersion: number): number {
   const scaled = (dispersion / DIAMOND_DISPERSION) * DIAMOND_ABERRATION;
-  // Floor keeps a low-dispersion stone from going glassy-dead; the ceiling
-  // stops moissanite's real 0.104 from tearing into rainbow fringing.
-  return clamp(scaled, 0.008, 0.09);
+  return clamp(scaled, ABERRATION_FLOOR, ABERRATION_CEILING);
 }
 
 export function clamp(n: number, lo: number, hi: number): number {
@@ -483,7 +498,10 @@ export function resolveGem(
     // Below 1 light bends the wrong way and the stone inverts; 3 is past
     // anything that occurs in nature and already looks like an error.
     ior: clamp(patch?.ior ?? gem.ior, 1, 3),
-    aberration: aberrationFor(gem.dispersion),
+    aberration:
+      patch?.aberration !== undefined
+        ? clamp(patch.aberration, ABERRATION_FLOOR, ABERRATION_CEILING)
+        : aberrationFor(gem.dispersion),
   };
 }
 

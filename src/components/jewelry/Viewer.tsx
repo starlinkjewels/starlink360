@@ -17,6 +17,8 @@ import { acceleratePicking } from "./pickBvh";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
+import { DimensionOverlay } from "./DimensionOverlay";
+import { DEFAULT_DIMENSIONS, mmPerUnit, summariseGems, type DimensionSettings } from "./dimensions";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { StudioRig, type StudioApi } from "./StudioRig";
 import type { StoneGroup } from "./stones";
@@ -684,6 +686,10 @@ export interface ViewerProps {
   onStoneTap?: (id: string) => void;
   /** Every selectable part in the loaded piece. */
   onParts?: (parts: Part[]) => void;
+  /** The piece's real extent, for Model Dimensions and anything else that
+   *  needs the actual size rather than the framing radius alone. */
+  onFit?: (fit: Fit) => void;
+  dimensions?: DimensionSettings;
   /**
    * True while the Select tool is active.
    *
@@ -756,6 +762,8 @@ export default function Viewer({
   onStones,
   onStoneTap,
   onParts,
+  onFit,
+  dimensions = DEFAULT_DIMENSIONS,
   selecting = false,
   prongPicking = false,
   selected,
@@ -783,6 +791,15 @@ export default function Viewer({
     },
     [onParts],
   );
+  const dimensionScale = useMemo(
+    () => (fit ? mmPerUnit(dimensions.knownWidthMM, fit.width) : null),
+    [dimensions.knownWidthMM, fit],
+  );
+  const dimensionSummary = useMemo(
+    () => summariseGems(partList, dimensionScale),
+    [partList, dimensionScale],
+  );
+
   const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object">("checking");
 
   // Verify the GLB exists before handing it to the loader, so a missing asset
@@ -814,8 +831,9 @@ export default function Viewer({
     (f: Fit) => {
       setFit(f);
       onLoadedChange(true);
+      onFit?.(f);
     },
-    [onLoadedChange],
+    [onLoadedChange, onFit],
   );
 
   // "Reset view" pulls back to the whole piece, so drop any focus with it.
@@ -1121,6 +1139,10 @@ export default function Viewer({
           environmentRotation={[0, lighting.environmentRotation, 0]}
           environmentIntensity={lighting.environmentIntensity}
         />
+
+        {dimensions.showOnCanvas && fit && (
+          <DimensionOverlay fit={fit} scale={dimensionScale} summary={dimensionSummary} />
+        )}
 
         <Suspense fallback={null}>
           {/* Tap anywhere on the piece to orbit and zoom around that spot. */}

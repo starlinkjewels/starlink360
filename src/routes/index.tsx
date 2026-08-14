@@ -16,6 +16,8 @@ import { StudioPanel } from "@/components/jewelry/StudioPanel";
 import type { StudioApi } from "@/components/jewelry/StudioRig";
 import type { StoneGroup } from "@/components/jewelry/stones";
 import { describeSelection, type Part, type PartKind } from "@/components/jewelry/selection";
+import type { Fit } from "@/components/jewelry/Model";
+import { DEFAULT_DIMENSIONS, type DimensionSettings } from "@/components/jewelry/dimensions";
 import {
   applyMaterial,
   assignToPart,
@@ -274,6 +276,8 @@ function Index() {
   const [background, setBackground] = useState<Background>(DEFAULT_BACKGROUND);
   const [stones, setStones] = useState<StoneGroup[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
+  const [fit, setFit] = useState<Fit | null>(null);
+  const [dimensions, setDimensions] = useState<DimensionSettings>(DEFAULT_DIMENSIONS);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const stageBackground = backgroundCss(background);
   const [stoneColors, setStoneColors] = useState<Record<string, string>>({});
@@ -1047,6 +1051,8 @@ function Index() {
                   onStones={handleStones}
                   onStoneTap={setSelectedStone}
                   onParts={setParts}
+                  onFit={setFit}
+                  dimensions={dimensions}
                   selected={selected}
                   selecting={tool === "select"}
                   prongPicking={brush?.tool === "prong"}
@@ -1212,6 +1218,9 @@ function Index() {
             productRef={product.ref}
             camera={cameraSettings}
             onCamera={setCameraSettings}
+            fit={fit}
+            dimensions={dimensions}
+            onDimensions={setDimensions}
             livePosition={livePosition}
             animation={animation}
             onAnimation={(id) => {

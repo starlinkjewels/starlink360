@@ -5556,3 +5556,125 @@ input[type="radio"]:disabled {
   padding-left: 1.1rem;
   list-style: decimal;
 }
+
+/* ── Model Dimensions ────────────────────────────────────────────────── */
+
+@utility dim-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+@utility dim-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+}
+
+@utility dim-stat-label {
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+@utility dim-stat-value {
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+
+@utility dim-stat-suffix {
+  font-size: 0.65rem;
+  color: var(--color-muted-foreground);
+}
+
+@utility dim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+
+@utility dim-table-cell {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  font-variant-numeric: tabular-nums;
+}
+
+@utility dim-table-head {
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+@utility dim-table-carat {
+  color: var(--color-muted-foreground);
+}
+
+/* The floating mm label on an on-canvas dimension line. Its own small pill
+   rather than bare text, since it sits directly over the render and has no
+   guaranteed contrast with whatever is behind it. */
+@utility dim-callout {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(20, 18, 14, 0.82);
+  border: 1px solid rgba(217, 178, 106, 0.55);
+  color: #f2e6c9;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The floating summary card on the canvas — the same numbers as the panel's
+   Size and Gems groups, at a glance without opening the sidebar. */
+@utility dim-report {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 11rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.6rem;
+  background: rgba(20, 18, 14, 0.86);
+  border: 1px solid rgba(217, 178, 106, 0.45);
+  color: #f2e6c9;
+  pointer-events: none;
+}
+
+@utility dim-report-title {
+  margin: 0 0 0.15rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #d9b26a;
+}
+
+@utility dim-report-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+}
+
+@utility dim-report-label {
+  color: rgba(242, 230, 201, 0.65);
+}
+
+@utility dim-report-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@utility dim-report-rule {
+  height: 1px;
+  margin: 0.15rem 0;
+  background: rgba(217, 178, 106, 0.3);
+}

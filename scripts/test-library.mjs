@@ -131,6 +131,22 @@ console.log("\n=== patches layer over the catalogue ===");
     resolveGem(ruby, { color: "#00ff00" }).ior === ruby.ior,
     "patching one field leaves the others at the catalogue value",
   );
+  check(
+    Math.abs(resolveGem(ruby).aberration - aberrationFor(ruby.dispersion)) < 1e-9,
+    "no patch keeps the dispersion-derived fire",
+  );
+  check(
+    Math.abs(resolveGem(ruby, { aberration: 0.06 }).aberration - 0.06) < 1e-9,
+    "a patched fire overrides the catalogue's dispersion entirely",
+  );
+  check(
+    resolveGem(ruby, { aberration: 5 }).aberration <= 0.09,
+    "a patched fire past the ceiling is clamped like everything else, not passed raw to the shader",
+  );
+  check(
+    resolveGem(ruby, { color: "#00ff00" }).aberration === resolveGem(ruby).aberration,
+    "patching colour leaves fire at the catalogue value",
+  );
   const gold = metalById("gold-18k");
   check(resolveMetal(gold, { roughness: 5 }).roughness === 1, "roughness is clamped");
   check(resolveMetal(gold, {}).metalness === 1, "an empty patch changes nothing");

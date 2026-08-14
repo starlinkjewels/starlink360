@@ -44,6 +44,11 @@ export interface Fit {
   radiusXZ: number;
   /** Half extent in Y. */
   halfHeight: number;
+  /** Full extent on each axis, in the model's own units — what Model
+   *  Dimensions scales by the calibrated mm-per-unit to show a real size. */
+  width: number;
+  height: number;
+  depth: number;
 }
 
 interface DressedProps {
@@ -248,6 +253,7 @@ export function DressedScene({
   useEffect(() => {
     const box = new THREE.Box3().setFromObject(object);
     const radius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
+    const size = box.getSize(new THREE.Vector3());
 
     // A cylinder about Y bounds a turntable far more tightly than a sphere:
     // spinning only sweeps the XZ footprint, so height stays height. On a
@@ -258,6 +264,9 @@ export function DressedScene({
       radius,
       radiusXZ: Math.hypot(halfX, halfZ) || radius,
       halfHeight: Math.max(Math.abs(box.min.y), Math.abs(box.max.y)) || radius,
+      width: size.x,
+      height: size.y,
+      depth: size.z,
     });
   }, [object, onFit]);
 

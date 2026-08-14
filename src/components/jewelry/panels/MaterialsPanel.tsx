@@ -16,6 +16,7 @@ import { RotateCcw, Sliders, LayoutGrid, List, Brush as BrushIcon } from "lucide
 import {
   GEMS,
   METALS,
+  aberrationFor,
   gemById,
   gemGroups,
   metalById,
@@ -311,6 +312,31 @@ export function MaterialsPanel({
           precision={2}
           hint="All the way up is a mirror polish; down is brushed or satin. This is what a highlight looks like — tight and bright at the top, soft and spread at the bottom."
           onChange={(v) => edit({ roughness: 1 - v })}
+        />
+      )}
+
+      {/*
+        Metal's equivalent for stones. A diamond's fire — the rainbow flash,
+        not its brightness — is real here (a traced dispersion, not a filter)
+        but genuinely subtle at the physically-accurate default, the same way
+        metal's roughness was accurate but never pushed to an actual mirror.
+        Capped at the same ceiling the shader itself uses, not a wider one:
+        past it the fire stops looking like a diamond and starts looking like
+        a shader bug (moissanite's real dispersion already sits at that wall).
+      */}
+      {tab === "gems" && has && (
+        <NumberField
+          label="Fire"
+          value={
+            patch.aberration ??
+            aberrationFor((chosen as GemMaterial | undefined)?.dispersion ?? 0.044)
+          }
+          min={0.008}
+          max={0.09}
+          step={0.001}
+          precision={3}
+          hint="The rainbow flash a stone throws as it turns, not how bright it is. Diamond is genuinely subtle here; this is how far it can go before the flash stops reading as a stone and starts reading as a glitch."
+          onChange={(v) => edit({ aberration: v })}
         />
       )}
 
