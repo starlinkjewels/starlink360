@@ -80,7 +80,19 @@ function stoneId(mesh: THREE.Mesh): string {
   return (mesh.userData?.stone as { id?: string } | undefined)?.id ?? "";
 }
 
-const BOUNCES = 3;
+/*
+ * Bounces of total internal reflection, per traced ray. Test value, not
+ * settled: was 3 specifically because this was believed to run on
+ * software-only rendering with no real GPU, where every extra bounce is
+ * pure added cost. That premise turned out to be wrong — chrome://gpu
+ * confirms real hardware-accelerated WebGL (an AMD integrated GPU via
+ * ANGLE/D3D11) — so the trade-off is worth revisiting. A commercial
+ * competitor's own shipped diamond material traces 5; more bounces means
+ * more of the internal reflection path is actually followed before it's
+ * approximated away, which is most of what separates "brilliant" from
+ * "glassy" on a deep pavilion.
+ */
+const BOUNCES = 5;
 /** Splits the ray per wavelength — this is the fire. */
 const ABERRATION = 0.035;
 /** Edge brightness where the stone turns mirror-like. */

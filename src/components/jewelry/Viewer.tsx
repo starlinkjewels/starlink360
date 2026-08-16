@@ -1129,7 +1129,17 @@ export default function Viewer({
           environment is left shared — their shader samples its own map.
         */}
         <Environment
-          preset={(environmentById(lighting.environment).preset ?? "warehouse") as "warehouse"}
+          /*
+           * A real HDRI `file` (see `EnvironmentOption.file`) takes priority
+           * over a drei `preset` name — see the matching logic in Model.tsx
+           * for why the gem side needs the same rule.
+           */
+          {...(environmentById(lighting.environment).file
+            ? { files: environmentById(lighting.environment).file }
+            : {
+                preset: (environmentById(lighting.environment).preset ??
+                  "warehouse") as "warehouse",
+              })}
           /*
            * Rotating the environment moves every reflection, which on a metal
            * band is where the highlight sits — most of whether a render reads

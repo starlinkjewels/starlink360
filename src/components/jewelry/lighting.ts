@@ -21,6 +21,16 @@ export interface EnvironmentOption {
   /** drei preset name, or null for the generated light tent. */
   preset: string | null;
   /**
+   * A real photographed/rendered studio HDRI, served from `public/env/`,
+   * instead of one of drei's free built-in presets. Takes priority over
+   * `preset` when set. Sourced from Poly Haven (CC0 — free to use, no
+   * licensing concerns), because the free `preset` list is a fixed set of
+   * drei defaults never shot for jewellery, while a real studio capture is
+   * what an environment map actually looks like on a commercial jewellery
+   * renderer.
+   */
+  file?: string;
+  /**
    * Sky and ground colours, for the swatch.
    *
    * A grid of twelve identical grey spheres tells nobody anything, and the real
@@ -137,6 +147,29 @@ export const ENVIRONMENTS: EnvironmentOption[] = [
     preset: "sunset",
     sky: "#cfd8e8",
     ground: "#4b4436",
+  },
+  /*
+   * Real studio captures, not drei presets — see `EnvironmentOption.file`.
+   * Both CC0 from Poly Haven (polyhaven.com), downloaded at 2k: large enough
+   * for a clean reflection on a polished band, small enough to fetch quickly.
+   */
+  {
+    id: "white-studio",
+    label: "White Studio",
+    hint: "Real capture — clean, even",
+    preset: null,
+    file: "/env/white_studio_02_2k.hdr",
+    sky: "#f5f5f2",
+    ground: "#c9c9c6",
+  },
+  {
+    id: "studio-small",
+    label: "Studio Small",
+    hint: "Real capture — punchy highlights",
+    preset: null,
+    file: "/env/studio_small_03_2k.hdr",
+    sky: "#e8e6e0",
+    ground: "#3a3a3d",
   },
 ];
 

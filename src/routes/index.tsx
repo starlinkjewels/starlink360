@@ -53,7 +53,7 @@ import {
   environmentById,
   type LightingSettings,
 } from "@/components/jewelry/lighting";
-import { resetLights, type LightDef } from "@/components/jewelry/lights";
+import { isDefaultRig, resetLights, type LightDef } from "@/components/jewelry/lights";
 import { DEFAULT_SHADOWS, type ShadowSettings } from "@/components/jewelry/shadows";
 import { DEFAULT_GROUND, type GroundSettings } from "@/components/jewelry/ground";
 import { DEFAULT_POST, type PostSettings } from "@/components/jewelry/bloom";
@@ -716,32 +716,67 @@ function Index() {
     showcaseSnapshot.current = { lighting, shadows, post, theme, lights };
 
     /*
-     * Every one of these was tried in one synchronous batch and it
-     * reproducibly went to a blank canvas — confirmed by actually driving the
-     * app and watching it happen, not guessed from the settings alone.
-     * `shadows.mode` forces the shadow-casting light to drop and reallocate
-     * its map (LightRig disposes it whenever the `shadows` object reference
-     * changes, which every one of these does), and the gem light tent below
-     * builds and uploads its own environment texture — two real GPU
-     * allocations. The comment this replaced already knew a shadow camera, a
-     * composer and an environment map going up in the same tick loses the
-     * context; bundling bloom/highlights/exposure/environment-intensity
-     * alongside them tipped it over again. Cheap, prop-only changes (theme,
-     * the light rig's own numbers, bloom/highlight numbers on already-
-     * existing passes) stay in this first batch; the two changes that
-     * actually allocate GPU memory each get their own animation frame.
+     * Confirmed by actually driving the app in a browser and watching it
+     * happen (`THREE.WebGLRenderer: Context Lost.` in the console, right on
+     * click) — not guessed from the settings alone. On a machine with no
+     * real GPU, the renderer is already right at its ceiling (it logs "GPU
+     * stall due to ReadPixels" warnings even before this button is touched);
+     * one avoidable extra allocation is enough to take the whole context
+     * down, and staggering that allocation across animation frames — the
+     * previous attempt — only delays the moment it happens, it does not
+     * shrink it.
+     *
+     * The avoidable part: `shadows.mode`/`lighting.gemEnvironment` were
+     * being reset UNCONDITIONALLY, even when they already held the target
+     * value. `setShadows({ ...shadows, mode: "directional" })` still hands
+     * LightRig a new object every time, and LightRig disposes and
+     * reallocates the shadow map whenever that reference changes (see
+     * Viewer.tsx's LightRig effect) — regardless of whether `.mode` itself
+     * actually changed. Same shape of waste for the gem light tent. On the
+     * exact scene this was tested against, shadows were already
+     * "directional" and the gem environment was already "tent" — both
+     * defaults — so every click was reallocating a shadow map and rebuilding
+     * an environment texture FOR NO REASON, on a renderer with no margin
+     * left to absorb it.
+     *
+     * Fixed by only touching what genuinely needs to change. `isDefaultRig`
+     * already existed in lights.ts for exactly this comparison.
      */
     setPost({
       ...post,
-      bloom: { ...post.bloom, enabled: true, strength: 0.45, radius: 0.45 },
+      /*
+       * Threshold raised well past the everyday 0.95 — checked against a
+       * real commercial jewellery renderer's own shipped config, which uses
+       * 2.0 with a lower intensity (0.2) than our own default (0.35). At
+       * 0.95, ordinary bright pixels glow, not just genuine sparkle; that is
+       * most of why pushing exposure up read as "washed out" rather than
+       * "photographed" — more of the image was crossing the bloom threshold
+       * as it got brighter. 1.6 rather than their 2.0: our light tent's hard
+       * sources go up to intensity 26, but the everyday key/fill/rim rig is
+       * dimmer than a dedicated studio tent, so 2.0 caught nothing at all on
+       * this rig in testing.
+       */
+      bloom: { ...post.bloom, enabled: true, strength: 0.4, radius: 0.5, threshold: 1.6 },
       // Compresses highlights already above white a little harder than the
       // everyday default, so the extra exposure/reflection below reads as
       // brighter facets rather than a flat white patch — the mechanism this
       // file already built for exactly that problem (see HighlightSettings).
       highlights: { ...post.highlights, enabled: true, strength: 3 },
+      /*
+       * Vignette, grain and chromatic aberration all zeroed — the same
+       * reference config ships every one of these OFF by default. They are
+       * artistic photography effects (a lens's own imperfections), not part
+       * of what makes a render look like a professional PRODUCT photo; a
+       * catalogue shot wants even, clean lighting corner to corner, not a
+       * darkened vignette or film grain drawing attention away from the
+       * piece. Left enabled at 0 rather than `enabled: false`, so the pass
+       * stays in the pipeline and a later per-value change still takes
+       * effect without also having to flip this back on.
+       */
+      film: { ...post.film, vignette: 0, grain: 0, aberration: 0 },
     });
     setTheme("light");
-    setLights(resetLights());
+    if (!isDefaultRig(lights)) setLights(resetLights());
     /*
      * Bloom needs something already bright enough to catch, and the light
      * rig only looks different if it had been touched — on a piece where
@@ -764,18 +799,27 @@ function Index() {
     }));
     setShowcaseOn(true);
 
-    // Frame 2: the shadow camera's own allocation, alone.
-    requestAnimationFrame(() => {
-      setShadows((current) => ({ ...current, mode: "directional" }));
-      // Frame 3: the gem light tent's environment texture, alone.
+    // Each of these is a real GPU allocation and only worth doing — or
+    // waiting a frame for — when the value genuinely isn't there yet.
+    const needsDirectionalShadow = shadows.mode !== "directional";
+    const needsGemTent = !(lighting.separateGemEnvironment && lighting.gemEnvironment === "tent");
+    const applyGemTent = () =>
+      setLighting((current) => ({
+        ...current,
+        separateGemEnvironment: true,
+        gemEnvironment: "tent",
+      }));
+
+    if (needsDirectionalShadow) {
       requestAnimationFrame(() => {
-        setLighting((current) => ({
-          ...current,
-          separateGemEnvironment: true,
-          gemEnvironment: "tent",
-        }));
+        setShadows((current) => ({ ...current, mode: "directional" }));
+        // A second allocation still gets its own frame, separate from the
+        // shadow camera's — that combination is the one confirmed to crash.
+        if (needsGemTent) requestAnimationFrame(applyGemTent);
       });
-    });
+    } else if (needsGemTent) {
+      requestAnimationFrame(applyGemTent);
+    }
   }, [lighting, shadows, post, theme, lights, setTheme]);
 
   /*

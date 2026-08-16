@@ -481,19 +481,26 @@ export function DressedScene({
   /*
    * What the stones refract.
    *
-   * `useEnvironment` is called unconditionally with a real preset even when the
-   * tent is chosen — hooks cannot be skipped, and the preset it loads is the one
-   * the scene is already using, so nothing extra is fetched.
+   * `useEnvironment` is called unconditionally even when the tent is chosen —
+   * hooks cannot be skipped — falling back to "warehouse" so nothing extra is
+   * fetched that will not be used. A real HDRI `file` (see
+   * `EnvironmentOption.file` in lighting.ts) takes priority over a drei
+   * `preset` name when the chosen environment has one; the light tent (id
+   * "tent", no file and no preset) is handled separately below rather than
+   * inferred from `preset === null`, since a file-based environment ALSO
+   * carries `preset: null` and must not be mistaken for the tent.
    */
   const gemChoice = lighting.separateGemEnvironment
     ? environmentById(lighting.gemEnvironment)
     : environmentById(lighting.environment);
-  const presetMap = useEnvironment({
-    preset: (gemChoice.preset ??
-      environmentById(lighting.environment).preset ??
-      "warehouse") as "warehouse",
-  });
-  const envMap = gemChoice.preset === null ? getLightTent() : presetMap;
+  const metalEnv = environmentById(lighting.environment);
+  const activeFile = gemChoice.file ?? metalEnv.file;
+  const presetMap = useEnvironment(
+    activeFile
+      ? { files: activeFile }
+      : { preset: (gemChoice.preset ?? metalEnv.preset ?? "warehouse") as "warehouse" },
+  );
+  const envMap = gemChoice.id === "tent" ? getLightTent() : presetMap;
 
   return (
     <>

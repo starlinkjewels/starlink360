@@ -1,12 +1,28 @@
 import * as THREE from "three";
 import type { Finish } from "@/data/finishes";
 
+/*
+ * Reflection intensity: test value, not a settled one.
+ *
+ * Checked against a real commercial jewellery renderer's own shipped config
+ * (a competitor's downloaded scene file), which uses plain 1.0 with a real
+ * photographed/rendered studio HDRI doing the actual work. Ours was boosted
+ * to 2.8 — almost certainly to compensate for drei's free "warehouse" preset
+ * being a comparatively flat, dim environment, not because real metal reflects
+ * harder than the number 1 implies. Dropping it may reveal that the actual
+ * gap is environment MAP quality, not this multiplier — in which case this
+ * number alone will not close it, and a genuinely better HDRI (see lighting.ts)
+ * is the real fix. Left here rather than reverted so it can be judged by eye
+ * against the previous look, not decided in the abstract.
+ */
+const METAL_ENV_MAP_INTENSITY = 1.0;
+
 export function createMetalMaterial(finish: Finish) {
   return new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(finish.color),
     metalness: 1.0,
     roughness: finish.roughness,
-    envMapIntensity: 2.8,
+    envMapIntensity: METAL_ENV_MAP_INTENSITY,
     clearcoat: 0.18,
     clearcoatRoughness: 0.06,
     reflectivity: 1.0,
