@@ -156,6 +156,18 @@ const TOPICS: Topic[] = [
     how: "A longer lens flattens perspective, which is what product photography uses. Orthographic removes perspective entirely, for a technical view.",
   },
   {
+    id: "dimensions",
+    what: "The real size of the piece in millimetres, how many stones it holds, and roughly what they weigh.",
+    steps: [
+      "Look at Real width first. It is read from the file where the file says, and a .3dm from CAD usually does.",
+      "If it is blank or wrong, type the true width in millimetres. Everything else — height, depth, stone sizes — is scaled from that one number.",
+      "Read off the gem count and estimated carat weight for the quote.",
+    ],
+    how: "One measured dimension sets the scale for all of them. Until the piece has a known width it reports bare multiples with a x rather than millimetres, because a number in the wrong unit is worse than no number.",
+    watch:
+      "The carat weight is estimated from the modelled stone volume, not from a certificate. It is right for quoting and for spotting a stone that was modelled at the wrong size — it is not a grading report.",
+  },
+  {
     id: "photos",
     what: "Stills, at print resolution.",
     steps: [

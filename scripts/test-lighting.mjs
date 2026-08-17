@@ -73,9 +73,23 @@ check(
 
 console.log("\n=== environment list ===");
 check(ENVIRONMENTS[0].id === "warehouse", "warehouse is first, and is the default");
+/*
+ * The tent must stay generated; how many others are is not this test's call.
+ *
+ * This asserted exactly one generated environment, which was true when the
+ * tent was the only one and stopped being true the moment studio environments
+ * were built rather than downloaded. Generating one is a legitimate choice —
+ * a procedural softbox has shapes in it that a photographed room does not —
+ * so what is worth holding is that every entry is either baked here or names
+ * a preset, and that the tent is one of the baked ones.
+ */
 check(
-  ENVIRONMENTS.filter((e) => e.preset === null).length === 1,
-  "exactly one generated environment (the tent); the rest are drei presets",
+  ENVIRONMENTS.find((e) => e.id === "tent")?.preset === null,
+  "the tent is generated rather than downloaded",
+);
+check(
+  ENVIRONMENTS.every((e) => e.preset === null || (typeof e.preset === "string" && e.preset)),
+  "and every other one names a preset rather than being half-declared",
 );
 check(new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length, "ids are unique");
 check(environmentById("nonsense").id === "warehouse", "an unknown id falls back, never throws");
@@ -163,18 +177,31 @@ check(tinted === 0, "perfectly neutral — a stone takes its colour from itself,
 check(getLightTent() === getLightTent(), "baked once and cached, not per model");
 
 {
-  check(ENVIRONMENTS.length === 12, "twelve to choose from", String(ENVIRONMENTS.length));
-  check(new Set(ENVIRONMENTS.map((e) => e.id)).size === 12, "every id is unique");
+  /*
+   * Counted against the list, not against a number written here.
+   *
+   * These were pinned to a literal 12 and went red the moment two more
+   * environments were added — the uniqueness check especially, which failed
+   * while every id was in fact unique, because it compared the set size to 12
+   * rather than to the number of entries. A test that fails for growing is
+   * one people learn to ignore, and an ignored suite is how the next real
+   * break gets through.
+   */
+  check(ENVIRONMENTS.length >= 12, "a dozen or more to choose from", String(ENVIRONMENTS.length));
+  check(
+    new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length,
+    "every id is unique",
+  );
   check(
     ENVIRONMENTS.every((e) => /^#[0-9a-f]{6}$/i.test(e.sky) && /^#[0-9a-f]{6}$/i.test(e.ground)),
     "every one has a sky and a ground colour for its swatch",
   );
   /*
-   * A grid of twelve identical circles tells nobody anything. Each has to be
-   * visibly its own thing, and each has to read as lit from above.
+   * A grid of identical circles tells nobody anything. Each has to be visibly
+   * its own thing, and each has to read as lit from above.
    */
   check(
-    new Set(ENVIRONMENTS.map((e) => e.sky + e.ground)).size === 12,
+    new Set(ENVIRONMENTS.map((e) => e.sky + e.ground)).size === ENVIRONMENTS.length,
     "and no two swatches are the same pair",
   );
   const lum = (hex) => {
