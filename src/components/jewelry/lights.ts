@@ -230,3 +230,134 @@ export function resetLights(): LightDef[] {
 export function isDefaultRig(lights: LightDef[]): boolean {
   return JSON.stringify(lights) === JSON.stringify(resetLights());
 }
+
+/*
+ * ── Named starting points ───────────────────────────────────────────────────
+ *
+ * The manager above edits one light at a time, which is right for fine work
+ * but wrong for "start from a different look entirely" — a photographer does
+ * not build a rig from a bare bulb every time, they start from a known setup
+ * and adjust. These are whole-rig presets: pick one, then keep editing with
+ * the panel above exactly as before.
+ *
+ * Two real, distinct looks beyond the default, not decoration on the same
+ * numbers:
+ *
+ * "Bright White" answers to a plain, even, colour-accurate catalogue shot —
+ * a single cool-white key close to the lens axis plus a strong ambient fill,
+ * so shadows are soft and nothing reads warm. This is a genuinely different
+ * lighting DECISION from the default (which is a directional key-fill-rim
+ * three-point rig), not a recolour of it.
+ *
+ * "Studio Contrast" answers to the opposite brief — a hard, punchy hero shot
+ * with almost no fill, so the piece's own facets and edges carve the shadow
+ * rather than the render smoothing them away. No rim light, because a rim
+ * exists to separate a piece from a dark background and this rig assumes a
+ * bright one.
+ *
+ * Neither touches the diamond: as documented at the top of this file, the
+ * stones read only the environment, so these are exactly what they claim to
+ * be — a metal/scene lighting choice, independent of the Diamond Environment
+ * section.
+ */
+export interface LightRig {
+  id: string;
+  label: string;
+  hint: string;
+  lights: LightDef[];
+}
+
+export const LIGHT_RIGS: LightRig[] = [
+  {
+    id: "default",
+    label: "Jeweller's Lamp",
+    hint: "Key, fill and a warm rim — the current look",
+    lights: DEFAULT_LIGHTS,
+  },
+  {
+    id: "bright-white",
+    label: "Bright White",
+    hint: "Even, colour-accurate, soft shadows",
+    lights: [
+      {
+        id: "key",
+        type: "directional",
+        label: "Key — cool white, near the lens",
+        color: "#ffffff",
+        intensity: 2.2,
+        position: [1.5, 5, 4],
+        visible: true,
+        castShadow: true,
+      },
+      {
+        id: "fill",
+        type: "ambient",
+        label: "Fill — flat, lifts every shadow",
+        color: "#ffffff",
+        intensity: 0.55,
+        position: [0, 0, 0],
+        visible: true,
+      },
+      {
+        id: "sparkle",
+        type: "point",
+        label: "Sparkle — ignites the facets",
+        color: "#ffffff",
+        intensity: 1.2,
+        position: [0, 2.5, 1.2],
+        visible: true,
+        distance: 10,
+      },
+    ],
+  },
+  {
+    id: "studio-contrast",
+    label: "Studio Contrast",
+    hint: "Hard key, almost no fill",
+    lights: [
+      {
+        id: "key",
+        type: "spot",
+        label: "Key — hard, narrow",
+        color: "#fff6ee",
+        intensity: 7,
+        position: [2.8, 6, 3.5],
+        visible: true,
+        angle: 0.28,
+        penumbra: 0.25,
+        castShadow: true,
+      },
+      {
+        id: "fill",
+        type: "directional",
+        label: "Fill — barely there",
+        color: "#dbe4ff",
+        intensity: 0.35,
+        position: [-4, 2, -1],
+        visible: true,
+      },
+      {
+        id: "sparkle",
+        type: "point",
+        label: "Sparkle — ignites the facets",
+        color: "#fff4e0",
+        intensity: 1.6,
+        position: [0, 2.5, 1.2],
+        visible: true,
+        distance: 10,
+      },
+    ],
+  },
+];
+
+/** Applies a named rig, cloning its light positions so edits cannot mutate it. */
+export function applyLightRig(id: string): LightDef[] {
+  const rig = LIGHT_RIGS.find((r) => r.id === id) ?? LIGHT_RIGS[0];
+  return rig.lights.map((l) => ({ ...l, position: [...l.position] as [number, number, number] }));
+}
+
+/** Which named rig the current lights match exactly, or null once hand-edited. */
+export function matchingRig(lights: LightDef[]): string | null {
+  const json = JSON.stringify(lights);
+  return LIGHT_RIGS.find((r) => JSON.stringify(r.lights) === json)?.id ?? null;
+}

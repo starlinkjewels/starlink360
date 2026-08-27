@@ -92,7 +92,7 @@ export function UploadPiece({
       <input
         ref={inputRef}
         type="file"
-        accept={filterPicker ? ".3dm,.glb,.gltf,.obj,.stl,model/gltf-binary" : undefined}
+        accept={filterPicker ? ".3dm,.glb,.gltf,.obj,.stl,.fbx,model/gltf-binary" : undefined}
         className="sr-only"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -111,7 +111,7 @@ export function UploadPiece({
       </button>
 
       <p className="mt-2 text-[0.6rem] leading-relaxed text-muted-foreground">
-        .3dm, .glb or .gltf — decoded in your browser, nothing leaves your device.
+        .3dm, .glb, .gltf, .obj, .stl or .fbx — decoded in your browser, nothing leaves your device.
       </p>
     </div>
   );

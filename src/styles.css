@@ -1075,6 +1075,13 @@
   border-color: var(--gold);
 }
 
+/* A wrapping row of chips or reset buttons — angle presets, dual reset actions. */
+@utility model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
 @utility view-list {
   display: flex;
   flex-direction: column;
@@ -1814,6 +1821,21 @@
   background: var(--stage-gradient);
   box-shadow: var(--dock-shadow);
   min-height: 0;
+}
+
+/*
+ * The chosen backdrop, as its own layer behind the canvas rather than the
+ * viewport's own `background`. A blur filter rasterises everything it is
+ * applied to, so putting it on `.viewport` itself would blur the canvas
+ * sitting inside it — this element has no children, so a filter on it can
+ * only ever soften this one painted layer. Oversized slightly so a blurred
+ * edge never shows a hard cutoff against the viewport's own border.
+ */
+@utility stage-backdrop {
+  position: absolute;
+  inset: -30px;
+  background: transparent;
+  pointer-events: none;
 }
 
 @utility rail {
@@ -5410,6 +5432,22 @@ input[type="radio"]:disabled {
   font-variant-numeric: tabular-nums;
   font-size: 0.55rem;
   color: var(--color-muted-foreground);
+}
+
+/* Show/hide, on a part row. Quiet until hovered — most parts stay visible. */
+@utility obj-eye {
+  flex: none;
+  padding: 0.2rem;
+  border-radius: 0.3rem;
+  color: var(--color-muted-foreground);
+
+  &:hover {
+    color: var(--color-foreground);
+  }
+
+  &[aria-pressed="true"] {
+    color: var(--gold);
+  }
 }
 
 @utility obj-sub {

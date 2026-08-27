@@ -174,6 +174,29 @@ export function ensurePart(mesh: THREE.Mesh, kind: PartKind, seen: Map<string, n
   }
 }
 
+/**
+ * A part's label with any trailing uniquification number stripped —
+ * "Prong 2" and "Prong" both read as "Prong". `uniqueLabel` above is what adds
+ * that number in the first place, so this is its inverse: the label two parts
+ * would have shared had they not needed telling apart.
+ *
+ * Used for "link parts with the same name" — visibility and, contextually,
+ * anything else that wants "every Prong" from a single click on one of them,
+ * without a second, separate name-grouping concept to keep in sync with how
+ * labels actually get made.
+ */
+export function baseName(label: string): string {
+  return label.replace(/\s+\d+$/, "").trim();
+}
+
+/** Every part sharing `id`'s base name and kind, including `id` itself. */
+export function linkedPartIds(parts: Part[], id: string): string[] {
+  const part = parts.find((p) => p.id === id);
+  if (!part) return [id];
+  const base = baseName(part.label);
+  return parts.filter((p) => p.kind === part.kind && baseName(p.label) === base).map((p) => p.id);
+}
+
 /** Reads the selectable parts off a built scene, in the order they were added. */
 export function collectParts(root: THREE.Object3D): Part[] {
   const parts: Part[] = [];

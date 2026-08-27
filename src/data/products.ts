@@ -12,10 +12,10 @@ export interface Product {
 
 export const products: Product[] = [
   {
-    id: "lp-043",
-    name: "Lumière Pendant",
-    ref: "Ref. LP 043",
-    glbUrl: "/LP043.glb?v=9",
-    description: "A flat brilliant-set pendant, hand-finished and set with a single round stone.",
+    id: "sdag-076",
+    name: "SDAG076",
+    ref: "Ref. SDAG076",
+    glbUrl: "/SDAG076.glb",
+    description: "A pavé-set piece, hand-finished with round brilliant stones.",
   },
 ];

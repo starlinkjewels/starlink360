@@ -130,7 +130,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    /*
+     * `data-theme` is never in this component's own render output — it is set
+     * imperatively by the inline script below, before React ever hydrates, so
+     * the flash-prevention above can run before first paint rather than one
+     * React effect too late (see that script's own comment). That is exactly
+     * the one situation `suppressHydrationWarning` exists for: an attribute
+     * legitimately set outside React on this one element. Without it, every
+     * single load hit "tree hydrated but attributes didn't match... this
+     * won't be patched up" on `<html>` and React discarded and rebuilt the
+     * ENTIRE client tree in response — which is what was actually behind the
+     * startup shader-recompile storm this was chased down from, not any one
+     * component's own effects. `suppressHydrationWarning` only covers this
+     * element's own attributes, not its descendants, so it changes nothing
+     * about how any real mismatch elsewhere in the tree is still reported.
+     */
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
         {/*

@@ -8,38 +8,69 @@
  * version tried to guess every prong on the piece from shape and stone
  * proximity, and repeated tuning against a real piece never got past
  * "either everything or nothing." Picking a prong is a person's own click.
+ *
+ * Three sliders, not one: height (along the claw's own length, unchanged
+ * from the original control) plus two perpendicular widths. Selecting
+ * several prongs and dragging one slider applies the SAME factor to all of
+ * them, each scaled from its own original size — so prongs that were never
+ * quite identical to begin with stay proportionally themselves rather than
+ * being forced to match, which is what "linked, but allowing minor size
+ * differences" means here. There is no separate "link by name" step: prongs
+ * are solids inside a merged metal group, not separately named parts the
+ * way "link same names" means in Objects, and multi-selecting them (by hand,
+ * or via Select all prongs below) already applies one factor to the whole
+ * set.
  */
 import { Brush as BrushIcon, Wand2 } from "lucide-react";
 import { useMemo } from "react";
 import { findProngs, prongIds } from "../prongDetect";
 import {
-  PRONG_HEIGHT_MAX,
-  PRONG_HEIGHT_MIN,
-  commonProngHeight,
+  PRONG_SCALE_MAX,
+  PRONG_SCALE_MIN,
+  commonProngFactor,
   describeProngTargets,
-  resetProngHeights,
-  setProngHeights,
+  resetProngScale,
+  setProngFactor,
   targetProngIds,
-  type ProngHeights,
+  type ProngScale,
+  type ProngScales,
 } from "../prongs";
 import type { Part } from "../selection";
 import type { Brush } from "../assign";
 import { NumberField } from "../ui/NumberField";
 import { PanelIntro, PanelReset, PanelStatus } from "../ui/Panel";
 
+const AXES: { axis: keyof ProngScale; label: string; hint: string }[] = [
+  {
+    axis: "h",
+    label: "Height",
+    hint: "Along the claw's own length. 1.00 is how the file was modelled.",
+  },
+  {
+    axis: "x",
+    label: "Horizontal X",
+    hint: "Thickness along world X, projected perpendicular to the claw's own length.",
+  },
+  {
+    axis: "y",
+    label: "Horizontal Y",
+    hint: "The remaining perpendicular direction — together with X and Height, a full 3-axis scale.",
+  },
+];
+
 export function ProngsPanel({
   parts,
   selected,
-  prongHeights,
-  onProngHeights,
+  prongScales,
+  onProngScales,
   onSelect,
   armed = null,
   onArm,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
-  prongHeights: ProngHeights;
-  onProngHeights: (next: ProngHeights) => void;
+  prongScales: ProngScales;
+  onProngScales: (next: ProngScales) => void;
   onSelect?: (next: Set<string>) => void;
   /** The shared brush slot — arming this here disarms any material/finish/
    *  stamp brush elsewhere, the same as arming one of those disarms this. */
@@ -49,8 +80,10 @@ export function ProngsPanel({
   const hasMetal = parts.some((p) => p.kind === "metal");
   const picking = armed?.tool === "prong";
   const targets = targetProngIds(parts, selected);
-  const common = commonProngHeight(prongHeights, targets);
-  const changed = targets.some((id) => (prongHeights[id] ?? 1) !== 1);
+  const changed = targets.some((id) => {
+    const s = prongScales[id];
+    return s && (s.h !== 1 || s.x !== 1 || s.y !== 1);
+  });
 
   /*
    * A starting point, not an answer.
@@ -76,10 +109,10 @@ export function ProngsPanel({
   return (
     <>
       <PanelIntro>
-        Raises or lowers a claw along its own length. Arm the brush, then click metal on the piece —
-        each click adds one solid, clicking an already-picked one drops it. A stone, the backdrop,
-        or anything clearly too large to be a claw — a shank, or a plate a whole field of stones is
-        set into — does nothing.
+        Scales a claw along its own length and two perpendicular widths. Arm the brush, then click
+        metal on the piece — each click adds one solid, clicking an already-picked one drops it. A
+        stone, the backdrop, or anything clearly too large to be a claw — a shank, or a plate a
+        whole field of stones is set into — does nothing.
       </PanelIntro>
 
       {onSelect && suggested.length > 0 && (
@@ -130,27 +163,31 @@ export function ProngsPanel({
         <p className="field-hint mb-2">Nothing here to change yet — this piece has no metal.</p>
       )}
 
-      <NumberField
-        label="Height"
-        value={common ?? 1}
-        min={PRONG_HEIGHT_MIN}
-        max={PRONG_HEIGHT_MAX}
-        step={0.02}
-        precision={2}
-        suffix="×"
-        disabled={!targets.length}
-        hint={
-          common === null && targets.length
-            ? "Mixed — the selected prongs are not all the same height."
-            : "1.00 is the height the file was modelled with."
-        }
-        onChange={(v) => onProngHeights(setProngHeights(prongHeights, targets, v))}
-      />
+      {AXES.map(({ axis, label, hint }) => {
+        const common = commonProngFactor(prongScales, targets, axis);
+        return (
+          <NumberField
+            key={axis}
+            label={label}
+            value={common ?? 1}
+            min={PRONG_SCALE_MIN}
+            max={PRONG_SCALE_MAX}
+            step={0.02}
+            precision={2}
+            suffix="×"
+            disabled={!targets.length}
+            hint={
+              common === null && targets.length ? `Mixed — not all selected prongs agree.` : hint
+            }
+            onChange={(v) => onProngScales(setProngFactor(prongScales, targets, axis, v))}
+          />
+        );
+      })}
 
       <PanelReset
-        onReset={() => onProngHeights(resetProngHeights(prongHeights, targets))}
+        onReset={() => onProngScales(resetProngScale(prongScales, targets))}
         disabled={!targets.length || !changed}
-        label="Reset height"
+        label="Reset scale"
       />
     </>
   );

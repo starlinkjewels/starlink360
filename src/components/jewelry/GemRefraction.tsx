@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
@@ -6,7 +6,13 @@ import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { MeshRefractionMaterial } from "@react-three/drei/materials/MeshRefractionMaterial";
 import { PATCH_ID, withPathAbsorption } from "./gemAbsorption";
+import { ENV_INTENSITY_PATCH_ID, withEnvIntensity } from "./diamondEnvIntensity";
+import { ENV_ROTATION_PATCH_ID, withEnvRotation } from "./diamondEnvRotation";
+import { ENV_RESPONSE_PATCH_ID, withEnvResponse } from "./diamondEnvResponse";
+import { HDR_KNEE_PATCH_ID, withHdrKnee } from "./gemHdrKnee";
 import { gemFresnel, gemTint } from "./materials";
+import { DIAMOND_ABERRATION } from "./library";
+import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
 
 /*
  * A real diamond, rather than a transmissive approximation of one.
@@ -56,13 +62,43 @@ function stoneColor(name: string): THREE.Color {
    */
   return Math.max(c.r, c.g, c.b) < 0.09 ? new THREE.Color("#ffffff") : c;
 }
-/** Bounces of total internal reflection. 3 is where brilliance appears. */
 /** What the library resolves a chosen stone down to, for the shader. */
 export interface GemSpec {
   color: string;
   ior: number;
   aberration: number;
   transmission: number;
+  /*
+   * Opaque-only — read solely by the `transmission < 0.5` branch below, which
+   * builds a `MeshPhysicalMaterial` rather than tracing. Optional so every
+   * transparent stone's spec is unaffected; defaults exactly match what that
+   * branch hardcoded before these existed (onyx and black diamond render
+   * bit-identically to before unless a preset or patch sets one of these).
+   */
+  metalness?: number;
+  roughness?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  /**
+   * Two different renderer properties share this one name, chosen by which
+   * branch below a gem actually renders through:
+   *  - Opaque (Pearl/onyx): `MeshPhysicalMaterial`'s own dielectric
+   *    reflectance. Undefined falls back to three's own default, 0.5.
+   *  - Transparent (traced): overrides `diamondOptics.fresnelScale` for this
+   *    one gem, through the exact same `gemFresnel` formula and the exact
+   *    same `material.fresnel` uniform every other gem already uses.
+   *    Undefined leaves the global scale in effect, exactly as before.
+   */
+  reflectivity?: number;
+  /**
+   * Transparent gems only. Scales the path length `gemAbsorption.ts` is
+   * measured against — see `resolveGem` in library.ts, which is where this
+   * is actually computed and clamped. Always a real number once resolved;
+   * optional here only so a `GemOptics` built before this field existed
+   * still type-checks.
+   */
+  absorptionFactor?: number;
 }
 
 export interface GemOptics {
@@ -73,6 +109,31 @@ export interface GemOptics {
    * Absent means fully transmissive, which is what every stone was before.
    */
   transmission?: number;
+  /** Opaque-only — see `GemSpec`. */
+  metalness?: number;
+  roughness?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  /**
+   * Two different renderer properties share this one name, chosen by which
+   * branch below a gem actually renders through:
+   *  - Opaque (Pearl/onyx): `MeshPhysicalMaterial`'s own dielectric
+   *    reflectance. Undefined falls back to three's own default, 0.5.
+   *  - Transparent (traced): overrides `diamondOptics.fresnelScale` for this
+   *    one gem, through the exact same `gemFresnel` formula and the exact
+   *    same `material.fresnel` uniform every other gem already uses.
+   *    Undefined leaves the global scale in effect, exactly as before.
+   */
+  reflectivity?: number;
+  /**
+   * Transparent gems only. Scales the path length `gemAbsorption.ts` is
+   * measured against — see `resolveGem` in library.ts, which is where this
+   * is actually computed and clamped. Always a real number once resolved;
+   * optional here only so a `GemOptics` built before this field existed
+   * still type-checks.
+   */
+  absorptionFactor?: number;
 }
 
 /** The stone-group id a mesh belongs to, or "" for an untagged one. */
@@ -80,31 +141,33 @@ function stoneId(mesh: THREE.Mesh): string {
   return (mesh.userData?.stone as { id?: string } | undefined)?.id ?? "";
 }
 
-/*
- * Bounces of total internal reflection, per traced ray. Test value, not
- * settled: was 3 specifically because this was believed to run on
- * software-only rendering with no real GPU, where every extra bounce is
- * pure added cost. That premise turned out to be wrong — chrome://gpu
- * confirms real hardware-accelerated WebGL (an AMD integrated GPU via
- * ANGLE/D3D11) — so the trade-off is worth revisiting. A commercial
- * competitor's own shipped diamond material traces 5; more bounces means
- * more of the internal reflection path is actually followed before it's
- * approximated away, which is most of what separates "brilliant" from
- * "glassy" on a deep pavilion.
+/**
+ * Splits the ray per wavelength — this is the fire. Anchored on `library.ts`'s
+ * diamond aberration, so an untraced stone (one with no library/override
+ * optics at all) can't drift out of sync with the catalogue's own diamond
+ * entry.
  */
-const BOUNCES = 5;
-/** Splits the ray per wavelength — this is the fire. */
-const ABERRATION = 0.035;
-/** Edge brightness where the stone turns mirror-like. */
-const FRESNEL = 1.0;
+const ABERRATION = DIAMOND_ABERRATION;
+
+/*
+ * Bounces and fresnel scale used to be fixed constants here (3, later 5, and
+ * 1.0 respectively). They're global shader tuning now — `diamondOptics`,
+ * from `diamondOptics.ts` — because they're properties of the approximation
+ * itself, not of any one gem, and the premium diamond render pass needed
+ * both live-tunable from a debug panel.
+ */
 
 /**
  * The shader reads the environment through three's CubeUV packing, so it needs
  * the mip layout of the specific map as compile-time constants. Mirrors drei's
  * own calculation, but tolerates a texture that has no `image` rather than
  * throwing.
+ *
+ * `fastChroma` selects drei's cheap per-channel dispersion approximation
+ * instead of tracing red/blue separately — a compile-time `#define`, not a
+ * uniform, so it must be baked in here rather than set on the material later.
  */
-function envDefines(envMap: THREE.Texture): Record<string, string> {
+function envDefines(envMap: THREE.Texture, fastChroma: boolean): Record<string, string> {
   const isCube = (envMap as THREE.CubeTexture).isCubeTexture === true;
   const image = envMap.image as { width?: number }[] & { width?: number };
   const width = (isCube ? image?.[0]?.width : image?.width) ?? 1024;
@@ -119,8 +182,8 @@ function envDefines(envMap: THREE.Texture): Record<string, string> {
     CUBEUV_TEXEL_HEIGHT: `${1 / texelHeight}`,
     CUBEUV_MAX_MIP: `${lodMax}.0`,
     CHROMATIC_ABERRATIONS: "",
-    FAST_CHROMA: "",
   };
+  if (fastChroma) defines.FAST_CHROMA = "";
   if (isCube) defines.ENVMAP_TYPE_CUBEM = "";
   return defines;
 }
@@ -178,6 +241,9 @@ export function GemRefraction({
   envMap,
   overrides,
   optics,
+  diamondOptics = DEFAULT_DIAMOND_OPTICS,
+  envIntensity = 1,
+  envRotation = 0,
 }: {
   meshes: THREE.Mesh[];
   envMap: THREE.Texture;
@@ -195,9 +261,30 @@ export function GemRefraction({
    * what makes moissanite throw more fire than diamond rather than the same.
    */
   optics?: Record<string, GemOptics>;
+  /** Global shader tuning — see `diamondOptics.ts`. */
+  diamondOptics?: DiamondOpticsSettings;
+  /**
+   * Multiplies the sampled diamond environment. A live uniform, not baked
+   * into materials, so dragging this slider never triggers the shader
+   * rebuild/recompile the rest of this component's props do.
+   */
+  envIntensity?: number;
+  /**
+   * Turns the diamond environment's longitude, in radians. Also a live
+   * uniform — texture.offset does nothing here, since this shader computes
+   * its own UV from the ray direction rather than reading a texture
+   * transform (see diamondEnvRotation.ts).
+   */
+  envRotation?: number;
 }) {
   const size = useThree((s) => s.size);
   const materials = useRef<RefractionMaterialLike[]>([]);
+  // Read every frame, not a dependency of the rebuild effect below — see the
+  // `envIntensity`/`envRotation` prop docs.
+  const envIntensityRef = useRef(envIntensity);
+  envIntensityRef.current = envIntensity;
+  const envRotationRef = useRef(envRotation);
+  envRotationRef.current = envRotation;
 
   /*
    * The BVH, cached per geometry.
@@ -208,6 +295,12 @@ export function GemRefraction({
    * rebuild it, or every swatch click would stall for seconds on a pave field.
    */
   const bvhCache = useRef(new Map<string, MeshBVHUniformStruct>());
+  /**
+   * Whatever the last COMPLETED rebuild put on screen, so a new one can tear
+   * it down before building fresh — see the debounce below for why this
+   * moved out of the effect's own return.
+   */
+  const disposeCurrentRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     const cache = bvhCache.current;
@@ -236,241 +329,405 @@ export function GemRefraction({
   useLayoutEffect(() => {
     if (!meshes.length || !envMap) return;
 
-    const created: RefractionMaterialLike[] = [];
-    const disposable: THREE.Material[] = [];
-    const previous: (THREE.Material | THREE.Material[])[] = [];
-    /** One entry per mesh that actually gets a material — see the staggering below. */
-    const applySteps: (() => void)[] = [];
+    /*
+     * Debounced, not run inline.
+     *
+     * This effect's own deps can settle across more than one commit very
+     * early in a piece's life — a fresh model discovers its parts, then its
+     * stone colours, then its material overrides, each a legitimate step
+     * that used to trigger its own full rebuild (see routes/index.tsx's
+     * `useStableRecord` for the reference-identity half of this fix; this is
+     * the other half, for renders that carry genuinely-changing values close
+     * together rather than merely a new reference to the same content).
+     *
+     * Two rAFs, the same span already used below for spacing individual
+     * compiles apart and for the same underlying reason: a burst of commits
+     * within a couple of frames of each other is exactly the pattern that
+     * has taken down the WebGL context on real hardware. Deferred here means
+     * a rebuild that keeps getting superseded before it ever starts never
+     * touches the GPU at all — only the LAST one in a burst runs, and it
+     * runs with whatever props are current in ITS closure, so the final
+     * state is always what gets built once the burst settles.
+     */
+    let debounceCancelled = false;
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (debounceCancelled) return;
+        runBuild();
+      });
+    });
 
-    for (const mesh of meshes) {
-      const groupId = stoneId(mesh);
-      const fileColor = stoneColor(mesh.name);
+    function runBuild() {
+      // Tear down whatever the last COMPLETED build put on screen — never
+      // what a superseded, never-started build would have — before making
+      // the new one, so two builds can never both be live on the same mesh.
+      disposeCurrentRef.current?.();
+      disposeCurrentRef.current = null;
 
-      /** Everything the shader needs for one stone, in one comparable object. */
-      const specFor = (id: string, fallback?: GemSpec): GemSpec => {
-        const o = optics?.[id];
-        const c = overrides?.[id];
-        if (!o && !c)
-          return (
-            fallback ?? {
-              color: `#${fileColor.getHexString()}`,
-              ior: DIAMOND_IOR,
-              aberration: ABERRATION,
-              transmission: 1,
+      const created: RefractionMaterialLike[] = [];
+      const disposable: THREE.Material[] = [];
+      const previous: (THREE.Material | THREE.Material[])[] = [];
+      /** One entry per mesh that actually gets a material — see the staggering below. */
+      const applySteps: (() => void)[] = [];
+
+      for (const mesh of meshes) {
+        const groupId = stoneId(mesh);
+        const fileColor = stoneColor(mesh.name);
+
+        /** Everything the shader needs for one stone, in one comparable object. */
+        const specFor = (id: string, fallback?: GemSpec): GemSpec => {
+          const o = optics?.[id];
+          const c = overrides?.[id];
+          if (!o && !c)
+            return (
+              fallback ?? {
+                color: `#${fileColor.getHexString()}`,
+                ior: DIAMOND_IOR,
+                aberration: ABERRATION,
+                transmission: 1,
+              }
+            );
+          const from = fallback ?? {
+            color: `#${fileColor.getHexString()}`,
+            ior: DIAMOND_IOR,
+            aberration: ABERRATION,
+            transmission: 1,
+          };
+          return {
+            color: c ?? from.color,
+            ior: o?.ior ?? from.ior,
+            aberration: o?.aberration ?? from.aberration,
+            transmission: o?.transmission ?? from.transmission,
+            metalness: o?.metalness ?? from.metalness,
+            roughness: o?.roughness ?? from.roughness,
+            clearcoat: o?.clearcoat ?? from.clearcoat,
+            clearcoatRoughness: o?.clearcoatRoughness ?? from.clearcoatRoughness,
+            envMapIntensity: o?.envMapIntensity ?? from.envMapIntensity,
+            reflectivity: o?.reflectivity ?? from.reflectivity,
+            absorptionFactor: o?.absorptionFactor ?? from.absorptionFactor,
+          };
+        };
+
+        const base = specFor(groupId);
+
+        // Per-solid specs, layered on the group's rather than on the file's, so
+        // painting one stone in a group already set to ruby keeps ruby's optics
+        // for everything the paint did not touch.
+        const perSolid = new Map<number, GemSpec>();
+        for (const id of new Set([...Object.keys(optics ?? {}), ...Object.keys(overrides ?? {})])) {
+          const { group, solid } = parseId(id);
+          if (group !== groupId || solid === null) continue;
+          perSolid.set(solid, specFor(id, base));
+        }
+
+        const runs = planRuns(
+          mesh.userData?.solids as ArrayLike<number> | undefined,
+          drawableCount(mesh.geometry),
+          base,
+          perSolid,
+        );
+        const specs = runMaterials(runs);
+        const slots = runSlots(runs, specs);
+
+        /*
+         * The reference length is measured from this mesh, because the traced
+         * distance is in model space and a piece is scaled to unit size on load:
+         * a fixed number would absorb wildly differently on a solitaire and on a
+         * melee stone. Four radii approximates a ray's whole path through the
+         * stone across its internal bounces.
+         */
+        const geo = mesh.geometry;
+        if (!geo.boundingSphere) geo.computeBoundingSphere();
+        const reference = (geo.boundingSphere?.radius ?? 0.25) * 4;
+        const bvh = bvhCache.current.get(geo.uuid);
+
+        /*
+         * Building the material objects themselves is deferred into the
+         * staggered step below, alongside assigning them — see the comment
+         * there for why. Everything above this point (specs, runs, the
+         * reference length) is cheap, synchronous planning with no GPU work
+         * in it, and stays outside the stagger.
+         */
+        applySteps.push(() => {
+          const made = specs.map((spec) => {
+            const s = spec ?? base;
+
+            /*
+             * A stone that does not transmit is not traced.
+             *
+             * Onyx, and anything dragged below half transmission. The shader
+             * assumes light leaves the far side, so an opaque body renders as dark
+             * glass with the background showing through it — worse than wrong.
+             */
+            if (s.transmission < 0.5) {
+              /*
+               * Defaults exactly match what this branch hardcoded before Pearl
+               * existed, so onyx and black diamond render bit-identically to
+               * before unless a preset or the custom editor sets one of these —
+               * this is the same contextual spec Pearl's Luster/Roughness/
+               * Shine/Environment Intensity controls write into.
+               */
+              const opaque = new THREE.MeshPhysicalMaterial({
+                color: new THREE.Color(s.color),
+                metalness: s.metalness ?? 0,
+                roughness: s.roughness ?? 0.08,
+                clearcoat: s.clearcoat ?? 1,
+                clearcoatRoughness: s.clearcoatRoughness ?? 0.04,
+                envMapIntensity: s.envMapIntensity ?? 1.6,
+                // three's own default — unset, this line changes nothing.
+                reflectivity: s.reflectivity ?? 0.5,
+              });
+              disposable.push(opaque);
+              return opaque as THREE.Material;
             }
-          );
-        const from = fallback ?? {
-          color: `#${fileColor.getHexString()}`,
-          ior: DIAMOND_IOR,
-          aberration: ABERRATION,
-          transmission: 1,
-        };
-        return {
-          color: c ?? from.color,
-          ior: o?.ior ?? from.ior,
-          aberration: o?.aberration ?? from.aberration,
-          transmission: o?.transmission ?? from.transmission,
-        };
-      };
 
-      const base = specFor(groupId);
+            const material = new (
+              MeshRefractionMaterial as unknown as {
+                new (): RefractionMaterialLike;
+              }
+            )();
+            material.defines = envDefines(envMap, diamondOptics.fastChroma);
+            material.envMap = envMap;
+            material.bounces = diamondOptics.bounces;
+            material.ior = s.ior;
+            // Scaled by how coloured the stone is. At full strength the shader
+            // blends every grazing facet to pure white, which is the diamond look
+            // on a colourless stone and erases the colour on a painted one.
+            // A per-gem Reflectivity override, when set, replaces the diamond-wide
+            // scale for this one stone — see the `reflectivity` field doc on
+            // `GemSpec` for why this is the right existing hook rather than a
+            // new one.
+            material.fresnel = gemFresnel(s.color, s.reflectivity ?? diamondOptics.fresnelScale);
+            material.aberrationStrength = s.aberration;
+            // Normalised so the shader's HDR environment multiply keeps the hue
+            // instead of clipping the bright facets to white.
+            material.color = new THREE.Color(gemTint(s.color));
+            material.resolution = new THREE.Vector2(size.width, size.height);
+            if (bvh) material.bvh = bvh;
 
-      // Per-solid specs, layered on the group's rather than on the file's, so
-      // painting one stone in a group already set to ruby keeps ruby's optics
-      // for everything the paint did not touch.
-      const perSolid = new Map<number, GemSpec>();
-      for (const id of new Set([...Object.keys(optics ?? {}), ...Object.keys(overrides ?? {})])) {
-        const { group, solid } = parseId(id);
-        if (group !== groupId || solid === null) continue;
-        perSolid.set(solid, specFor(id, base));
+            /*
+             * Depth-dependent colour, so a coloured stone reads as gemstone rather
+             * than tinted glass. Colourless stones are unaffected by construction —
+             * the absorption term is a power of the stone's colour, and one to any
+             * power is one — so the white diamond look is untouched.
+             */
+            /*
+             * Absorption Factor, above 1, shortens the reference length so the
+             * same physical path reaches a higher exponent sooner — more
+             * saturated for the same geometry. `gemAbsorption.ts` itself is
+             * untouched; only the length its caller hands it changes.
+             */
+            const effectiveReference = reference / (s.absorptionFactor ?? 1);
+
+            material.onBeforeCompile = (shader) => {
+              const patched = withPathAbsorption(shader.fragmentShader, effectiveReference);
+              // Null means drei's shader is not the one this was written against.
+              // Keeping the original flat tint is correct; a partial patch is not.
+              if (patched) shader.fragmentShader = patched;
+              /*
+               * Say so, loudly, either way.
+               *
+               * Falling back to drei's flat tint is the safe choice but it is also
+               * indistinguishable from the colour feature being broken: the stone
+               * shows its colour only where the environment is dim, so a painted
+               * stone comes out part coloured and part white. Failing silently
+               * turned that into a long hunt through geometry that was never at
+               * fault. This runs once per program, not per frame.
+               */
+              if (import.meta.env.DEV) {
+                if (patched) console.log(`[gem] absorption patch ${PATCH_ID} compiled`);
+                else
+                  console.error(
+                    "[gem] absorption patch REJECTED — drei's shader has changed shape, so " +
+                      "stones fall back to a flat tint that washes out against a bright " +
+                      "environment. Run `npm run test:gem` to see which anchor no longer matches.",
+                  );
+              }
+
+              // Live diamond-environment-intensity uniform — see diamondEnvIntensity.ts.
+              const withIntensity = withEnvIntensity(shader.fragmentShader);
+              if (withIntensity) {
+                shader.fragmentShader = withIntensity;
+                shader.uniforms.uDiamondEnvIntensity = new THREE.Uniform(envIntensityRef.current);
+              } else if (import.meta.env.DEV) {
+                console.error(
+                  "[gem] env-intensity patch REJECTED — drei's shader has changed shape, so " +
+                    "the diamond environment intensity slider has no effect on this stone.",
+                );
+              }
+
+              // Live diamond-environment-rotation uniform — see diamondEnvRotation.ts.
+              // No-op (by design) when envMap is a cube texture; only the equirect
+              // branch has a uvv/smoothUv to rotate.
+              const withRotation = withEnvRotation(shader.fragmentShader);
+              if (withRotation) {
+                shader.fragmentShader = withRotation;
+                shader.uniforms.uDiamondEnvRotation = new THREE.Uniform(
+                  (envRotationRef.current ?? 0) / (2 * Math.PI),
+                );
+              } else if (import.meta.env.DEV && !(envMap as THREE.CubeTexture).isCubeTexture) {
+                console.error(
+                  "[gem] env-rotation patch REJECTED — drei's shader has changed shape, so " +
+                    "the diamond environment rotation slider has no effect on this stone.",
+                );
+              }
+
+              // Live environment-response-curve uniform — see diamondEnvResponse.ts.
+              const withResponse = withEnvResponse(shader.fragmentShader);
+              if (withResponse) {
+                shader.fragmentShader = withResponse;
+                shader.uniforms.uEnvResponseExponent = new THREE.Uniform(
+                  diamondOptics.envResponseExponent,
+                );
+              } else if (import.meta.env.DEV) {
+                console.error(
+                  "[gem] env-response patch REJECTED — drei's shader has changed shape, so " +
+                    "the environment response curve has no effect on this stone.",
+                );
+              }
+
+              // Live pre-ACES HDR-compression uniforms — see gemHdrKnee.ts.
+              const withKnee = withHdrKnee(shader.fragmentShader);
+              if (withKnee) {
+                shader.fragmentShader = withKnee;
+                shader.uniforms.uKneeThreshold = new THREE.Uniform(diamondOptics.kneeThreshold);
+                shader.uniforms.uKneeStrength = new THREE.Uniform(diamondOptics.kneeStrength);
+              } else if (import.meta.env.DEV) {
+                console.error(
+                  "[gem] hdr-knee patch REJECTED — drei's shader has changed shape, so " +
+                    "the diamond's pre-ACES HDR compression has no effect on this stone.",
+                );
+              }
+            };
+            /*
+             * The reference length is baked into the shader text, so two stones of
+             * different sizes need different programs. Without this three reuses
+             * the first compiled program for all of them and every stone absorbs as
+             * if it were the size of whichever compiled first.
+             *
+             * PATCH_ID and ENV_INTENSITY_PATCH_ID cover the same hazard for their own
+             * patches, and the fast-chroma flag is included because it changes the
+             * compiled `#define`s, not just a uniform. This cache lives on the
+             * renderer, which survives a Vite hot update — so a key that does not
+             * move when any of these do means three keeps serving a stale program,
+             * and the edit silently does nothing until the renderer is torn down.
+             */
+            material.customProgramCacheKey = () =>
+              `gem-absorb-${effectiveReference.toPrecision(8)}-${PATCH_ID}-envint-${ENV_INTENSITY_PATCH_ID}` +
+              `-envrot-${ENV_ROTATION_PATCH_ID}-envresp-${ENV_RESPONSE_PATCH_ID}-hdrknee-${HDR_KNEE_PATCH_ID}` +
+              `-fc${diamondOptics.fastChroma ? 1 : 0}`;
+            material.needsUpdate = true;
+
+            created.push(material);
+            disposable.push(material as unknown as THREE.Material);
+            return material as unknown as THREE.Material;
+          });
+
+          if (!made.length) return;
+
+          previous.push(mesh.material);
+          mesh.geometry.clearGroups();
+          if (made.length > 1) {
+            runs.forEach((run, i) => mesh.geometry.addGroup(run.start, run.count, slots[i]));
+            mesh.material = made;
+          } else {
+            mesh.material = made[0];
+          }
+        });
       }
 
-      const runs = planRuns(
-        mesh.userData?.solids as ArrayLike<number> | undefined,
-        drawableCount(mesh.geometry),
-        base,
-        perSolid,
-      );
-      const specs = runMaterials(runs);
-      const slots = runSlots(runs, specs);
+      materials.current = created;
 
       /*
-       * The reference length is measured from this mesh, because the traced
-       * distance is in model space and a piece is scaled to unit size on load:
-       * a fixed number would absorb wildly differently on a solitaire and on a
-       * melee stone. Four radii approximates a ray's whole path through the
-       * stone across its internal bounces.
+       * Applied one mesh at a time, an animation frame apart — never all at
+       * once.
+       *
+       * `envDefines` above bakes the environment texture's own dimensions into
+       * the shader as compile-time defines, so switching environments forces a
+       * fresh GLSL shader compile for every distinct stone group a piece has,
+       * not just a uniform update. Three only actually compiles a program the
+       * first time `gl.render()` encounters it — not when `mesh.material` is
+       * assigned — so introducing every new material in the same tick means
+       * the very next render call compiles all of them synchronously, back to
+       * back, in one go. ANGLE translates each through its HLSL compiler
+       * (visible in chrome://gpu's own log), which is not fast, and this was
+       * confirmed on real hardware to be enough to lose the WebGL context
+       * outright — reproducing even against an environment that was already
+       * loaded and cached, which is what pointed at compilation rather than
+       * the texture fetch as the actual cost. Spacing the assignments apart
+       * gives each fresh program its own render call to compile in, so no
+       * single frame ever carries more than one new shader compile.
+       *
+       * Two rAFs per step, not one, kept as defence in depth even now that
+       * the debounce above coalesces most redundant back-to-back rebuilds
+       * before they ever reach this point (see that comment for the actual
+       * root cause it was chasing — a theme-flash script's `data-theme`
+       * attribute, now fixed with `suppressHydrationWarning` in
+       * `__root.tsx`). One frame of spacing was tuned against a single clean
+       * run and wasn't enough headroom for two overlapping ones; a double
+       * rAF roughly halves the compile density during that window without
+       * making a normal single run noticeably slower to finish.
        */
-      const geo = mesh.geometry;
-      if (!geo.boundingSphere) geo.computeBoundingSphere();
-      const reference = (geo.boundingSphere?.radius ?? 0.25) * 4;
-      const bvh = bvhCache.current.get(geo.uuid);
-
-      /*
-       * Building the material objects themselves is deferred into the
-       * staggered step below, alongside assigning them — see the comment
-       * there for why. Everything above this point (specs, runs, the
-       * reference length) is cheap, synchronous planning with no GPU work
-       * in it, and stays outside the stagger.
-       */
-      applySteps.push(() => {
-        const made = specs.map((spec) => {
-          const s = spec ?? base;
-
-          /*
-           * A stone that does not transmit is not traced.
-           *
-           * Onyx, and anything dragged below half transmission. The shader
-           * assumes light leaves the far side, so an opaque body renders as dark
-           * glass with the background showing through it — worse than wrong.
-           */
-          if (s.transmission < 0.5) {
-            const opaque = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color(s.color),
-              metalness: 0,
-              roughness: 0.08,
-              clearcoat: 1,
-              clearcoatRoughness: 0.04,
-              envMapIntensity: 1.6,
-            });
-            disposable.push(opaque);
-            return opaque as THREE.Material;
-          }
-
-          const material = new (
-            MeshRefractionMaterial as unknown as {
-              new (): RefractionMaterialLike;
-            }
-          )();
-          material.defines = envDefines(envMap);
-          material.envMap = envMap;
-          material.bounces = BOUNCES;
-          material.ior = s.ior;
-          // Scaled by how coloured the stone is. At full strength the shader
-          // blends every grazing facet to pure white, which is the diamond look
-          // on a colourless stone and erases the colour on a painted one.
-          material.fresnel = gemFresnel(s.color, FRESNEL);
-          material.aberrationStrength = s.aberration;
-          // Normalised so the shader's HDR environment multiply keeps the hue
-          // instead of clipping the bright facets to white.
-          material.color = new THREE.Color(gemTint(s.color));
-          material.resolution = new THREE.Vector2(size.width, size.height);
-          if (bvh) material.bvh = bvh;
-
-          /*
-           * Depth-dependent colour, so a coloured stone reads as gemstone rather
-           * than tinted glass. Colourless stones are unaffected by construction —
-           * the absorption term is a power of the stone's colour, and one to any
-           * power is one — so the white diamond look is untouched.
-           */
-          material.onBeforeCompile = (shader) => {
-            const patched = withPathAbsorption(shader.fragmentShader, reference);
-            // Null means drei's shader is not the one this was written against.
-            // Keeping the original flat tint is correct; a partial patch is not.
-            if (patched) shader.fragmentShader = patched;
-            /*
-             * Say so, loudly, either way.
-             *
-             * Falling back to drei's flat tint is the safe choice but it is also
-             * indistinguishable from the colour feature being broken: the stone
-             * shows its colour only where the environment is dim, so a painted
-             * stone comes out part coloured and part white. Failing silently
-             * turned that into a long hunt through geometry that was never at
-             * fault. This runs once per program, not per frame.
-             */
-            if (import.meta.env.DEV) {
-              if (patched) console.log(`[gem] absorption patch ${PATCH_ID} compiled`);
-              else
-                console.error(
-                  "[gem] absorption patch REJECTED — drei's shader has changed shape, so " +
-                    "stones fall back to a flat tint that washes out against a bright " +
-                    "environment. Run `npm run test:gem` to see which anchor no longer matches.",
-                );
-            }
-          };
-          /*
-           * The reference length is baked into the shader text, so two stones of
-           * different sizes need different programs. Without this three reuses
-           * the first compiled program for all of them and every stone absorbs as
-           * if it were the size of whichever compiled first.
-           *
-           * PATCH_ID covers the other half of the same hazard. This cache lives on
-           * the renderer, which survives a Vite hot update — so a key that does
-           * not move when the shader text does means three keeps serving the
-           * program it compiled from the previous version of the patch, and every
-           * edit to it silently does nothing until the renderer is torn down.
-           */
-          material.customProgramCacheKey = () =>
-            `gem-absorb-${reference.toPrecision(8)}-${PATCH_ID}`;
-          material.needsUpdate = true;
-
-          created.push(material);
-          disposable.push(material as unknown as THREE.Material);
-          return material as unknown as THREE.Material;
+      let cancelled = false;
+      let raf = 0;
+      function step(i: number) {
+        if (cancelled || i >= applySteps.length) return;
+        applySteps[i]();
+        raf = requestAnimationFrame(() => {
+          raf = requestAnimationFrame(() => step(i + 1));
         });
+      }
+      step(0);
 
-        if (!made.length) return;
-
-        previous.push(mesh.material);
-        mesh.geometry.clearGroups();
-        if (made.length > 1) {
-          runs.forEach((run, i) => mesh.geometry.addGroup(run.start, run.count, slots[i]));
-          mesh.material = made;
-        } else {
-          mesh.material = made[0];
-        }
-      });
+      disposeCurrentRef.current = () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+        // Put the originals back before disposing ours, so a remount never lands
+        // on a disposed program.
+        meshes.forEach((mesh, i) => {
+          if (previous[i]) mesh.material = previous[i];
+        });
+        disposable.forEach((m) => m.dispose());
+        materials.current = [];
+      };
     }
-
-    materials.current = created;
 
     /*
-     * Applied one mesh at a time, an animation frame apart — never all at
-     * once.
-     *
-     * `envDefines` above bakes the environment texture's own dimensions into
-     * the shader as compile-time defines, so switching environments forces a
-     * fresh GLSL shader compile for every distinct stone group a piece has,
-     * not just a uniform update. Three only actually compiles a program the
-     * first time `gl.render()` encounters it — not when `mesh.material` is
-     * assigned — so introducing every new material in the same tick means
-     * the very next render call compiles all of them synchronously, back to
-     * back, in one go. ANGLE translates each through its HLSL compiler
-     * (visible in chrome://gpu's own log), which is not fast, and this was
-     * confirmed on real hardware to be enough to lose the WebGL context
-     * outright — reproducing even against an environment that was already
-     * loaded and cached, which is what pointed at compilation rather than
-     * the texture fetch as the actual cost. Spacing the assignments one
-     * frame apart gives each fresh program its own render call to compile
-     * in, so no single frame ever carries more than one new shader compile.
+     * Cancels only the SCHEDULING of a build that has not started yet — never
+     * a build that already has, which is why disposal lives on
+     * `disposeCurrentRef` instead of here. A superseded invocation whose
+     * timers never fired has nothing on screen to tear down; what IS on
+     * screen belongs to whichever invocation last actually ran `runBuild`,
+     * and only the next successful `runBuild` (or true unmount, below) should
+     * dispose it.
      */
-    let cancelled = false;
-    let raf = 0;
-    function step(i: number) {
-      if (cancelled || i >= applySteps.length) return;
-      applySteps[i]();
-      raf = requestAnimationFrame(() => step(i + 1));
-    }
-    step(0);
-
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      // Put the originals back before disposing ours, so a remount never lands
-      // on a disposed program.
-      meshes.forEach((mesh, i) => {
-        if (previous[i]) mesh.material = previous[i];
-      });
-      disposable.forEach((m) => m.dispose());
-      materials.current = [];
+      debounceCancelled = true;
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
     };
-  }, [meshes, envMap, size.width, size.height, overrides, optics]);
+  }, [meshes, envMap, size.width, size.height, overrides, optics, diamondOptics]);
+
+  // Unmount only — every other teardown path runs through `disposeCurrentRef`
+  // itself, from the next build that supersedes this one.
+  useEffect(() => {
+    return () => {
+      disposeCurrentRef.current?.();
+      disposeCurrentRef.current = null;
+    };
+  }, []);
 
   // The shader reconstructs world rays itself, so it needs the camera each frame.
   useFrame(({ camera }) => {
     for (const material of materials.current) {
       material.viewMatrixInverse = camera.matrixWorld;
       material.projectionMatrixInverse = camera.projectionMatrixInverse;
+      const intensity = material.uniforms.uDiamondEnvIntensity;
+      if (intensity) intensity.value = envIntensityRef.current;
+      const rotation = material.uniforms.uDiamondEnvRotation;
+      if (rotation) rotation.value = (envRotationRef.current ?? 0) / (2 * Math.PI);
     }
   });
 

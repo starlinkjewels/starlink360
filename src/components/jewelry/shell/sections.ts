@@ -1,4 +1,6 @@
 import {
+  Aperture,
+  Axis3d,
   Bot,
   Camera,
   Clapperboard,
@@ -58,8 +60,31 @@ export const SECTIONS: SectionDef[] = [
    * with an outliner rather than with a better cursor.
    */
   { id: "objects", title: "Objects", hint: "Everything in the piece, by name", icon: ListTree },
+  /*
+   * Right after Objects: orientation and part transform both need a part
+   * selected first, the same dependency Prongs and Materials already have on
+   * this section — so it sits next to the thing it depends on.
+   */
+  {
+    id: "model",
+    title: "Model",
+    hint: "Orientation, and one part's scale or position",
+    icon: Axis3d,
+  },
   { id: "metal", title: "Metals", hint: "Metal for the whole piece or one part", icon: Palette },
   { id: "stones", title: "Stones", hint: "Select one stone or all, and set the gem", icon: Gem },
+  /*
+   * Separate from Stones on purpose: these are global shader/environment
+   * constants that apply to every diamond at once, not a per-stone override —
+   * folding them into Stones' per-part editor would conflate "which gem is
+   * this part" with "how does the refraction shader itself behave".
+   */
+  {
+    id: "diamond",
+    title: "Diamond Optics",
+    hint: "Global tuning for how every diamond is traced and lit",
+    icon: Aperture,
+  },
   { id: "textures", title: "Textures", hint: "Surface finish, per part", icon: Waves },
   /*
    * Stamping sits with the material sections rather than near export, because a

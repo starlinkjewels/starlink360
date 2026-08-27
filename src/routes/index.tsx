@@ -28,7 +28,13 @@ import {
   type Assignments,
   type Brush,
 } from "@/components/jewelry/assign";
-import type { ProngHeights } from "@/components/jewelry/prongs";
+import type { ProngScales } from "@/components/jewelry/prongs";
+import {
+  DEFAULT_MODEL_ORIENTATION,
+  type ModelOrientation,
+} from "@/components/jewelry/modelOrientation";
+import type { PartTransforms } from "@/components/jewelry/partTransform";
+import type { PartVisibility } from "@/components/jewelry/visibility";
 import { describeContext, type ChatAction } from "@/components/jewelry/chatProtocol";
 import {
   DEFAULT_STAMP,
@@ -57,6 +63,10 @@ import { isDefaultRig, resetLights, type LightDef } from "@/components/jewelry/l
 import { DEFAULT_SHADOWS, type ShadowSettings } from "@/components/jewelry/shadows";
 import { DEFAULT_GROUND, type GroundSettings } from "@/components/jewelry/ground";
 import { DEFAULT_POST, type PostSettings } from "@/components/jewelry/bloom";
+import {
+  DEFAULT_DIAMOND_OPTICS,
+  type DiamondOpticsSettings,
+} from "@/components/jewelry/diamondOptics";
 import { DEFAULT_EXPORT_OPTIONS, type ExportOptions } from "@/components/jewelry/exportOptions";
 import { animationById, objectMoveById } from "@/components/jewelry/animation";
 import {
@@ -80,6 +90,7 @@ import { LoadingOverlay } from "@/components/jewelry/LoadingOverlay";
 import { UploadPiece, type UploadStatus } from "@/components/jewelry/UploadPiece";
 import { downloadBlob } from "@/components/jewelry/studio";
 import { estimateDecodeMs, useSmoothProgress } from "@/hooks/useSmoothProgress";
+import { useStableRecord } from "@/hooks/useStableRecord";
 
 const Viewer = lazy(() => import("@/components/jewelry/Viewer"));
 
@@ -257,6 +268,7 @@ function Index() {
   const [ground, setGround] = useState<GroundSettings>(DEFAULT_GROUND);
   const [watermark, setWatermark] = useState<WatermarkSettings>(DEFAULT_WATERMARK);
   const [post, setPost] = useState<PostSettings>(DEFAULT_POST);
+  const [diamondOptics, setDiamondOptics] = useState<DiamondOpticsSettings>(DEFAULT_DIAMOND_OPTICS);
   /*
    * The live mark is sized from the stage, not the export, so what is on
    * screen is the same proportion of the picture that a download will be.
@@ -274,6 +286,22 @@ function Index() {
     return () => ro.disconnect();
   }, []);
   const [background, setBackground] = useState<Background>(DEFAULT_BACKGROUND);
+  /*
+   * Ground colour is not duplicated here — `ground.color` stays the only
+   * place that value lives. This just mirrors a Solid background colour onto
+   * it when the sync preference is on, wherever the change came from (a
+   * preset swatch or the custom picker both call `onBackground` the same
+   * way, so one place catches both).
+   */
+  const handleBackground = useCallback(
+    (next: Background) => {
+      setBackground(next);
+      if (next.syncGroundColor && next.kind === "solid") {
+        setGround((prev) => (prev.color === next.color ? prev : { ...prev, color: next.color }));
+      }
+    },
+    [setGround],
+  );
   const [stones, setStones] = useState<StoneGroup[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
   const [fit, setFit] = useState<Fit | null>(null);
@@ -311,6 +339,14 @@ function Index() {
    */
   /** Surface finish per part id, the same shape as the material assignments. */
   const [textures, setTextures] = useState<Textures>({});
+  /**
+   * Shared by the Metals and Textures sections: while on, applying a metal or
+   * a finish to one named part also applies it to every other part sharing
+   * that base name.
+   */
+  const [metalLinkNames, setMetalLinkNames] = useState(false);
+  /** Same idea, for Stones — independent of `metalLinkNames`. */
+  const [gemLinkNames, setGemLinkNames] = useState(false);
   /*
    * One brush, carrying which kind of part it paints.
    *
@@ -321,7 +357,11 @@ function Index() {
   const [brush, setBrush] = useState<Brush | null>(null);
 
   /** Height factor per prong solid id, the same shape as the material assignments. */
-  const [prongHeights, setProngHeights] = useState<ProngHeights>({});
+  const [prongScales, setProngScales] = useState<ProngScales>({});
+  const [modelOrientation, setModelOrientation] =
+    useState<ModelOrientation>(DEFAULT_MODEL_ORIENTATION);
+  const [partTransforms, setPartTransforms] = useState<PartTransforms>({});
+  const [partVisibility, setPartVisibility] = useState<PartVisibility>({});
 
   /*
    * Hallmarks, and the punch waiting to be struck.
@@ -381,14 +421,17 @@ function Index() {
        */
       if (brush.tool === "finish") {
         if (!brush.finish) return false;
-        setTextures((prev) => finishToPart(prev, partId, brush.finish, DEFAULT_TEXTURE));
+        setTextures((prev) =>
+          finishToPart(prev, partId, brush.finish, DEFAULT_TEXTURE, parts, metalLinkNames),
+        );
         return true;
       }
       if (brush.tool !== "material" || !brush.material) return false;
-      setAssignments((prev) => assignToPart(prev, partId, brush.material));
+      const linked = brush.kind === "metal" ? metalLinkNames : gemLinkNames;
+      setAssignments((prev) => assignToPart(prev, partId, brush.material, parts, linked));
       return true;
     },
-    [brush],
+    [brush, parts, metalLinkNames, gemLinkNames],
   );
 
   const handleStones = useCallback((groups: StoneGroup[]) => {
@@ -402,7 +445,13 @@ function Index() {
     setTextures({});
     // Same reasoning again — a solid id from the last piece names nothing on
     // this one, and its own geometry has never been touched.
-    setProngHeights({});
+    setProngScales({});
+    // Same reasoning again — orientation, part transform and visibility are
+    // all keyed by ids or express an adjustment that belongs to the piece
+    // just left, not to whatever loads next.
+    setModelOrientation(DEFAULT_MODEL_ORIENTATION);
+    setPartTransforms({});
+    setPartVisibility({});
     setStamps([]);
     resetStampIds();
     // A set pointing at the last piece's parts would select nothing at all.
@@ -422,7 +471,9 @@ function Index() {
     // asking, same as before.
     const detected = lastFitRef.current;
     const knownWidthMM =
-      detected?.detectedMMPerUnit !== undefined ? detected.detectedMMPerUnit * detected.width : null;
+      detected?.detectedMMPerUnit !== undefined
+        ? detected.detectedMMPerUnit * detected.width
+        : null;
     setDimensions({ ...DEFAULT_DIMENSIONS, knownWidthMM, autoDetected: knownWidthMM !== null });
   }, []);
 
@@ -433,7 +484,16 @@ function Index() {
    * know the library exists — Model takes colours and numbers, GemRefraction
    * takes IOR and aberration, and the catalogue stays in one place.
    */
-  const metalOverrides = useMemo(() => {
+  /*
+   * Stabilised below (`useStableRecord`) — each of these is a `useMemo` that
+   * legitimately recomputes to a brand new object on every `assignments`/
+   * `textures`/`stoneColors` change, including a reset to `{}` on every model
+   * load. `GemRefraction`/`Model` depend on the results by reference, so an
+   * "empty to equally-empty" transition — which every load produces — was
+   * enough to trigger a full stone-shader rebuild for no visible change. See
+   * `useStableRecord`'s own doc comment for the full story.
+   */
+  const metalOverridesRaw = useMemo(() => {
     const out: Record<
       string,
       { color: string; roughness: number; metalness: number; texture?: TextureAssignment }
@@ -452,30 +512,43 @@ function Index() {
       const base =
         out[partId] ??
         // A part with a finish but no chosen metal keeps the global one.
-        resolveMetal(metalById(finish.id) ?? { ...finish, group: "Gold", metalness: 1 });
+        resolveMetal(metalById(finish.id) ?? { ...finish, group: "Yellow Gold", metalness: 1 });
       out[partId] = { ...base, texture: t };
     }
     return out;
   }, [assignments, textures, finish]);
+  const metalOverrides = useStableRecord(metalOverridesRaw);
 
-  const gemOverrides = useMemo(() => {
+  const gemOverridesRaw = useMemo(() => {
     const out: Record<string, GemOptics> = {};
     for (const [partId, a] of Object.entries(assignments)) {
       const gem = gemById(a.material);
       if (gem) {
         const r = resolveGem(gem, a.patch);
-        out[partId] = { ior: r.ior, aberration: r.aberration, transmission: r.transmission };
+        out[partId] = {
+          ior: r.ior,
+          aberration: r.aberration,
+          transmission: r.transmission,
+          metalness: r.metalness,
+          roughness: r.roughness,
+          clearcoat: r.clearcoat,
+          clearcoatRoughness: r.clearcoatRoughness,
+          envMapIntensity: r.envMapIntensity,
+          reflectivity: r.reflectivity,
+          absorptionFactor: r.absorptionFactor,
+        };
       }
     }
     return out;
   }, [assignments]);
+  const gemOverrides = useStableRecord(gemOverridesRaw);
 
   /*
    * Stone colour has two sources: a gem chosen from the library, and the "any
    * other colour" picker. They write to one map with the picker last, so the
    * more specific choice wins and there is never a race between two states.
    */
-  const effectiveStoneColors = useMemo(() => {
+  const effectiveStoneColorsRaw = useMemo(() => {
     const out: Record<string, string> = {};
     for (const [partId, a] of Object.entries(assignments)) {
       const gem = gemById(a.material);
@@ -483,6 +556,7 @@ function Index() {
     }
     return { ...out, ...stoneColors };
   }, [assignments, stoneColors]);
+  const effectiveStoneColors = useStableRecord(effectiveStoneColorsRaw);
 
   /*
    * Leaving Select drops the selection.
@@ -863,7 +937,7 @@ function Index() {
           if (!/^#[0-9a-f]{6}$/i.test(action.hex)) {
             return { ok: false, note: "That didn't come through as a valid colour." };
           }
-          setBackground((prev) => ({ ...prev, kind: "solid", color: action.hex }));
+          handleBackground({ ...background, kind: "solid", color: action.hex });
           return { ok: true };
 
         case "toggleBestLook":
@@ -931,7 +1005,7 @@ function Index() {
           return { ok: false };
       }
     },
-    [parts, handleToggleShowcase, setTheme],
+    [parts, handleToggleShowcase, setTheme, background, handleBackground],
   );
 
   /*
@@ -1122,18 +1196,25 @@ function Index() {
       />
 
       <div className="app-body">
-        <main
-          ref={stageRef}
-          className="viewport"
-          /*
-           * The chosen backdrop, painted by CSS behind a transparent WebGL
-           * canvas. Nothing is added to the 3D scene, so it costs no frame time
-           * and never picks up the tone mapping meant for metal and stones.
-           * `null` means the default stage, whose look lives in the stylesheet.
-           */
-          style={stageBackground ? { background: stageBackground } : undefined}
-          onPointerDown={() => setShowHint(false)}
-        >
+        <main ref={stageRef} className="viewport" onPointerDown={() => setShowHint(false)}>
+          {/*
+            The chosen backdrop, painted by CSS on its own layer behind the
+            transparent WebGL canvas. Nothing is added to the 3D scene, so it
+            costs no frame time and never picks up the tone mapping meant for
+            metal and stones. A blur here cannot reach the canvas: this div has
+            no children, so the filter rasterises only what it paints itself.
+            `null` background means the default stage, whose look lives in the
+            stylesheet's `.viewport` rule instead.
+          */}
+          <div
+            className="stage-backdrop"
+            aria-hidden="true"
+            style={{
+              background: stageBackground ?? undefined,
+              filter: background.blur ? `blur(${background.blur}px)` : undefined,
+            }}
+          />
+
           {canUpload && showUpload && (
             /*
              * The ref is on the CARD, not on the backdrop. The backdrop now
@@ -1169,10 +1250,15 @@ function Index() {
                   shadows={shadows}
                   ground={ground}
                   post={post}
+                  background={background}
+                  diamondOptics={diamondOptics}
                   stoneColors={effectiveStoneColors}
                   metalOverrides={metalOverrides}
                   gemOverrides={gemOverrides}
-                  prongHeights={prongHeights}
+                  prongScales={prongScales}
+                  modelOrientation={modelOrientation}
+                  partTransforms={partTransforms}
+                  partVisibility={partVisibility}
                   onStones={handleStones}
                   onStoneTap={setSelectedStone}
                   onParts={setParts}
@@ -1381,8 +1467,10 @@ function Index() {
             onWatermark={setWatermark}
             post={post}
             onPost={setPost}
+            diamondOptics={diamondOptics}
+            onDiamondOptics={setDiamondOptics}
             background={background}
-            onBackground={setBackground}
+            onBackground={handleBackground}
             stones={stones}
             stoneColors={stoneColors}
             onStoneColor={handleStoneColor}
@@ -1391,10 +1479,20 @@ function Index() {
             onSelectParts={setSelected}
             assignments={assignments}
             onAssignments={setAssignments}
+            metalLinkNames={metalLinkNames}
+            onMetalLinkNames={setMetalLinkNames}
+            gemLinkNames={gemLinkNames}
+            onGemLinkNames={setGemLinkNames}
             armed={brush}
             onArm={setBrush}
-            prongHeights={prongHeights}
-            onProngHeights={setProngHeights}
+            prongScales={prongScales}
+            onProngScales={setProngScales}
+            modelOrientation={modelOrientation}
+            onModelOrientation={setModelOrientation}
+            partTransforms={partTransforms}
+            onPartTransforms={setPartTransforms}
+            partVisibility={partVisibility}
+            onPartVisibility={setPartVisibility}
             textures={textures}
             onTextures={setTextures}
             stamps={stamps}

@@ -27,16 +27,41 @@ import { parseId, solidId, solidRange, type Part } from "./selection";
  * picking turned out to be both simpler and reliably correct.
  */
 
-export type ProngHeights = Record<string, number>;
+/**
+ * A prong's scale along its own three axes: height (along its inferred long
+ * direction, anchored so the tip moves and the base does not — unchanged
+ * from the original single-axis control) and two perpendicular "width"
+ * directions (anchored at the solid's own centre, so it thickens or thins in
+ * place rather than drifting sideways).
+ *
+ * `x`/`y` are not a claim about the solid's own true secondary axes the way
+ * `h` is a claim about its long axis — a claw's cross-section rarely has a
+ * strong "second principal direction" the geometry itself picks out. They
+ * are instead world X and the direction perpendicular to both that and the
+ * height axis, which is the closest technically correct behaviour available
+ * without inventing a shape signal that is not reliably there: deterministic,
+ * reproducible across loads, and an honest "horizontal, along two
+ * perpendicular directions" rather than a specific claim about the prong's
+ * real cross-section.
+ */
+export interface ProngScale {
+  h: number;
+  x: number;
+  y: number;
+}
 
-/** Shorter than this looks collapsed; taller starts clipping through the crown. */
-export const PRONG_HEIGHT_MIN = 0.5;
-export const PRONG_HEIGHT_MAX = 1.6;
+export type ProngScales = Record<string, ProngScale>;
+
+export const IDENTITY_PRONG_SCALE: ProngScale = { h: 1, x: 1, y: 1 };
+
+/** Smaller looks collapsed or pinched; larger starts clipping through the crown or its neighbours. */
+export const PRONG_SCALE_MIN = 0.5;
+export const PRONG_SCALE_MAX = 1.6;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
-export function clampProngHeight(n: number): number {
-  return clamp(n, PRONG_HEIGHT_MIN, PRONG_HEIGHT_MAX);
+export function clampProngFactor(n: number): number {
+  return clamp(n, PRONG_SCALE_MIN, PRONG_SCALE_MAX);
 }
 
 interface SolidAxis {
@@ -49,15 +74,24 @@ interface SolidAxis {
   axis: THREE.Vector3;
   /** Where the anchored end projects onto that axis, in the geometry's BASE positions. */
   anchorT: number;
+  /** Two unit vectors perpendicular to `axis` (and to each other) — see the
+   *  `ProngScale` doc for why these are world-seeded rather than shape-derived. */
+  perpU: THREE.Vector3;
+  perpV: THREE.Vector3;
+  /** The solid's own centroid, projected onto `perpU`/`perpV` — width scale
+   *  is anchored here rather than at an edge, since there is no "base" end
+   *  to a thickness the way there is to a length. */
+  centerU: number;
+  centerV: number;
 }
 
 interface ProngGeometryCache {
   /** The pristine position buffer, snapshotted before the first deformation. */
   base: Float32Array;
   axes: Map<number, SolidAxis>;
-  /** The factor currently baked into `position`, per solid — lets a repeat
+  /** The factors currently baked into `position`, per solid — lets a repeat
    *  call skip any solid whose target hasn't changed. */
-  applied: Map<number, number>;
+  applied: Map<number, ProngScale>;
   groupCenter?: THREE.Vector3;
   /** The single largest solid's bounding diagonal in this group — computed
    *  once and reused by `isReasonablySized`, since it never changes. */
@@ -240,7 +274,8 @@ function principalAxis(base: Float32Array, vertices: Iterable<number>): THREE.Ve
   return new THREE.Vector3(vx, vy, vz);
 }
 
-/** The end of the solid's true long axis that sits closer to the piece's body. */
+/** The end of the solid's true long axis that sits closer to the piece's body,
+ *  plus a perpendicular width frame — see `SolidAxis` and `ProngScale`. */
 function axisOf(
   base: Float32Array,
   vertices: Iterable<number>,
@@ -249,14 +284,43 @@ function axisOf(
   const axis = principalAxis(base, vertices);
   let minT = Infinity;
   let maxT = -Infinity;
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  let n = 0;
   for (const vi of vertices) {
     const t = base[vi * 3] * axis.x + base[vi * 3 + 1] * axis.y + base[vi * 3 + 2] * axis.z;
     if (t < minT) minT = t;
     if (t > maxT) maxT = t;
+    cx += base[vi * 3];
+    cy += base[vi * 3 + 1];
+    cz += base[vi * 3 + 2];
+    n++;
   }
   const centerT = groupCenter.x * axis.x + groupCenter.y * axis.y + groupCenter.z * axis.z;
   const anchorT = Math.abs(minT - centerT) <= Math.abs(maxT - centerT) ? minT : maxT;
-  return { axis, anchorT };
+
+  /*
+   * World X, projected perpendicular to `axis` (Gram-Schmidt) — unless the
+   * long axis is itself close to world X, in which case that projection is
+   * unstable (near-zero length), so world Z is used instead. `perpV`
+   * completes a right-handed orthonormal frame with a cross product.
+   */
+  const seed = Math.abs(axis.x) > 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+  const perpU = seed.clone().addScaledVector(axis, -seed.dot(axis));
+  if (perpU.lengthSq() < 1e-10) perpU.set(0, 1, 0).addScaledVector(axis, -axis.y);
+  perpU.normalize();
+  const perpV = new THREE.Vector3().crossVectors(axis, perpU).normalize();
+
+  const centroid = new THREE.Vector3(cx / (n || 1), cy / (n || 1), cz / (n || 1));
+  return {
+    axis,
+    anchorT,
+    perpU,
+    perpV,
+    centerU: centroid.dot(perpU),
+    centerV: centroid.dot(perpV),
+  };
 }
 
 /**
@@ -340,17 +404,27 @@ function recomputeNormals(
  */
 const PRONG_BATCH_SIZE = 48;
 
+function sameScale(a: ProngScale, b: ProngScale): boolean {
+  return a.h === b.h && a.x === b.x && a.y === b.y;
+}
+
 /**
- * Applies whatever height factors are set, and puts every other solid back to
- * its original height — always computed fresh from the cached base positions,
+ * Applies whatever scale factors are set, and puts every other solid back to
+ * its original shape — always computed fresh from the cached base positions,
  * never compounded from the last frame, so repeated drags cannot drift and a
  * missing entry always means "unchanged."
+ *
+ * All three axes are computed from the SAME cached base position and summed,
+ * not applied one after another — so height, then width, then depth would
+ * each distort whatever the previous one already moved. Composing them from
+ * one untouched starting point is what keeps the three sliders independent
+ * of the order they were touched in.
  *
  * Touches at most `PRONG_BATCH_SIZE` outstanding solids and returns whether
  * any are still left, so a change spanning many solids spreads itself across
  * several calls instead of one large one — see the constant's comment.
  */
-export function applyProngHeights(part: Part, heights: ProngHeights): boolean {
+export function applyProngScales(part: Part, scales: ProngScales): boolean {
   if (part.kind !== "metal") return false;
   const solids = part.solids;
   if (!solids || solids.length < 2) return false;
@@ -368,9 +442,14 @@ export function applyProngHeights(part: Part, heights: ProngHeights): boolean {
   let remaining = false;
 
   for (let s = 0; s < count; s++) {
-    const factor = clampProngHeight(heights[solidId(part.id, s)] ?? 1);
-    const last = cache.applied.get(s) ?? 1;
-    if (factor === last) continue;
+    const raw = scales[solidId(part.id, s)] ?? IDENTITY_PRONG_SCALE;
+    const factor: ProngScale = {
+      h: clampProngFactor(raw.h),
+      x: clampProngFactor(raw.x),
+      y: clampProngFactor(raw.y),
+    };
+    const last = cache.applied.get(s) ?? IDENTITY_PRONG_SCALE;
+    if (sameScale(factor, last)) continue;
 
     if (done >= PRONG_BATCH_SIZE) {
       remaining = true;
@@ -387,14 +466,24 @@ export function applyProngHeights(part: Part, heights: ProngHeights): boolean {
       cache.axes.set(s, axis);
     }
 
-    const { axis: ax, anchorT } = axis;
+    const { axis: ax, anchorT, perpU, perpV, centerU, centerV } = axis;
     for (const vi of vertices) {
       const o = vi * 3;
-      const t = cache.base[o] * ax.x + cache.base[o + 1] * ax.y + cache.base[o + 2] * ax.z;
-      const scaledDelta = (t - anchorT) * (factor - 1);
-      position.array[o] = cache.base[o] + ax.x * scaledDelta;
-      position.array[o + 1] = cache.base[o + 1] + ax.y * scaledDelta;
-      position.array[o + 2] = cache.base[o + 2] + ax.z * scaledDelta;
+      const px = cache.base[o];
+      const py = cache.base[o + 1];
+      const pz = cache.base[o + 2];
+
+      const tAxis = px * ax.x + py * ax.y + pz * ax.z;
+      const tU = px * perpU.x + py * perpU.y + pz * perpU.z;
+      const tV = px * perpV.x + py * perpV.y + pz * perpV.z;
+
+      const deltaH = (tAxis - anchorT) * (factor.h - 1);
+      const deltaU = (tU - centerU) * (factor.x - 1);
+      const deltaV = (tV - centerV) * (factor.y - 1);
+
+      position.array[o] = px + ax.x * deltaH + perpU.x * deltaU + perpV.x * deltaV;
+      position.array[o + 1] = py + ax.y * deltaH + perpU.y * deltaU + perpV.y * deltaV;
+      position.array[o + 2] = pz + ax.z * deltaH + perpU.z * deltaU + perpV.z * deltaV;
     }
     recomputeNormals(geometry, range, vertices);
     cache.applied.set(s, factor);
@@ -439,32 +528,46 @@ export function describeProngTargets(parts: Part[], selected: ReadonlySet<string
   return `${ids.length} selected`;
 }
 
-/** The one height shown as active — only when every target agrees. */
-export function commonProngHeight(heights: ProngHeights, ids: string[]): number | null {
+/**
+ * The one value shown as active for a given axis — only when every target
+ * agrees. Linking several prongs and dragging one slider applies the SAME
+ * factor to every target (see `setProngFactor`), each scaled from its own
+ * cached base — so prongs a touch different in size to begin with stay that
+ * way relative to each other rather than being forced identical, which is
+ * what "linked, but allowing minor size differences" means in practice here.
+ */
+export function commonProngFactor(
+  scales: ProngScales,
+  ids: string[],
+  axis: keyof ProngScale,
+): number | null {
   if (!ids.length) return null;
-  const first = heights[ids[0]] ?? 1;
-  return ids.every((id) => (heights[id] ?? 1) === first) ? first : null;
+  const first = (scales[ids[0]] ?? IDENTITY_PRONG_SCALE)[axis];
+  return ids.every((id) => (scales[id] ?? IDENTITY_PRONG_SCALE)[axis] === first) ? first : null;
 }
 
-/** Sets the height on the given ids. A factor of 1 clears the entry, so "no
- *  override" stays the representation of "unchanged" rather than a stored 1. */
-export function setProngHeights(
-  heights: ProngHeights,
+/** Sets one axis on the given ids, leaving the others as they are. Dropping
+ *  back to the identity on all three clears the entry, so "no override"
+ *  stays the representation of "unchanged" rather than a stored `{1,1,1}`. */
+export function setProngFactor(
+  scales: ProngScales,
   ids: string[],
+  axis: keyof ProngScale,
   factor: number,
-): ProngHeights {
-  const next = { ...heights };
-  const clamped = clampProngHeight(factor);
+): ProngScales {
+  const next = { ...scales };
+  const clamped = clampProngFactor(factor);
   for (const id of ids) {
-    if (clamped === 1) delete next[id];
-    else next[id] = clamped;
+    const updated = { ...(next[id] ?? IDENTITY_PRONG_SCALE), [axis]: clamped };
+    if (sameScale(updated, IDENTITY_PRONG_SCALE)) delete next[id];
+    else next[id] = updated;
   }
   return next;
 }
 
-/** Drops any override on the given ids, returning them to their original height. */
-export function resetProngHeights(heights: ProngHeights, ids: string[]): ProngHeights {
-  const next = { ...heights };
+/** Drops any override on the given ids, returning them to their original shape. */
+export function resetProngScale(scales: ProngScales, ids: string[]): ProngScales {
+  const next = { ...scales };
   for (const id of ids) delete next[id];
   return next;
 }

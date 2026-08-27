@@ -10,7 +10,7 @@
  * control that cannot do anything.
  */
 // Aliased: `Brush` is the armed-brush state type in this codebase.
-import { Brush as BrushIcon, LayoutGrid, List, RotateCcw } from "lucide-react";
+import { Brush as BrushIcon, LayoutGrid, Link2, List, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   DEFAULT_TEXTURE,
@@ -21,7 +21,7 @@ import {
   type TextureChannels,
 } from "../textures";
 import { applyClick, type Part } from "../selection";
-import { describeTargets, targetIds, targetsEverything, type Brush } from "../assign";
+import { describeTargets, expandLinked, targetIds, targetsEverything, type Brush } from "../assign";
 import { NumberField } from "../ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "../ui/Panel";
 
@@ -63,6 +63,8 @@ export function TexturesPanel({
   onFallbackFinish,
   armed = null,
   onArm,
+  linkNames = false,
+  onLinkNames,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
@@ -78,6 +80,9 @@ export function TexturesPanel({
    */
   armed?: Brush | null;
   onArm?: (brush: Brush | null) => void;
+  /** Same "same name" link Materials offers, for a finish instead of a metal. */
+  linkNames?: boolean;
+  onLinkNames?: (next: boolean) => void;
 }) {
   const [layout, setLayout] = useState<"grid" | "list">("grid");
 
@@ -101,6 +106,8 @@ export function TexturesPanel({
     assigned.finish === "none" && whole ? { ...assigned, finish: fallbackFinish } : assigned;
   const ofKind = parts.filter((p) => p.kind === "metal");
 
+  const linkedIds = expandLinked(parts, ids, linkNames);
+
   const write = (patch: Partial<TextureAssignment>) => {
     /*
      * A finish meant for the WHOLE piece sets the global one rather than
@@ -115,12 +122,12 @@ export function TexturesPanel({
     ) {
       onFallbackFinish(patch.finish);
       const cleared = { ...textures };
-      for (const id of ids) delete cleared[id];
+      for (const id of linkedIds) delete cleared[id];
       onTextures(cleared);
       return;
     }
     const next = { ...textures };
-    for (const id of ids) next[id] = { ...(next[id] ?? DEFAULT_TEXTURE), ...patch };
+    for (const id of linkedIds) next[id] = { ...(next[id] ?? DEFAULT_TEXTURE), ...patch };
     onTextures(next);
   };
 
@@ -129,7 +136,7 @@ export function TexturesPanel({
 
   const reset = () => {
     const next = { ...textures };
-    for (const id of ids) delete next[id];
+    for (const id of linkedIds) delete next[id];
     onTextures(next);
   };
 
@@ -203,6 +210,23 @@ export function TexturesPanel({
           This piece has no metal, so there is nothing to texture. Stones are not offered here — a
           diamond is not hammered.
         </p>
+      )}
+
+      {onLinkNames && ofKind.length > 1 && (
+        <label
+          className="tex-toggle mb-2"
+          title="Applying a finish to one named part also applies it to every other part with the same name"
+        >
+          <input
+            type="checkbox"
+            checked={linkNames}
+            onChange={(e) => onLinkNames(e.target.checked)}
+          />
+          <span>
+            <Link2 className="size-3.5 inline-block mr-1 -mt-0.5" />
+            Link same names
+          </span>
+        </label>
       )}
 
       {/*

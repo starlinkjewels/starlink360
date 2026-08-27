@@ -490,8 +490,7 @@ export async function compressToJewelryScene(
    * correction, so this stays correct whichever axis a piece is rotated
    * about, unlike deriving it from any one edge of the box.
    */
-  const detectedMMPerUnit =
-    sourceUnitsAreMeters && sphere.radius > 0 ? sphere.radius * 1000 : null;
+  const detectedMMPerUnit = sourceUnitsAreMeters && sphere.radius > 0 ? sphere.radius * 1000 : null;
   const scale = 1 / (sphere.radius || 1);
   const normalise = new THREE.Matrix4()
     .makeScale(scale, scale, scale)
@@ -759,8 +758,23 @@ export async function loadJewelryFile(
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial());
     mesh.name = "metal";
     root = new THREE.Group().add(mesh);
+  } else if (ext === "fbx") {
+    /*
+     * FBX keeps object/node names and, like OBJ, no layer concept — so the
+     * same name-based classification the GLB/OBJ path uses is what separates
+     * stones from metal here too. `FBXLoader.parse` is synchronous and takes
+     * the raw buffer directly; the second argument is a resource path for
+     * resolving embedded texture references, which this in-memory upload has
+     * none of, so an empty string is correct rather than a stand-in for a
+     * real path.
+     */
+    onProgress?.({ phase: "Decoding model", percent: 30 });
+    const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
+    root = new FBXLoader().parse(buffer, "");
   } else {
-    throw new Error("Unsupported file. Please upload a .3dm, .glb, .gltf, .obj or .stl file.");
+    throw new Error(
+      "Unsupported file. Please upload a .3dm, .glb, .gltf, .obj, .stl or .fbx file.",
+    );
   }
 
   onProgress?.({ phase: "Sorting layers", percent: 70 });
@@ -771,12 +785,14 @@ export async function loadJewelryFile(
    * Say what the format could not carry, rather than letting it look like the
    * stones went missing. Only for the formats that genuinely cannot express it.
    */
-  if (ext === "stl" || ext === "obj") {
+  if (ext === "stl" || ext === "obj" || ext === "fbx") {
     const notices = (scene.userData.notices as string[] | undefined) ?? [];
     notices.push(
       ext === "stl"
         ? "STL files carry geometry only — no materials, names or layers — so the whole piece is shown as metal and no stones can be found. Upload a .3dm or .glb to separate them."
-        : "OBJ files carry no layers, and their materials live in a separate .mtl file. Parts were sorted by name where possible.",
+        : ext === "fbx"
+          ? "FBX files carry no layers, and embedded textures are not read from an uploaded file. Parts were sorted by name where possible."
+          : "OBJ files carry no layers, and their materials live in a separate .mtl file. Parts were sorted by name where possible.",
     );
     scene.userData.notices = notices;
   }

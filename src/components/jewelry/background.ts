@@ -6,13 +6,21 @@
  * a navy gradient on screen and downloads a black JPEG — which is exactly the
  * kind of thing that destroys trust in an export button.
  *
- * The WebGL canvas itself stays transparent. Painting the backdrop underneath
- * rather than into the 3D scene means it costs nothing per frame, never picks
- * up the tone mapping meant for metal and stones, and stays perfectly clean at
- * any export resolution instead of being resampled with the render.
+ * The WebGL canvas itself stays transparent for every kind below except
+ * "image3d". Painting the backdrop underneath rather than into the 3D scene
+ * means it costs nothing per frame, never picks up the tone mapping meant for
+ * metal and stones, and stays perfectly clean at any export resolution instead
+ * of being resampled with the render — which is why it is still the default
+ * for a flat image.
+ *
+ * "image3d" is the one exception on purpose: a real Three.js plane, textured
+ * with the same uploaded image, that sits behind the piece as an actual scene
+ * object rather than a screen-space layer — see `ImageBackdrop3D.tsx`. It
+ * shares this file's `image` field rather than a second copy of it; only how
+ * that image is rendered differs.
  */
 
-export type BackgroundKind = "stage" | "solid" | "gradient" | "image" | "transparent";
+export type BackgroundKind = "stage" | "solid" | "gradient" | "image" | "image3d" | "transparent";
 
 /** Where a linear gradient runs. Matches the CSS keywords one-for-one. */
 export type GradientDirection =
@@ -85,6 +93,21 @@ export interface Background {
   imageOpacity: number;
   /** Behind the piece, or over it. */
   imagePlacement?: ImagePlacement;
+  /**
+   * While on, setting a Solid background colour also writes it onto the
+   * ground — one click for a seamless "colour sweep" look. The ground keeps
+   * its own `color` field as the only place that value actually lives; this
+   * is a one-way write triggered by a background change, not a second copy
+   * of it, and the two stay independently editable the moment this is off.
+   */
+  syncGroundColor?: boolean;
+  /**
+   * Backdrop blur, in CSS pixels. Applied to the background layer only — it
+   * sits in the DOM behind the transparent WebGL canvas (see the file header),
+   * so blurring it can never soften the jewellery, which is drawn in a
+   * separate layer on top untouched.
+   */
+  blur?: number;
 }
 
 export const DEFAULT_BACKGROUND: Background = {
@@ -98,6 +121,8 @@ export const DEFAULT_BACKGROUND: Background = {
   image: null,
   imageOpacity: 1,
   imagePlacement: "back",
+  syncGroundColor: false,
+  blur: 0,
 };
 
 /**
@@ -199,6 +224,15 @@ export function backgroundCss(bg: Background): string | null {
     }
     case "image":
       return bg.image ? `#000 center / cover no-repeat url(${JSON.stringify(bg.image)})` : null;
+    case "image3d":
+      /*
+       * The CSS layer paints nothing here on purpose — the backdrop is a real
+       * plane in the Three.js scene instead (see `ImageBackdrop3D.tsx`). Falling
+       * through to `default` would show the dark stage gradient behind it
+       * instead of nothing, which would read as a border around the 3D plane
+       * on any frame where it does not exactly fill the view.
+       */
+      return "transparent";
     case "transparent":
       return "transparent";
     default:
@@ -294,7 +328,7 @@ const imageCache = new Map<string, HTMLImageElement | null>();
  * so the decode has to happen before the run starts.
  */
 export async function resolveBackground(bg: Background): Promise<ResolvedBackground> {
-  if (bg.kind !== "image" || !bg.image) return { ...bg, bitmap: null };
+  if ((bg.kind !== "image" && bg.kind !== "image3d") || !bg.image) return { ...bg, bitmap: null };
 
   const cached = imageCache.get(bg.image);
   if (cached !== undefined) return { ...bg, bitmap: cached };
@@ -365,6 +399,19 @@ export function paintBackground(
       return true;
     }
 
+    /*
+     * Exported as the flat cover-fit image, same as "image" — not the
+     * perspective-correct 3D plane the live view shows.
+     *
+     * The export pipeline is a 2D canvas painter with no camera or scene of
+     * its own, and re-deriving the plane's exact on-screen projection here
+     * would mean duplicating the 3D framing math into 2D canvas terms. That
+     * is real work belonging to the later Export phase, out of scope for this
+     * one; painting the flat image is an honest degradation — the export
+     * still shows the chosen picture, just without the depth/orbit framing —
+     * rather than a silent gap or a wrongly-composited frame.
+     */
+    case "image3d":
     case "image": {
       /*
        * A FRONT image is not a backdrop, so nothing is painted here — the piece

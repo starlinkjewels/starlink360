@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useEnvironment, useGLTF } from "@react-three/drei";
@@ -6,14 +6,25 @@ import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
 import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
 import { GemRefraction, type GemOptics } from "./GemRefraction";
-import { DEFAULT_LIGHTING, environmentById, getLightTent, type LightingSettings } from "./lighting";
+import {
+  DEFAULT_LIGHTING,
+  environmentById,
+  getDiamondStudioEnvironment,
+  getLightTent,
+  type LightingSettings,
+} from "./lighting";
+import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
+import { useDiamondSceneCapture } from "./diamondSceneCapture";
 import { collectStoneGroups, type StoneGroup } from "./stones";
 import { StampDecals } from "./StampDecals";
 import type { Stamp } from "./stamps";
 import { collectParts, ensurePart, ensureSolids, parseId, type Part } from "./selection";
 import { assignmentsFor, planRuns, runMaterials, runSlots, drawableCount } from "./plan";
-import { applyProngHeights, type ProngHeights } from "./prongs";
+import { applyProngScales, type ProngScales } from "./prongs";
 import { upAxisRotation, type CameraSettings } from "./camera";
+import { DEFAULT_MODEL_ORIENTATION, type ModelOrientation } from "./modelOrientation";
+import { applyPartTransform, type PartTransforms } from "./partTransform";
+import { isPartVisible, type PartVisibility } from "./visibility";
 import {
   DEFAULT_TEXTURE,
   ensureProjectedUVs,
@@ -34,7 +45,11 @@ const EMPTY_STAMPS: Stamp[] = [];
 
 /** Same reasoning as `EMPTY_STAMPS`: a fresh `{}` every render would re-run
  *  the prong effect for no reason. */
-const EMPTY_PRONG_HEIGHTS: ProngHeights = {};
+const EMPTY_PRONG_SCALES: ProngScales = {};
+/** Same reasoning again, for the part-transform effect. */
+const EMPTY_PART_TRANSFORMS: PartTransforms = {};
+/** Same reasoning again, for the visibility effect. */
+const EMPTY_PART_VISIBILITY: PartVisibility = {};
 
 /** What the camera needs to frame a piece. */
 export interface Fit {
@@ -87,8 +102,16 @@ interface DressedProps {
   >;
   /** Library optics resolved per stone group id, from the Materials panel. */
   gemOverrides?: Record<string, GemOptics>;
+  /** Global diamond shader tuning — see `diamondOptics.ts`. */
+  diamondOptics?: DiamondOpticsSettings;
   /** Height factor per prong solid id, from the Prongs panel. 1 is unchanged. */
-  prongHeights?: ProngHeights;
+  prongScales?: ProngScales;
+  /** A live, user-adjustable rotation on top of the file's own up-axis fix. */
+  modelOrientation?: ModelOrientation;
+  /** Per-part scale/offset, from the Model panel. Whole parts only. */
+  partTransforms?: PartTransforms;
+  /** Which parts are hidden, from the Objects panel. Absent means visible. */
+  partVisibility?: PartVisibility;
   /** Reports the selectable stone groups once the piece is built. */
   onStones?: (groups: StoneGroup[]) => void;
   /** Reports every selectable part — metal and stone alike. */
@@ -117,7 +140,11 @@ export function DressedScene({
   stoneColors,
   metalOverrides,
   gemOverrides,
-  prongHeights = EMPTY_PRONG_HEIGHTS,
+  diamondOptics = DEFAULT_DIAMOND_OPTICS,
+  prongScales = EMPTY_PRONG_SCALES,
+  modelOrientation = DEFAULT_MODEL_ORIENTATION,
+  partTransforms = EMPTY_PART_TRANSFORMS,
+  partVisibility = EMPTY_PART_VISIBILITY,
   onStones,
   onParts,
   stamps,
@@ -125,7 +152,7 @@ export function DressedScene({
   selectedStampId = null,
   ownsScene = false,
 }: DressedProps) {
-  const { object, owned, stones } = useMemo(() => {
+  const { object, oriented, owned, stones } = useMemo(() => {
     const root = scene.clone(true);
     // Geometry we allocated here, and must therefore dispose. Anything reused
     // from the caller (the useGLTF cache, or an uploaded scene) is not ours to
@@ -241,18 +268,33 @@ export function DressedScene({
     const center = box.getCenter(new THREE.Vector3());
     root.position.sub(center);
 
-    const wrapper = new THREE.Group();
-    wrapper.add(root);
-    // Applied to the inner root so the wrapper stays free for the spin, and set
-    // before the fit below measures the rotated bounding box.
+    // Applied to the inner root so nothing outside it needs to know the file's
+    // up-axis convention, and set before the fit below measures the rotated
+    // bounding box.
     root.rotation.set(...upAxisRotation(camera?.upAxis ?? "y"));
+
+    /*
+     * A dedicated middle group for the live model-orientation control, between
+     * the up-axis fix (baked once into `root`, above) and the turntable spin
+     * (applied to `wrapper`, below). Three separate transform nodes for three
+     * separate concerns that each need to change independently: the up-axis
+     * fix never changes after load, the spin resets to identity whenever it is
+     * switched off, and the orientation control is a live, persistent user
+     * setting that must survive both of those without being overwritten by
+     * either.
+     */
+    const oriented = new THREE.Group();
+    oriented.add(root);
+
+    const wrapper = new THREE.Group();
+    wrapper.add(oriented);
     // Carried onto the wrapper — the fit effect below only has `object`, not
     // `root` — so a real, file-derived scale (see loadJewelryFile.ts) reaches
     // Model Dimensions without anyone having to guess a width by hand.
     if (typeof root.userData.detectedMMPerUnit === "number") {
       wrapper.userData.detectedMMPerUnit = root.userData.detectedMMPerUnit;
     }
-    return { object: wrapper, owned, stones };
+    return { object: wrapper, oriented, owned, stones };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, camera?.rawGeometry, camera?.upAxis]);
 
@@ -265,6 +307,23 @@ export function DressedScene({
   // edges and the pendant itself off-screen. Fit the product; let the user
   // pinch or scroll in on a stone if they want to.
   useEffect(() => {
+    /*
+     * The live rotation, set here rather than baked into the `useMemo` above.
+     *
+     * That memo only reruns when the scene itself changes (a new file, a raw-
+     * geometry toggle, a different up-axis) — rebuilding faceting and every
+     * material on each rotation-slider tick would be enormously wasteful for
+     * a transform that touches nothing but a `Group`'s own matrix. Set on the
+     * wrapper, never the inner `root`, so it composes with the up-axis fix
+     * (baked into `root`) rather than fighting it — turning the model further
+     * must never undo the correction that made it upright in the first place.
+     */
+    oriented.rotation.set(
+      THREE.MathUtils.degToRad(modelOrientation.rotationX),
+      THREE.MathUtils.degToRad(modelOrientation.rotationY),
+      THREE.MathUtils.degToRad(modelOrientation.rotationZ),
+    );
+
     const box = new THREE.Box3().setFromObject(object);
     const radius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
     const size = box.getSize(new THREE.Vector3());
@@ -274,8 +333,7 @@ export function DressedScene({
     // portrait phone that difference is what keeps the piece from looking tiny.
     const halfX = Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
     const halfZ = Math.max(Math.abs(box.min.z), Math.abs(box.max.z));
-    const detectedMMPerUnit = (object.userData as { detectedMMPerUnit?: number })
-      .detectedMMPerUnit;
+    const detectedMMPerUnit = (object.userData as { detectedMMPerUnit?: number }).detectedMMPerUnit;
     onFit({
       radius,
       radiusXZ: Math.hypot(halfX, halfZ) || radius,
@@ -285,7 +343,14 @@ export function DressedScene({
       depth: size.z,
       ...(detectedMMPerUnit !== undefined && { detectedMMPerUnit }),
     });
-  }, [object, onFit]);
+  }, [
+    object,
+    oriented,
+    onFit,
+    modelOrientation.rotationX,
+    modelOrientation.rotationY,
+    modelOrientation.rotationZ,
+  ]);
 
   /*
    * Publish the selectable stone groups.
@@ -334,6 +399,24 @@ export function DressedScene({
    * identified by what it is, from `userData.part`, with the sniff kept only
    * for GLB and fallback scenes that carry no part tags.
    */
+  /*
+   * Bumped whenever the metal pass below actually replaces materials, so the
+   * dynamic-reflection capture knows to re-capture.
+   *
+   * `useDiamondSceneCapture`'s stand-in meshes share `mesh.material` with the
+   * live scene BY REFERENCE, captured once when the capture runs — see that
+   * file's own doc comment. That is fine for a colour/roughness tweak, which
+   * mutates the existing material in place, but the metal pass below instead
+   * builds brand new `MeshPhysicalMaterial`s and reassigns `mesh.material`
+   * (needed for draw-range splitting on a per-solid recolour), then disposes
+   * the previous ones on its own next run. A stand-in never told about that
+   * would go on reflecting a material that is about to be disposed — wrong
+   * pixels at best, a disposed-resource GPU error at worst. This is state,
+   * not a ref, precisely so `DressedScene`'s render sees it change and hands
+   * the capture hook a reason to re-run.
+   */
+  const [materialsGeneration, setMaterialsGeneration] = useState(0);
+
   useEffect(() => {
     // Materials this pass created, so the previous set can be freed. Anything
     // the scene build put on a mesh is not ours to dispose.
@@ -422,6 +505,8 @@ export function DressedScene({
       }
     });
 
+    setMaterialsGeneration((g) => g + 1);
+
     return () => {
       // Freed on the next pass rather than left to pile up — this effect runs
       // again on every swatch click.
@@ -437,7 +522,7 @@ export function DressedScene({
    * changing on different occasions (a colour click vs. a height drag) would
    * otherwise make each pay for the other's re-run.
    *
-   * Spread over frames rather than done in one pass: `applyProngHeights`
+   * Spread over frames rather than done in one pass: `applyProngScales`
    * only touches a bounded batch per call and says whether any are left, so
    * "Select all prongs" on a dense pavé face — hundreds of solids moving at
    * once — cannot land as a single oversized synchronous update.
@@ -451,7 +536,7 @@ export function DressedScene({
       if (cancelled) return;
       let more = false;
       for (const part of metalParts) {
-        if (applyProngHeights(part, prongHeights)) more = true;
+        if (applyProngScales(part, prongScales)) more = true;
       }
       if (more) frame = requestAnimationFrame(step);
     };
@@ -461,7 +546,24 @@ export function DressedScene({
       cancelled = true;
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [object, prongHeights]);
+  }, [object, prongScales]);
+
+  /*
+   * Part scale/offset, applied straight to each part's own mesh transform —
+   * cheap (a `position`/`scale` set, not a vertex rewrite) so unlike prong
+   * height this needs no staggering across frames.
+   */
+  useEffect(() => {
+    for (const part of collectParts(object)) applyPartTransform(part, partTransforms);
+  }, [object, partTransforms]);
+
+  /** Part visibility — a plain `visible` flag, so a hidden part still exists
+   *  for selection, materials and export sizing; it just doesn't draw. */
+  useEffect(() => {
+    for (const part of collectParts(object)) {
+      part.mesh.visible = isPartVisible(partVisibility, part.id);
+    }
+  }, [object, partVisibility]);
 
   useEffect(() => {
     return () => {
@@ -500,7 +602,17 @@ export function DressedScene({
       ? { files: activeFile }
       : { preset: (gemChoice.preset ?? metalEnv.preset ?? "warehouse") as "warehouse" },
   );
-  const envMap = gemChoice.id === "tent" ? getLightTent() : presetMap;
+  const diamondStudioMap = getDiamondStudioEnvironment(gemChoice.id);
+  const staticEnvMap = gemChoice.id === "tent" ? getLightTent() : (diamondStudioMap ?? presetMap);
+
+  const dynamicEnvMap = useDiamondSceneCapture({
+    object,
+    stones,
+    backdrop: staticEnvMap,
+    enabled: lighting.diamondDynamicReflections,
+    materialsGeneration,
+  });
+  const envMap = dynamicEnvMap ?? staticEnvMap;
 
   return (
     <>
@@ -510,6 +622,9 @@ export function DressedScene({
         optics={gemOverrides}
         meshes={stones}
         envMap={envMap}
+        diamondOptics={diamondOptics}
+        envIntensity={lighting.diamondEnvironmentIntensity}
+        envRotation={lighting.diamondEnvironmentRotation}
       />
       {/*
         Struck into the dressed scene, so a hallmark rides the piece through the
@@ -530,7 +645,11 @@ export function GLBModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
-  prongHeights,
+  diamondOptics,
+  prongScales,
+  modelOrientation,
+  partTransforms,
+  partVisibility,
   onStones,
   onParts,
   stamps,
@@ -545,7 +664,11 @@ export function GLBModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
-  prongHeights?: ProngHeights;
+  diamondOptics?: DressedProps["diamondOptics"];
+  prongScales?: ProngScales;
+  modelOrientation?: DressedProps["modelOrientation"];
+  partTransforms?: DressedProps["partTransforms"];
+  partVisibility?: DressedProps["partVisibility"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -566,7 +689,11 @@ export function GLBModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
-      prongHeights={prongHeights}
+      diamondOptics={diamondOptics}
+      prongScales={prongScales}
+      modelOrientation={modelOrientation}
+      partTransforms={partTransforms}
+      partVisibility={partVisibility}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}
@@ -584,7 +711,11 @@ export function FallbackModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
-  prongHeights,
+  diamondOptics,
+  prongScales,
+  modelOrientation,
+  partTransforms,
+  partVisibility,
   onStones,
   onParts,
   stamps,
@@ -598,7 +729,11 @@ export function FallbackModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
-  prongHeights?: ProngHeights;
+  diamondOptics?: DressedProps["diamondOptics"];
+  prongScales?: ProngScales;
+  modelOrientation?: DressedProps["modelOrientation"];
+  partTransforms?: DressedProps["partTransforms"];
+  partVisibility?: DressedProps["partVisibility"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -616,7 +751,11 @@ export function FallbackModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
-      prongHeights={prongHeights}
+      diamondOptics={diamondOptics}
+      prongScales={prongScales}
+      modelOrientation={modelOrientation}
+      partTransforms={partTransforms}
+      partVisibility={partVisibility}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}
@@ -636,7 +775,11 @@ export function ObjectModel({
   stoneColors,
   metalOverrides,
   gemOverrides,
-  prongHeights,
+  diamondOptics,
+  prongScales,
+  modelOrientation,
+  partTransforms,
+  partVisibility,
   onStones,
   onParts,
   stamps,
@@ -651,7 +794,11 @@ export function ObjectModel({
   stoneColors?: Record<string, string>;
   metalOverrides?: DressedProps["metalOverrides"];
   gemOverrides?: DressedProps["gemOverrides"];
-  prongHeights?: ProngHeights;
+  diamondOptics?: DressedProps["diamondOptics"];
+  prongScales?: ProngScales;
+  modelOrientation?: DressedProps["modelOrientation"];
+  partTransforms?: DressedProps["partTransforms"];
+  partVisibility?: DressedProps["partVisibility"];
   onStones?: (groups: StoneGroup[]) => void;
   onParts?: (parts: Part[]) => void;
   stamps?: Stamp[];
@@ -668,7 +815,11 @@ export function ObjectModel({
       stoneColors={stoneColors}
       metalOverrides={metalOverrides}
       gemOverrides={gemOverrides}
-      prongHeights={prongHeights}
+      diamondOptics={diamondOptics}
+      prongScales={prongScales}
+      modelOrientation={modelOrientation}
+      partTransforms={partTransforms}
+      partVisibility={partVisibility}
       onStones={onStones}
       onParts={onParts}
       stamps={stamps}

@@ -59,24 +59,29 @@ const withHighlights = (patch) => ({
 });
 
 /*
- * Bloom is the exception, and deliberately so. On a jewellery viewer the halo
- * around a stone is not an effect to opt into, it is what makes the stone read
- * as a stone — a client compared the old flat dots against a competitor and
- * called them an obvious render. Everything else still costs nothing until it
- * is asked for.
+ * Bloom was the deliberate exception to "everything costs nothing until it's
+ * asked for" — until Phase 18 measured what it actually cost. Once the
+ * diamond's own optics carried real facet contrast, even bloom's lowest
+ * safe strength/radius still softened that contrast on a controlled A/B, for
+ * no benefit the reference showed any sign of wanting. Off by default now;
+ * Highlight Recovery and Film stay on, since the same A/B showed neither of
+ * them responsible for any of that softening.
  */
-console.log("=== bloom is on, the rest is off ===");
-check(DEFAULT_BLOOM.enabled, "bloom is on, because sparkle is the product");
+console.log("=== bloom is off, so is the rest but for its own reasons ===");
+check(
+  !DEFAULT_BLOOM.enabled,
+  "bloom is off — measured to cost facet contrast for no matching benefit",
+);
 check(
   DEFAULT_BLOOM.threshold > 0.9,
-  "and kept honest by a high threshold, so metal does not glow",
+  "and kept honest by a high threshold if it's ever turned back on, so metal does not glow",
   `${DEFAULT_BLOOM.threshold}`,
 );
 check(!DEFAULT_DOF.enabled, "depth of field is off");
 check(!DEFAULT_SSR.enabled, "SSR is off");
 check(
   usesComposer(DEFAULT_POST),
-  "so a composer is built, which is what puts bloom on screen at all",
+  "a composer is still built — Highlight Recovery and Film are on even with bloom off",
 );
 check(
   DEFAULT_BLOOM.resolutionX === 0 && DEFAULT_BLOOM.resolutionY === 0,
@@ -215,11 +220,13 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
 
   /*
    * Baked in at construction. Changing any of these in place silently does
-   * nothing, which is the failure that looks like a broken control.
+   * nothing, which is the failure that looks like a broken control. Bloom is
+   * off in `base` now, so this toggles it ON rather than off — either
+   * direction proves the same thing, that flipping `enabled` changes the key.
    */
   check(
-    composerKey(base) !== composerKey(withBloom({ enabled: false })),
-    "turning an effect off changes which passes exist",
+    composerKey(base) !== composerKey(withBloom({ enabled: true })),
+    "turning an effect on changes which passes exist",
   );
   check(
     composerKey(withBloom({ enabled: true })) !==
@@ -264,10 +271,11 @@ console.log("\n=== the warnings are honest about the cost ===");
   );
 
   /*
-   * Bloom is turned off here on purpose. With it on — the default now — depth
-   * of field is the second full-screen pass and the warning that matters is
-   * the one about frame rate, which is checked above. The focus advice is what
-   * a person sees when depth of field is the only pass they have added.
+   * Bloom is turned off here on purpose, matching its own default now. With
+   * bloom on, depth of field is the second full-screen pass and the warning
+   * that matters is the one about frame rate, which is checked below. The
+   * focus advice is what a person sees when depth of field is the only pass
+   * they have added.
    */
   const dof = postWarning({
     ...withDof({ enabled: true }),

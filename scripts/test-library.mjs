@@ -41,7 +41,7 @@ const check = (ok, label, detail) => {
 
 console.log("=== the catalogue is well formed ===");
 check(METALS.length === 18, "18 metals", `${METALS.length}`);
-check(GEMS.length === 24, "24 gems", `${GEMS.length}`);
+check(GEMS.length === 29, "29 gems", `${GEMS.length}`);
 
 const allIds = [...METALS, ...GEMS].map((m) => m.id);
 check(new Set(allIds).size === allIds.length, "no duplicate ids across both catalogues");
@@ -108,14 +108,18 @@ check(
 );
 
 console.log("\n=== dispersion maps to the shader's aberration ===");
-// Diamond is the anchor: its look is already signed off at 0.035.
+// Diamond is the anchor. Lowered from 0.035 to 0.015 for the premium diamond
+// render pass, then to 0.005 and finally 0.002 in Phase 18 — see
+// DIAMOND_ABERRATION in library.ts — each time because the previous value
+// still read as more colour than the market reference shows on a mostly-white
+// brilliant.
 check(
-  Math.abs(aberrationFor(0.044) - 0.035) < 1e-9,
+  Math.abs(aberrationFor(0.044) - 0.002) < 1e-9,
   "diamond lands exactly on the value it has always rendered at",
   `${aberrationFor(0.044)}`,
 );
 check(aberrationFor(0.104) > aberrationFor(0.044), "more dispersion, more aberration");
-check(aberrationFor(0) >= 0.008, "a zero-dispersion stone still has a floor, not dead glass");
+check(aberrationFor(0) >= 0.0015, "a zero-dispersion stone still has a floor, not dead glass");
 check(aberrationFor(5) <= 0.09, "an absurd value is clamped rather than tearing the shader");
 
 console.log("\n=== patches layer over the catalogue ===");

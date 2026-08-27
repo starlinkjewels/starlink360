@@ -7,7 +7,7 @@
  * changing one expecting the other is the commonest confusion in the panel.
  */
 import { useMemo, useState } from "react";
-import { RotateCcw, Trash2, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, RotateCcw, Trash2, Plus, X } from "lucide-react";
 import {
   DEFAULT_BACKGROUND,
   GRADIENT_DIRECTIONS,
@@ -192,6 +192,7 @@ export function EnvironmentPanel({
   onUploadImage?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("hdri");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const bg = background;
 
   return (
@@ -266,11 +267,51 @@ export function EnvironmentPanel({
             <span>Separate Gem Env</span>
           </label>
           {lighting.separateGemEnvironment ? (
-            <EnvGrid
-              value={lighting.gemEnvironment}
-              onChange={(id) => onLighting({ ...lighting, gemEnvironment: id })}
-              ariaLabel="Gem environment"
-            />
+            <>
+              <EnvGrid
+                value={lighting.gemEnvironment}
+                onChange={(id) => onLighting({ ...lighting, gemEnvironment: id })}
+                ariaLabel="Gem environment"
+              />
+
+              <p className="field-label mt-3">Diamond Environment</p>
+              <NumberField
+                label="Rotation"
+                value={Math.round((lighting.diamondEnvironmentRotation * 180) / Math.PI)}
+                min={0}
+                max={360}
+                step={1}
+                suffix="°"
+                hint="Turns the diamond's own environment, independent of the room — this is what moves which facets flash as the piece turns."
+                onChange={(v) =>
+                  onLighting({ ...lighting, diamondEnvironmentRotation: (v * Math.PI) / 180 })
+                }
+              />
+              <NumberField
+                label="Intensity"
+                value={lighting.diamondEnvironmentIntensity}
+                min={0.5}
+                max={3}
+                step={0.05}
+                precision={2}
+                hint="Multiplies the diamond environment only. Brighter isn't automatically better — facet contrast comes from the environment's own pattern, not from this."
+                onChange={(v) => onLighting({ ...lighting, diamondEnvironmentIntensity: v })}
+              />
+              <label className="tex-toggle mt-2">
+                <input
+                  type="checkbox"
+                  checked={lighting.diamondDynamicReflections}
+                  onChange={(e) =>
+                    onLighting({ ...lighting, diamondDynamicReflections: e.target.checked })
+                  }
+                />
+                <span>Reflect the piece</span>
+              </label>
+              <p className="field-hint">
+                Lets stones also reflect the actual metal and any other stone nearby, on top of the
+                studio backdrop above — off falls back to the pure backdrop, which is cheaper.
+              </p>
+            </>
           ) : (
             <>
               <p className="field-hint">
@@ -302,7 +343,10 @@ export function EnvironmentPanel({
           <label className="field">
             <span className="field-label">Type</span>
             <Select
-              value={bg.kind}
+              // "3D image texture" is a checkbox inside Image below, the same
+              // way i3D shows it — not a fourth type here, so it reads as the
+              // Image type either way.
+              value={bg.kind === "image3d" ? "image" : bg.kind}
               options={[
                 { value: "stage", label: "Atelier (default)", hint: "The viewer's own dark stage" },
                 { value: "solid", label: "Solid", hint: "One flat colour" },
@@ -347,6 +391,18 @@ export function EnvironmentPanel({
                   onChange={(e) => onBackground({ ...bg, color: e.target.value })}
                   aria-label="Background colour"
                 />
+              </label>
+
+              <label
+                className="tex-toggle mt-2"
+                title="Also sets the ground to this colour, and keeps it matching as you change it"
+              >
+                <input
+                  type="checkbox"
+                  checked={bg.syncGroundColor ?? false}
+                  onChange={(e) => onBackground({ ...bg, syncGroundColor: e.target.checked })}
+                />
+                <span>Sync ground colour</span>
               </label>
             </>
           )}
@@ -426,7 +482,7 @@ export function EnvironmentPanel({
             </>
           )}
 
-          {bg.kind === "image" && (
+          {(bg.kind === "image" || bg.kind === "image3d") && (
             <>
               <div className="mat-grid" role="radiogroup" aria-label="Backdrop">
                 {IMAGE_PRESETS.map((p) => {
@@ -454,46 +510,121 @@ export function EnvironmentPanel({
                 })}
               </div>
 
-              {onUploadImage && (
-                <button className="chip mt-2" onClick={onUploadImage}>
-                  Use my own image
-                </button>
-              )}
+              <div className="model-row mt-2">
+                {onUploadImage && (
+                  <button className="chip" onClick={onUploadImage}>
+                    Use my own image
+                  </button>
+                )}
+                {bg.image && (
+                  <button
+                    className="chip"
+                    onClick={() => onBackground({ ...bg, kind: "solid", image: null })}
+                    title="Clears the image and returns to a solid colour"
+                  >
+                    <X className="size-3" />
+                    Remove image
+                  </button>
+                )}
+              </div>
 
-              <label className="field mt-2">
-                <span className="field-label">Placement</span>
-                <Select
-                  value={bg.imagePlacement ?? "back"}
-                  options={[
-                    { value: "back", label: "Back", hint: "A backdrop behind the piece" },
-                    { value: "front", label: "Front", hint: "A prop over the piece" },
-                  ]}
-                  onChange={(v) => onBackground({ ...bg, imagePlacement: v as "back" | "front" })}
-                  ariaLabel="Image placement"
+              <label
+                className="tex-toggle mt-2"
+                title="Places the image as a real object behind the piece instead of a flat backdrop — it gains real depth and perspective as the camera orbits, at the cost of the Placement and Opacity controls below, which only apply to the flat version"
+              >
+                <input
+                  type="checkbox"
+                  checked={bg.kind === "image3d"}
+                  onChange={(e) =>
+                    onBackground({ ...bg, kind: e.target.checked ? "image3d" : "image" })
+                  }
                 />
-                <span className="field-hint">
-                  Front draws the image over the jewellery — a gauze or a lit edge shot through.
-                </span>
+                <span>3D image texture</span>
               </label>
 
-              <NumberField
-                label="Opacity"
-                value={bg.imageOpacity}
-                min={0}
-                max={1}
-                step={0.01}
-                precision={2}
-                onChange={(v) => onBackground({ ...bg, imageOpacity: v })}
-              />
+              {bg.kind === "image" && (
+                <>
+                  <label className="field mt-2">
+                    <span className="field-label">Placement</span>
+                    <Select
+                      value={bg.imagePlacement ?? "back"}
+                      options={[
+                        { value: "back", label: "Back", hint: "A backdrop behind the piece" },
+                        { value: "front", label: "Front", hint: "A prop over the piece" },
+                      ]}
+                      onChange={(v) =>
+                        onBackground({ ...bg, imagePlacement: v as "back" | "front" })
+                      }
+                      ariaLabel="Image placement"
+                    />
+                    <span className="field-hint">
+                      Front draws the image over the jewellery — a gauze or a lit edge shot through.
+                    </span>
+                  </label>
+
+                  <NumberField
+                    label="Opacity"
+                    value={bg.imageOpacity}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    precision={2}
+                    onChange={(v) => onBackground({ ...bg, imageOpacity: v })}
+                  />
+                </>
+              )}
+
+              {bg.kind === "image3d" && (
+                <p className="field-hint mt-2">
+                  A real object in the scene, not a flat layer — it has depth, so it moves with
+                  perspective as you orbit instead of staying pinned to the screen.
+                </p>
+              )}
             </>
           )}
 
-          {/* What the stage is actually showing, at a glance. */}
+          {/*
+            What the stage is actually showing, at a glance. `backgroundCss`
+            deliberately returns "transparent" for image3d — that is the
+            correct instruction for the LIVE CSS layer, which must stay empty
+            behind the real 3D plane — but would make this swatch show nothing
+            useful, so it reads the image directly here instead.
+          */}
           <div
             className="bg-preview mt-3"
-            style={{ background: backgroundCss(bg) ?? "var(--hover-tint)" }}
+            style={{
+              background:
+                bg.kind === "image3d" && bg.image
+                  ? `#000 center / cover no-repeat url(${JSON.stringify(bg.image)})`
+                  : (backgroundCss(bg) ?? "var(--hover-tint)"),
+            }}
             aria-hidden="true"
           />
+
+          <button
+            className="field-label mt-3 flex items-center gap-1"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            aria-expanded={advancedOpen}
+          >
+            {advancedOpen ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+            Advanced
+          </button>
+          {advancedOpen && (
+            <NumberField
+              label="Blur"
+              value={bg.blur ?? 0}
+              min={0}
+              max={24}
+              step={1}
+              suffix="px"
+              hint="Softens the backdrop only — a depth-of-field look. The piece itself is drawn on its own layer and stays sharp."
+              onChange={(v) => onBackground({ ...bg, blur: v })}
+            />
+          )}
 
           <PanelReset
             onReset={() => onBackground({ ...DEFAULT_BACKGROUND })}

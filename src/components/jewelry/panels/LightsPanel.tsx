@@ -20,12 +20,15 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import {
+  LIGHT_RIGS,
   addLight,
+  applyLightRig,
   deleteLight,
   describeLights,
   duplicateLight,
   fieldsFor,
   isDefaultRig,
+  matchingRig,
   resetLights,
   setCaster,
   updateLight,
@@ -75,9 +78,30 @@ export function LightsPanel({
   canCast: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const activeRig = matchingRig(lights);
 
   return (
     <>
+      {/*
+        Whole-rig starting points, above the per-light editor rather than
+        replacing it — pick a look, then fine-tune exactly as before. Only
+        highlighted when the rig still matches one exactly, the same rule
+        Reset uses, so this cannot claim a look survived hand-editing it.
+      */}
+      <div className="model-row mb-2" role="radiogroup" aria-label="Scene lighting">
+        {LIGHT_RIGS.map((rig) => (
+          <button
+            key={rig.id}
+            className={`chip ${activeRig === rig.id ? "chip-active" : ""}`}
+            aria-pressed={activeRig === rig.id}
+            title={rig.hint}
+            onClick={() => onLights(applyLightRig(rig.id))}
+          >
+            {rig.label}
+          </button>
+        ))}
+      </div>
+
       <div className="mat-scope">
         <span className="mat-scope-text">
           <strong>{describeLights(lights)}</strong>

@@ -25,7 +25,7 @@ import type { MaterialPatch } from "./library";
  * extensionless specifier; TypeScript maps ".js" back to the ".ts" source and
  * Vite is equally happy, so one spelling satisfies all three.
  */
-import { parseId, solidCount, type Part, type PartKind } from "./selection.js";
+import { linkedPartIds, parseId, solidCount, type Part, type PartKind } from "./selection.js";
 
 export interface Assignment {
   /** Library material id. */
@@ -57,6 +57,22 @@ export function targetIds(parts: Part[], selected: ReadonlySet<string>, kind: Pa
   return picked.length ? picked : ofKind.map((p) => p.id);
 }
 
+/**
+ * Widens a target list to every part sharing a base name, when linking is on.
+ *
+ * `linkedPartIds` only resolves a whole-part (group) id — a solid id is not in
+ * `parts` at all, so it is handed back unchanged. That is exactly the right
+ * behaviour here too: linking two parts named "Prong" is a real thing a
+ * jeweller means; linking two solids that happen to share a name is not a
+ * concept that exists, since solids do not have names of their own.
+ */
+export function expandLinked(parts: Part[], ids: string[], linked: boolean): string[] {
+  if (!linked) return ids;
+  const out = new Set<string>();
+  for (const id of ids) for (const l of linkedPartIds(parts, id)) out.add(l);
+  return [...out];
+}
+
 /** True when the action will land on the whole piece rather than a selection. */
 export function targetsEverything(
   parts: Part[],
@@ -74,9 +90,10 @@ export function applyMaterial(
   selected: ReadonlySet<string>,
   kind: PartKind,
   materialId: string,
+  linked = false,
 ): Assignments {
   const next = { ...current };
-  for (const id of targetIds(parts, selected, kind)) {
+  for (const id of expandLinked(parts, targetIds(parts, selected, kind), linked)) {
     // A new material discards the old patch. Carrying it over would silently
     // apply ruby's hand-tuned IOR to an emerald and look like a bug in the
     // catalogue rather than a leftover edit.
@@ -98,9 +115,10 @@ export function patchMaterial(
   kind: PartKind,
   patch: MaterialPatch,
   fallbackMaterial: string,
+  linked = false,
 ): Assignments {
   const next = { ...current };
-  for (const id of targetIds(parts, selected, kind)) {
+  for (const id of expandLinked(parts, targetIds(parts, selected, kind), linked)) {
     const existing = next[id];
     next[id] = {
       material: existing?.material ?? fallbackMaterial,
@@ -117,13 +135,22 @@ export function patchMaterial(
  * the piece one at a time. Selecting first and applying second is two steps for
  * every stone, and setting a halo one stone at a time is exactly the job where
  * that becomes tiring. Here the click IS the apply.
+ *
+ * `parts`/`linked` let one click also paint every part sharing that part's
+ * base name — the same "Link same names" choice the panel offers for a
+ * selected-and-applied change, kept true for the paint gesture too rather
+ * than only working for one of the two ways to apply a material.
  */
 export function assignToPart(
   current: Assignments,
   partId: string,
   materialId: string,
+  parts: Part[] = [],
+  linked = false,
 ): Assignments {
-  return { ...current, [partId]: { material: materialId } };
+  const next = { ...current };
+  for (const id of expandLinked(parts, [partId], linked)) next[id] = { material: materialId };
+  return next;
 }
 
 /**
@@ -168,8 +195,14 @@ export function finishToPart<T extends { finish: string }>(
   partId: string,
   finish: string,
   fallback: T,
+  parts: Part[] = [],
+  linked = false,
 ): Record<string, T> {
-  return { ...current, [partId]: { ...(current[partId] ?? fallback), finish } };
+  const next = { ...current };
+  for (const id of expandLinked(parts, [partId], linked)) {
+    next[id] = { ...(next[id] ?? fallback), finish };
+  }
+  return next;
 }
 
 /**
@@ -192,9 +225,10 @@ export function clearMaterial(
   parts: Part[],
   selected: ReadonlySet<string>,
   kind: PartKind,
+  linked = false,
 ): Assignments {
   const next = { ...current };
-  for (const id of targetIds(parts, selected, kind)) delete next[id];
+  for (const id of expandLinked(parts, targetIds(parts, selected, kind), linked)) delete next[id];
   return next;
 }
 

@@ -29,20 +29,18 @@ check(mmPerUnit(50, 5) === 10, "known width over model width gives mm per unit")
 check(mmPerUnit(50, 0) === null, "a zero-width piece cannot be calibrated, not a divide by zero");
 check(mmPerUnit(50, -1) === null, "nor a negative one");
 
-console.log("\n=== the default is a guess, not a blank ===");
+console.log("\n=== the default is honest, not a guess ===");
 {
-  // A panel showing dashes until someone finds a calibration field reads as
-  // broken. The default is a plausible starting figure, not null — real
-  // uncalibrated (null) is still reachable, just no longer the first thing
-  // anyone sees.
+  // A made-up starting width would silently scale every mm figure and the
+  // carat weight to match it, reading as a real measurement even though it
+  // isn't — see the file header on dimensions.ts. So the default ships
+  // uncalibrated, and the panel is expected to say so rather than show a
+  // fabricated number.
+  check(DEFAULT_DIMENSIONS.knownWidthMM === null, "ships uncalibrated, not a fabricated width");
+  check(!DEFAULT_DIMENSIONS.autoDetected, "and not flagged as auto-detected either");
   check(
-    DEFAULT_DIMENSIONS.knownWidthMM !== null && DEFAULT_DIMENSIONS.knownWidthMM > 0,
-    "ships with a real starting width, so figures show immediately",
-    `${DEFAULT_DIMENSIONS.knownWidthMM}`,
-  );
-  check(
-    DEFAULT_DIMENSIONS.showOnCanvas && DEFAULT_DIMENSIONS.showTable,
-    "both visualisations start on",
+    !DEFAULT_DIMENSIONS.showOnCanvas && !DEFAULT_DIMENSIONS.showTable,
+    "both visualisations start off, until someone asks for them",
   );
 }
 

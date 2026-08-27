@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 // Aliased: `Stamp` is the hallmark type in this codebase.
 import {
+  Aperture,
+  Axis3d,
   Bot,
   Camera,
   ChevronDown,
@@ -35,6 +37,7 @@ import type { Assignments, Brush } from "./assign";
 import { NumberField } from "./ui/NumberField";
 import { PanelGroup, PanelIntro, PanelReset } from "./ui/Panel";
 import { MaterialsPanel } from "./panels/MaterialsPanel";
+import { MetalHDRPanel } from "./panels/MetalHDRPanel";
 import { TexturesPanel, type Textures } from "./panels/TexturesPanel";
 import { StampsPanel, type StampDraft } from "./panels/StampsPanel";
 import { ObjectsPanel } from "./panels/ObjectsPanel";
@@ -47,7 +50,11 @@ import { DEFAULT_DIMENSIONS, type DimensionSettings } from "./dimensions";
 import type { Fit } from "./Model";
 import { AIChat } from "./AIChat";
 import type { ChatAction } from "./chatProtocol";
-import type { ProngHeights } from "./prongs";
+import type { ProngScales } from "./prongs";
+import { DEFAULT_MODEL_ORIENTATION, type ModelOrientation } from "./modelOrientation";
+import type { PartTransforms } from "./partTransform";
+import type { PartVisibility } from "./visibility";
+import { ModelPanel } from "./panels/ModelPanel";
 import { LightsPanel } from "./panels/LightsPanel";
 import { ShadowsPanel } from "./panels/ShadowsPanel";
 import { EnvironmentPanel } from "./panels/EnvironmentPanel";
@@ -67,6 +74,8 @@ import { DEFAULT_LIGHTS, casterOf, describeLights, type LightDef } from "./light
 import { DEFAULT_SHADOWS, type ShadowSettings } from "./shadows";
 import { SURFACE_FINISHES } from "./textures";
 import { DEFAULT_POST, type PostSettings } from "./bloom";
+import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
+import { DiamondPanel } from "./panels/DiamondPanel";
 import { DEFAULT_CAMERA, isPinned, type CameraSettings } from "./camera";
 import { DEFAULT_LIGHTING, ENVIRONMENTS, type LightingSettings } from "./lighting";
 import { DEFAULT_WATERMARK, WATERMARK_PLACEMENTS, type WatermarkSettings } from "./watermark";
@@ -332,6 +341,9 @@ export interface StudioPanelProps {
   /** Bloom, depth of field and screen-space reflections. */
   post?: PostSettings;
   onPost?: (p: PostSettings) => void;
+  /** Global diamond shader tuning — bounces, fresnel, trace quality. */
+  diamondOptics?: DiamondOpticsSettings;
+  onDiamondOptics?: (d: DiamondOpticsSettings) => void;
   onCamera?: (c: CameraSettings) => void;
   /** The scene backdrop, shown live and baked into every export. */
   background: Background;
@@ -350,12 +362,32 @@ export interface StudioPanelProps {
   /** Materials chosen per part id. */
   assignments?: Assignments;
   onAssignments?: (next: Assignments) => void;
+  /**
+   * Shared by Metals and Textures: while on, applying either to one named
+   * metal part also applies it to every other part sharing that base name.
+   */
+  metalLinkNames?: boolean;
+  onMetalLinkNames?: (next: boolean) => void;
+  /** Same idea, for Stones — kept separate from `metalLinkNames` since
+   *  linking a shank's prongs is an independent decision from linking a
+   *  pave's side stones. */
+  gemLinkNames?: boolean;
+  onGemLinkNames?: (next: boolean) => void;
   /** The brush, and how to load it. Null means not painting. */
   armed?: Brush | null;
   onArm?: (brush: Brush | null) => void;
   /** Height factor per prong solid id. 1 is unchanged. */
-  prongHeights?: ProngHeights;
-  onProngHeights?: (next: ProngHeights) => void;
+  prongScales?: ProngScales;
+  onProngScales?: (next: ProngScales) => void;
+  /** A live rotation on the whole piece, on top of the file's own up-axis fix. */
+  modelOrientation?: ModelOrientation;
+  onModelOrientation?: (next: ModelOrientation) => void;
+  /** Scale/offset on one selected whole part. */
+  partTransforms?: PartTransforms;
+  onPartTransforms?: (next: PartTransforms) => void;
+  /** Which parts are hidden. Absent means visible. */
+  partVisibility?: PartVisibility;
+  onPartVisibility?: (next: PartVisibility) => void;
   /** Hallmarks struck into the metal, and the punch waiting to be struck. */
   stamps: Stamp[];
   onStamps?: (next: Stamp[]) => void;
@@ -432,6 +464,8 @@ export function StudioPanel({
   onWatermark,
   post = DEFAULT_POST,
   onPost,
+  diamondOptics = DEFAULT_DIAMOND_OPTICS,
+  onDiamondOptics,
   background,
   onBackground,
   stones = [],
@@ -446,10 +480,20 @@ export function StudioPanel({
   onSelectParts,
   assignments = {},
   onAssignments,
+  metalLinkNames = false,
+  onMetalLinkNames,
+  gemLinkNames = false,
+  onGemLinkNames,
   armed = null,
   onArm,
-  prongHeights = {},
-  onProngHeights,
+  prongScales = {},
+  onProngScales,
+  modelOrientation = DEFAULT_MODEL_ORIENTATION,
+  onModelOrientation,
+  partTransforms = {},
+  onPartTransforms,
+  partVisibility = {},
+  onPartVisibility,
   stamps,
   onStamps,
   groups = [],
@@ -1298,7 +1342,14 @@ export function StudioPanel({
              */
             const reader = new FileReader();
             reader.onload = () =>
-              onBackground({ ...background, kind: "image", image: String(reader.result) });
+              onBackground({
+                ...background,
+                // Replacing the picture while already in either image mode
+                // stays in that mode — only a first upload from something
+                // else (Solid, Gradient...) lands on the flat CSS default.
+                kind: background.kind === "image3d" ? "image3d" : "image",
+                image: String(reader.result),
+              });
             reader.readAsDataURL(file);
             e.target.value = "";
           }}
@@ -1343,6 +1394,34 @@ export function StudioPanel({
           onSelect={onSelectParts ?? (() => {})}
           groups={groups}
           onGroups={onGroups}
+          visibility={partVisibility}
+          onVisibility={onPartVisibility}
+        />
+      </Section>
+
+      {/* ── Model ──────────────────────────────────────────────────
+          Orientation and part transform: the piece's own placement, not a
+          render parameter — see ModelPanel.tsx. */}
+      <Section
+        icon={<Axis3d className="size-4" />}
+        title="Model"
+        subtitle={
+          modelOrientation.rotationX || modelOrientation.rotationY || modelOrientation.rotationZ
+            ? "Rotated"
+            : Object.keys(partTransforms).length
+              ? `${Object.keys(partTransforms).length} part adjusted`
+              : "Unchanged"
+        }
+        open={open === "model"}
+        onToggle={() => toggle("model")}
+      >
+        <ModelPanel
+          orientation={modelOrientation}
+          onOrientation={onModelOrientation ?? (() => {})}
+          parts={parts}
+          selected={selectedParts}
+          transforms={partTransforms}
+          onTransforms={onPartTransforms ?? (() => {})}
         />
       </Section>
 
@@ -1353,6 +1432,27 @@ export function StudioPanel({
         open={open === "metal"}
         onToggle={() => toggle("metal")}
       >
+        <MetalHDRPanel
+          parts={parts}
+          selected={selectedParts}
+          assignments={assignments}
+          onAssignments={onAssignments ?? (() => {})}
+          textures={textures}
+          onTextures={onTextures ?? (() => {})}
+          fallbackMetal={finish.id}
+          fallbackFinish={finish.surface ?? "none"}
+          // One atomic update for both halves — see the prop's own doc for
+          // why two separate calls built from the same `finish` closure
+          // would silently drop one of them.
+          onWholePiecePreset={(metalId, finishId) =>
+            onSelectFinish({
+              ...(finishById(metalId) ?? finish),
+              surface: finishId === "none" ? undefined : finishId,
+            })
+          }
+          linkNames={metalLinkNames}
+        />
+
         <MaterialsPanel
           tab="metals"
           fallbackMetal={finish.id}
@@ -1366,6 +1466,8 @@ export function StudioPanel({
           onSelect={onSelectParts}
           armed={armed}
           onArm={onArm}
+          linkNames={metalLinkNames}
+          onLinkNames={onMetalLinkNames}
         />
       </Section>
 
@@ -1386,6 +1488,24 @@ export function StudioPanel({
           onSelect={onSelectParts}
           armed={armed}
           onArm={onArm}
+          linkNames={gemLinkNames}
+          onLinkNames={onGemLinkNames}
+          stoneColors={stoneColors}
+          onStoneColor={onStoneColor}
+        />
+      </Section>
+
+      {/* ── 1b2. Diamond Optics ────────────────────────────────────── */}
+      <Section
+        icon={<Aperture className="size-4" />}
+        title="Diamond Optics"
+        subtitle={`${diamondOptics.bounces} bounces · fresnel ${diamondOptics.fresnelScale.toFixed(2)}`}
+        open={open === "diamond"}
+        onToggle={() => toggle("diamond")}
+      >
+        <DiamondPanel
+          diamondOptics={diamondOptics}
+          onDiamondOptics={(next) => onDiamondOptics?.(next)}
         />
       </Section>
       {/* ── 1c. Textures ────────────────────────────────────────────
@@ -1422,6 +1542,8 @@ export function StudioPanel({
           onFallbackFinish={(id) =>
             onSelectFinish({ ...finish, surface: id === "none" ? undefined : id })
           }
+          linkNames={metalLinkNames}
+          onLinkNames={onMetalLinkNames}
         />
       </Section>
       {/* ── 1d. Stamping ────────────────────────────────────────────
@@ -1458,7 +1580,7 @@ export function StudioPanel({
         icon={<MoveVertical className="size-4" />}
         title="Prongs"
         subtitle={
-          Object.keys(prongHeights).length ? `${Object.keys(prongHeights).length} adjusted` : "None"
+          Object.keys(prongScales).length ? `${Object.keys(prongScales).length} adjusted` : "None"
         }
         open={open === "prongs"}
         onToggle={() => toggle("prongs")}
@@ -1466,8 +1588,8 @@ export function StudioPanel({
         <ProngsPanel
           parts={parts}
           selected={selectedParts}
-          prongHeights={prongHeights}
-          onProngHeights={onProngHeights ?? (() => {})}
+          prongScales={prongScales}
+          onProngScales={onProngScales ?? (() => {})}
           onSelect={onSelectParts}
           armed={armed}
           onArm={onArm}

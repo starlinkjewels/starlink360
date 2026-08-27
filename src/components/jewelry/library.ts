@@ -13,7 +13,16 @@
  * does on a bench — 0.104 against 0.044.
  */
 
-export type MetalGroup = "Gold" | "White" | "Silver" | "Speciality";
+/*
+ * Split the way a jeweller's own picker is split — Yellow, White and Rose as
+ * three separate families a client chooses between, not one "Gold" bucket
+ * that happens to contain all three. Platinum gets its own group rather than
+ * folding into White: it is a different metal, not a colour of gold, and a
+ * buyer choosing "Platinum" is making a different decision than one choosing
+ * "White Gold" even though the two can render similarly pale.
+ */
+export type MetalGroup =
+  "Yellow Gold" | "Rose Gold" | "White Gold" | "Platinum" | "Silver" | "Speciality";
 
 export interface MetalMaterial {
   id: string;
@@ -53,7 +62,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "gold-24k",
     name: "24k Yellow Gold",
-    group: "Gold",
+    group: "Yellow Gold",
     color: "#ffd75e",
     roughness: 0.02,
     metalness: 1,
@@ -61,7 +70,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "gold-22k",
     name: "22k Yellow Gold",
-    group: "Gold",
+    group: "Yellow Gold",
     color: "#fcd070",
     roughness: 0.02,
     metalness: 1,
@@ -69,7 +78,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "gold-18k",
     name: "18k Yellow Gold",
-    group: "Gold",
+    group: "Yellow Gold",
     color: "#f2cf76",
     roughness: 0.02,
     metalness: 1,
@@ -77,7 +86,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "gold-14k",
     name: "14k Yellow Gold",
-    group: "Gold",
+    group: "Yellow Gold",
     color: "#eed08d",
     roughness: 0.02,
     metalness: 1,
@@ -85,7 +94,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "gold-9k",
     name: "9k Yellow Gold",
-    group: "Gold",
+    group: "Yellow Gold",
     color: "#e6d2a6",
     roughness: 0.02,
     metalness: 1,
@@ -93,7 +102,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "rose-18k",
     name: "18k Rose Gold",
-    group: "Gold",
+    group: "Rose Gold",
     color: "#f0b79c",
     roughness: 0.02,
     metalness: 1,
@@ -101,7 +110,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "rose-14k",
     name: "14k Rose Gold",
-    group: "Gold",
+    group: "Rose Gold",
     color: "#eebda8",
     roughness: 0.02,
     metalness: 1,
@@ -109,7 +118,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "red-18k",
     name: "18k Red Gold",
-    group: "Gold",
+    group: "Rose Gold",
     color: "#e79c7d",
     roughness: 0.02,
     metalness: 1,
@@ -117,7 +126,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "green-18k",
     name: "18k Green Gold",
-    group: "Gold",
+    group: "Speciality",
     color: "#dcd694",
     roughness: 0.02,
     metalness: 1,
@@ -126,7 +135,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "white-18k",
     name: "18k White Gold",
-    group: "White",
+    group: "White Gold",
     color: "#ecebe6",
     roughness: 0.02,
     metalness: 1,
@@ -134,7 +143,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "white-14k",
     name: "14k White Gold",
-    group: "White",
+    group: "White Gold",
     color: "#e8e6df",
     roughness: 0.02,
     metalness: 1,
@@ -142,7 +151,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "platinum-950",
     name: "Platinum 950",
-    group: "White",
+    group: "Platinum",
     color: "#dadbe0",
     roughness: 0.02,
     metalness: 1,
@@ -150,7 +159,7 @@ export const METALS: MetalMaterial[] = [
   {
     id: "palladium-950",
     name: "Palladium 950",
-    group: "White",
+    group: "Platinum",
     color: "#d3d4d6",
     roughness: 0.02,
     metalness: 1,
@@ -201,7 +210,8 @@ export const METALS: MetalMaterial[] = [
   },
 ];
 
-export type GemGroup = "Colourless" | "Red & Pink" | "Blue" | "Green" | "Warm" | "Purple" | "Dark";
+export type GemGroup =
+  "Colourless" | "Red & Pink" | "Blue" | "Green" | "Warm" | "Purple" | "Dark" | "Pearl";
 
 export interface GemMaterial {
   id: string;
@@ -209,19 +219,39 @@ export interface GemMaterial {
   group: GemGroup;
   /** Body colour. Absorption deepens it with path length at render time. */
   color: string;
-  /** Refractive index. Diamond 2.417, quartz 1.55. */
+  /** Refractive index. Diamond 2.417, quartz 1.55. Nacre (pearl) 1.53. */
   ior: number;
   /**
    * Dispersion — the published B-G interval. This is "fire": how far red and
    * blue separate on the way through. Moissanite's 0.104 against diamond's
-   * 0.044 is why it throws visibly more colour.
+   * 0.044 is why it throws visibly more colour. Zero for a pearl: nacre does
+   * not throw fire, its optics are entirely surface lustre.
    */
   dispersion: number;
   /** Opaque stones are lit rather than traced; nothing passes through onyx. */
   opaque?: boolean;
+  /*
+   * ── Opaque-only appearance ───────────────────────────────────────────────
+   * Read solely by GemRefraction's `transmission < 0.5` branch. Undefined
+   * means "use that branch's own hardcoded default", which is exactly the
+   * onyx/black-diamond values it always used — so adding these fields changes
+   * nothing for a gem that does not set them. Pearl is the one catalogue
+   * entry that does, because a pearl's whole appearance IS this branch: it is
+   * never traced, its colour comes from a lustrous coated surface.
+   */
+  /** Luster, in `MeshPhysicalMaterial` terms. A pearl is not a metal, but a
+   *  nacre coating catches an environment the same way a satin metal does. */
+  metalness?: number;
+  roughness?: number;
+  /** Shine — the coating's own clearcoat. */
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  /** Dielectric reflectance at normal incidence. Three's own default is 0.5. */
+  reflectivity?: number;
 }
 
-/** Twenty-four stones, with their real optics. */
+/** Twenty-nine stones, with their real optics — twenty-four traced gems plus five pearl colours. */
 export const GEMS: GemMaterial[] = [
   {
     id: "diamond",
@@ -401,6 +431,86 @@ export const GEMS: GemMaterial[] = [
     dispersion: 0.013,
     opaque: true,
   },
+
+  /*
+   * Five pearl colours, matching i3D's own reference set — a jeweller's usual
+   * spread from Akoya white through to Tahitian black. Luster/Roughness/
+   * Clearcoat below are i3D's own observed defaults for the family (0.85,
+   * 0.10, 1.00); Environment Intensity is kept closer to this renderer's own
+   * tuned onyx default (1.6) rather than i3D's 3.5, since that number was
+   * read off a different tone-mapping pipeline — the custom editor's own
+   * range still reaches 3.5 for anyone who wants that punchier look.
+   */
+  {
+    id: "pearl-white",
+    name: "White Pearl",
+    group: "Pearl",
+    color: "#f5f1e6",
+    ior: 1.53,
+    dispersion: 0,
+    opaque: true,
+    metalness: 0.85,
+    roughness: 0.1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.8,
+  },
+  {
+    id: "pearl-cream",
+    name: "Cream Pearl",
+    group: "Pearl",
+    color: "#ece0c4",
+    ior: 1.53,
+    dispersion: 0,
+    opaque: true,
+    metalness: 0.85,
+    roughness: 0.1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.8,
+  },
+  {
+    id: "pearl-pink",
+    name: "Pink Pearl",
+    group: "Pearl",
+    color: "#eccfd2",
+    ior: 1.53,
+    dispersion: 0,
+    opaque: true,
+    metalness: 0.85,
+    roughness: 0.1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.8,
+  },
+  {
+    id: "pearl-grey",
+    name: "Grey Pearl",
+    group: "Pearl",
+    color: "#9a9a9e",
+    ior: 1.53,
+    dispersion: 0,
+    opaque: true,
+    metalness: 0.85,
+    roughness: 0.1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.8,
+  },
+  {
+    id: "pearl-black",
+    name: "Black Pearl (Tahitian)",
+    group: "Pearl",
+    color: "#2e2e33",
+    ior: 1.53,
+    dispersion: 0,
+    opaque: true,
+    metalness: 0.85,
+    roughness: 0.1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.8,
+  },
 ];
 
 /**
@@ -425,6 +535,31 @@ export interface MaterialPatch {
    * of "make it look like a real photograph" rather than "make it a fantasy."
    */
   aberration?: number;
+  /**
+   * Pearl (opaque gems) only — see `GemMaterial`. Shine, the coating's own
+   * clearcoat, and how strongly the environment shows in it.
+   */
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  /**
+   * Transparent gems: overrides the diamond-wide Fresnel scale
+   * (`diamondOptics.fresnelScale`) for this one gem, using the exact same
+   * `gemFresnel` formula and the exact same shader uniform — see
+   * `GemRefraction.tsx`. Opaque gems (Pearl/onyx): `MeshPhysicalMaterial`'s
+   * own reflectance. Same field name, two different — but each already
+   * real and connected — renderer properties, chosen by which branch a gem
+   * currently renders through.
+   */
+  reflectivity?: number;
+  /**
+   * Gems only, transparent stones. Scales the path length `gemAbsorption.ts`
+   * measures against, without touching that file: a factor above 1 shortens
+   * the reference length so the same physical path reaches a higher
+   * exponent sooner — more saturated, faster. 1 leaves the geometry-derived
+   * default exactly as it always was.
+   */
+  absorptionFactor?: number;
 }
 
 export const METAL_BY_ID = new Map(METALS.map((m) => [m.id, m]));
@@ -460,20 +595,33 @@ function groupBy<T, K extends string>(items: T[], key: (t: T) => K): { group: K;
 
 /*
  * Dispersion is a physical constant; the shader's aberration is a look control.
- * Diamond is the anchor — its 0.044 has always rendered at 0.035 here and that
- * is the image everyone has already signed off — so every other stone is scaled
- * against it rather than tuned by eye.
+ * Diamond is the anchor, so every other stone is scaled against it rather than
+ * tuned by eye. Lowered three times now, each time against a real market
+ * reference render rather than by eye alone: 0.035 read as an artificial
+ * rainbow effect; 0.015 still threw visible pink/green fringe across many
+ * facets once the gold wash that had been partly masking it was fixed; 0.005
+ * was closer but still showed a visible multicolour sprinkle spread across
+ * many small facets once bounces (see `diamondOptics.ts`) was separately
+ * lowered and the facets themselves got larger and easier to read
+ * individually. 0.002 removes that sprinkle down to the faint cool/blue tint
+ * the reference itself shows in one or two facets, without going fully
+ * colourless — true zero was tested and rejected, since the reference is not
+ * actually colourless, only restrained.
+ * Exported so `GemRefraction`'s untraced fallback stays anchored to the same
+ * number instead of carrying its own copy that can drift out of sync.
  */
 const DIAMOND_DISPERSION = 0.044;
-const DIAMOND_ABERRATION = 0.035;
+export const DIAMOND_ABERRATION = 0.002;
 
 /**
  * Floor keeps a low-dispersion stone from going glassy-dead; the ceiling
  * stops moissanite's real 0.104 from tearing into rainbow fringing. This is a
  * property of the shader at any input, not just of a catalogue lookup, so a
  * hand-set Fire patch is clamped to the same range rather than a wider one.
+ * Moved down twice in step with `DIAMOND_ABERRATION` so it never clamps the
+ * diamond's own default back up.
  */
-const ABERRATION_FLOOR = 0.008;
+const ABERRATION_FLOOR = 0.0015;
 const ABERRATION_CEILING = 0.09;
 
 export function aberrationFor(dispersion: number): number {
@@ -489,7 +637,19 @@ export function clamp(n: number, lo: number, hi: number): number {
 export function resolveGem(
   gem: GemMaterial,
   patch?: MaterialPatch,
-): { color: string; ior: number; aberration: number; transmission: number } {
+): {
+  color: string;
+  ior: number;
+  aberration: number;
+  transmission: number;
+  metalness?: number;
+  roughness?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  envMapIntensity?: number;
+  reflectivity?: number;
+  absorptionFactor: number;
+} {
   return {
     color: patch?.color ?? gem.color,
     // An opaque stone starts solid; anything else starts fully transmissive.
@@ -502,8 +662,41 @@ export function resolveGem(
       patch?.aberration !== undefined
         ? clamp(patch.aberration, ABERRATION_FLOOR, ABERRATION_CEILING)
         : aberrationFor(gem.dispersion),
+    // Opaque-only appearance, undefined unless the catalogue entry or a patch
+    // actually sets one — see `GemMaterial` for why that has to stay true.
+    metalness: patch?.metalness ?? gem.metalness,
+    roughness: patch?.roughness ?? gem.roughness,
+    clearcoat: patch?.clearcoat ?? gem.clearcoat,
+    clearcoatRoughness: patch?.clearcoatRoughness ?? gem.clearcoatRoughness,
+    envMapIntensity: patch?.envMapIntensity ?? gem.envMapIntensity,
+    reflectivity: patch?.reflectivity ?? gem.reflectivity,
+    // 1 is "unchanged" rather than undefined, unlike the opaque-only fields
+    // above: every transparent gem already has a real path length to scale,
+    // so there is no "not applicable" case to preserve by leaving it unset.
+    absorptionFactor: clamp(patch?.absorptionFactor ?? 1, 0.1, 10),
   };
 }
+
+/**
+ * Eleven quick colours, matching i3D's own flat swatch row — a fast recolour
+ * that does not require first picking a catalogue gem. Deliberately a
+ * separate, simpler mechanism from the gem catalogue and the Custom editor's
+ * colour field: it writes to `stoneColors`, not to an assignment's patch, so
+ * clicking one works even on a stone nothing has been assigned to yet.
+ */
+export const GEM_QUICK_COLORS: { label: string; hex: string }[] = [
+  { label: "White", hex: "#ffffff" },
+  { label: "Red", hex: "#a5182b" },
+  { label: "Blue", hex: "#12409b" },
+  { label: "Pink", hex: "#c02f6e" },
+  { label: "Green", hex: "#0d7a45" },
+  { label: "Olive", hex: "#b6a71e" },
+  { label: "Black", hex: "#141419" },
+  { label: "Purple", hex: "#6a2f9e" },
+  { label: "Orange", hex: "#d1631c" },
+  { label: "Teal", hex: "#149a92" },
+  { label: "Magenta", hex: "#d61fb0" },
+];
 
 /** A library metal with the user's edits folded in. */
 export function resolveMetal(

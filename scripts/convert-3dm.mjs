@@ -77,11 +77,45 @@ for (let i = 0; i < 12000 && !decoded; i++) await new Promise((r) => setTimeout(
 console.log("");
 if (!decoded || decoded.type === "error") throw new Error(decoded?.message ?? "decode timed out");
 
+/**
+ * Concatenates several decoded buckets into one, offsetting each one's index
+ * buffer by the running vertex count. The built-in GLB is exactly two meshes
+ * (see the doc comment on `compressToJewelryScene`), so every metal group —
+ * `decoded.metals` is one entry per distinct layer/colour/material, same as
+ * the browser's own multi-metal upload path — collapses back into a single
+ * "metal" mesh here; Model.tsx repaints it as one part with the chosen finish
+ * regardless of how many source layers fed it.
+ */
+function mergeBuckets(buckets) {
+  const total = buckets.reduce((n, b) => n + b.position.length / 3, 0);
+  const position = new Float32Array(total * 3);
+  const normal = new Float32Array(total * 3);
+  const indexCount = buckets.reduce((n, b) => n + b.index.length, 0);
+  const index = new Uint32Array(indexCount);
+  let vOff = 0;
+  let iOff = 0;
+  for (const b of buckets) {
+    position.set(b.position, vOff * 3);
+    normal.set(b.normal, vOff * 3);
+    for (let i = 0; i < b.index.length; i++) index[iOff + i] = b.index[i] + vOff;
+    iOff += b.index.length;
+    vOff += b.position.length / 3;
+  }
+  return { position, normal, index };
+}
+
 // ── assemble, normalise, export ──────────────────────────────────────────
 const group = new THREE.Group();
+if (decoded.metals?.length) {
+  for (const m of decoded.metals) {
+    console.log(
+      `   metal layer "${m.layer}" (${m.material}): ${(m.position.length / 3).toLocaleString()} verts`,
+    );
+  }
+}
 // Metal, then one mesh per stone colour. The "gem-" prefix is what the viewer
 // matches stones on, and the hex after it carries the colour through the GLB.
-const buckets = [["metal", decoded.metal]].concat(
+const buckets = [["metal", decoded.metals?.length ? mergeBuckets(decoded.metals) : null]].concat(
   (decoded.gems ?? []).map((g) => [`gem-${g.color.replace("#", "")}`, g]),
 );
 for (const [name, b] of buckets) {

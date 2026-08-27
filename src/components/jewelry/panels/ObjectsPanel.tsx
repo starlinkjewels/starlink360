@@ -27,12 +27,30 @@
  * it has always been, which is what lets a row here feed the material panels,
  * the stamp tool and `groups.ts` without any of them changing.
  */
-import { Check, ChevronRight, FolderPlus, Layers, Trash2, Wand2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FolderPlus,
+  Layers,
+  Link2,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
-import { applyClick, solidCount, solidId, type Part, type PartKind } from "../selection";
+import {
+  applyClick,
+  linkedPartIds,
+  solidCount,
+  solidId,
+  type Part,
+  type PartKind,
+} from "../selection";
 import { PanelGroup, PanelIntro } from "../ui/Panel";
 import { createGroup, kindOf, removeGroup, renameGroup, type PartGroup } from "../groups";
 import { findProngs, prongIds } from "../prongDetect";
+import { isPartVisible, setPartVisible, type PartVisibility } from "../visibility";
 
 /**
  * How many individual objects a part lists before it stops.
@@ -62,6 +80,8 @@ export function ObjectsPanel({
   onSelect,
   groups = [],
   onGroups,
+  visibility = {},
+  onVisibility,
 }: {
   parts: Part[];
   selected: ReadonlySet<string>;
@@ -69,11 +89,28 @@ export function ObjectsPanel({
   /** Named sets the user has saved. */
   groups?: PartGroup[];
   onGroups?: (next: PartGroup[]) => void;
+  /** Which parts are hidden. Absent means visible. */
+  visibility?: PartVisibility;
+  onVisibility?: (next: PartVisibility) => void;
 }) {
   /** Which parts are showing their individual objects. */
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   /** The name the next set will be saved under. */
   const [draftName, setDraftName] = useState("");
+  /*
+   * Off by default: hiding one of 285 identically-named prongs is a common,
+   * deliberate single action, and defaulting to "every Prong disappears"
+   * would surprise exactly the person trying to check one of them in
+   * isolation. Turned on for the case that IS common — a whole named layer,
+   * "Prong" or "Bead", hidden as one step rather than found and clicked N times.
+   */
+  const [linkNames, setLinkNames] = useState(false);
+
+  const toggleVisible = (id: string) => {
+    if (!onVisibility) return;
+    const ids = linkNames ? linkedPartIds(parts, id) : [id];
+    onVisibility(setPartVisible(visibility, ids, !isPartVisible(visibility, id)));
+  };
 
   const byKind = useMemo(
     () => KINDS.map((k) => ({ ...k, items: parts.filter((p) => p.kind === k.kind) })),
@@ -135,6 +172,23 @@ export function ObjectsPanel({
       <PanelIntro>
         Tap a <strong>name</strong> to select it alone, or its <strong>box</strong> to add it.
       </PanelIntro>
+
+      {onVisibility && parts.length > 0 && (
+        <label
+          className="tex-toggle mb-2"
+          title="Hiding or showing one part also hides or shows every part with the same name"
+        >
+          <input
+            type="checkbox"
+            checked={linkNames}
+            onChange={(e) => setLinkNames(e.target.checked)}
+          />
+          <span>
+            <Link2 className="size-3.5 inline-block mr-1 -mt-0.5" />
+            Link same names
+          </span>
+        </label>
+      )}
 
       {parts.length === 0 && <p className="field-hint">Nothing loaded yet.</p>}
 
@@ -316,6 +370,25 @@ export function ObjectsPanel({
                         {part.label}
                       </button>
                       {n > 1 && <span className="obj-count">{n}</span>}
+                      {onVisibility &&
+                        (() => {
+                          const visible = isPartVisible(visibility, part.id);
+                          return (
+                            <button
+                              className="obj-eye"
+                              onClick={() => toggleVisible(part.id)}
+                              aria-pressed={!visible}
+                              aria-label={`${visible ? "Hide" : "Show"} ${part.label}`}
+                              title={visible ? "Hide" : "Show"}
+                            >
+                              {visible ? (
+                                <Eye className="size-3.5" />
+                              ) : (
+                                <EyeOff className="size-3.5" />
+                              )}
+                            </button>
+                          );
+                        })()}
                     </div>
 
                     {expanded && n > 1 && (

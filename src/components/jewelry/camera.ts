@@ -279,6 +279,10 @@ export const UP_AXES: { value: CameraSettings["upAxis"]; label: string; hint: st
 export function guessUpAxis(fileName: string): CameraSettings["upAxis"] {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
   // .3dm is decoded to Y-up by our own worker; the CAD interchange formats are
-  // written by tools that are almost all Z-up.
-  return ext === "obj" || ext === "stl" ? "z" : "y";
+  // written by tools that are almost all Z-up. FBX genuinely varies by which
+  // tool wrote it (Maya's own convention is Y-up, but the CAD/jewellery tools
+  // this app actually sees FBX from are typically Z-up) — grouped with
+  // obj/stl as the better default for this audience, not a claim that FBX
+  // itself has one true convention. The import prompt still asks either way.
+  return ext === "obj" || ext === "stl" || ext === "fbx" ? "z" : "y";
 }

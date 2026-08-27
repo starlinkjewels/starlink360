@@ -53,24 +53,32 @@ export interface BloomSettings {
 }
 
 /*
- * On, because on a jewellery viewer this is not an effect — it is the product.
+ * Off. It was on for a while, on the theory that a diamond in a photograph
+ * blows out the sensor around each flash and that halo is most of what makes
+ * it read as real — without it a stone renders as a small grey dot, which is
+ * exactly what a client compared against a competitor and called an obvious
+ * render. That was true of the diamond this pass was tuned against.
  *
- * It defaulted to off so that nothing changed and nothing was paid for until
- * asked, which was the right instinct for an optional flourish and the wrong
- * one here. A diamond in a photograph blows out the sensor around each flash,
- * and that halo is most of what makes the photograph read as real. Without it
- * a stone renders as a small grey dot, which is exactly what a client compared
- * against a competitor and called an obvious render.
- *
- * Nobody was ever going to find this in a panel. The threshold does the work
- * of keeping it honest: at 0.95 only pixels already brighter than white glow,
- * so the stones bloom and the metal does not turn to fog.
+ * It stopped being true once Phase 18 fixed the diamond's own optics — the
+ * gold-contaminated reflection, the too-hot environment, the excess fire.
+ * With the sparkle now coming from the stone's own facet contrast rather
+ * than being manufactured by a halo, bloom had nothing left to do but cost:
+ * a controlled A/B at the lowest strength/radius that had ever looked safe
+ * (0.02/0.02, threshold 0.99) still measurably softened the exact dark/light
+ * facet separation those other fixes were fought for, indistinguishable in
+ * kind from the earlier 0.2/0.25/0.92 wash, only smaller in degree. Turning
+ * it off entirely, with Highlight Recovery and Film left on, produced a
+ * pixel-for-pixel match to composer-off on the diamond — proof the two of
+ * them were never the source of the softening — while the diamond alone
+ * still read as bright and sparkling at normal viewing distance, not a grey
+ * dot. The settings below are kept, not deleted, for whoever re-enables it
+ * on a future diamond that turns out to need the crutch again.
  */
 export const DEFAULT_BLOOM: BloomSettings = {
-  enabled: true,
-  strength: 0.35,
-  radius: 0.4,
-  threshold: 0.95,
+  enabled: false,
+  strength: 0.02,
+  radius: 0.02,
+  threshold: 0.99,
   // Zero is "match the renderer", which is what it always did.
   resolutionX: 0,
   resolutionY: 0,
@@ -167,11 +175,20 @@ export interface FilmSettings {
   aberration: number;
 }
 
+/*
+ * Toned down for the premium diamond render pass: at 0.035/0.35/0.15 the
+ * frame read like a camera-lens effect laid over the whole piece rather than
+ * a clean product render. Grain stays above 0 rather than dropping to the
+ * spec's suggested 0 — see the "reads as computed" check in test-post.mjs —
+ * but low enough to be barely present. Chromatic aberration goes to 0: the
+ * diamond shader's own aberration is what should carry fire, not a
+ * whole-image lens effect on top of it.
+ */
 export const DEFAULT_FILM: FilmSettings = {
   enabled: true,
-  grain: 0.035,
-  vignette: 0.35,
-  aberration: 0.15,
+  grain: 0.012,
+  vignette: 0.05,
+  aberration: 0,
 };
 
 /**
@@ -215,7 +232,10 @@ export interface HighlightSettings {
 
 export const DEFAULT_HIGHLIGHTS: HighlightSettings = {
   enabled: true,
-  strength: 2,
+  // Lowered from 2 for the premium diamond render pass — less compression,
+  // so two blown facets stay more differentiated rather than both settling
+  // toward the same recovered value.
+  strength: 1,
 };
 
 /** Everything the composer draws, in one object. */
@@ -271,7 +291,60 @@ const HighlightShader = {
         float compressed = 1.0 + log(1.0 + excess * strength) / strength;
         c.rgb *= compressed / peak;
       }
-      gl_FragColor = c;
+      // Alpha is clamped, not carried through unexamined: the renderer's
+      // canvas is premultipliedAlpha, and the scene's own alpha can carry
+      // values above 1 (a separate, real defect in what renders the gem/
+      // metal — not something to fix here). Premultiplying already-correct
+      // colour by an out-of-range alpha inflates it again after tone mapping
+      // already finished, which is indistinguishable from overexposure.
+      // Clamping rather than forcing a constant matters: the cutout behind
+      // the piece is genuinely transparent (alpha near 0), and forcing 1.0
+      // unconditionally would paint that transparent area opaque black —
+      // min() leaves every legitimate alpha value, transparent or opaque,
+      // untouched and only caps the illegitimate ones.
+      gl_FragColor = vec4(c.rgb, min(c.a, 1.0));
+    }
+  `,
+};
+
+/**
+ * Guards `OutputPass`'s input, unconditionally, regardless of which optional
+ * passes ran before it.
+ *
+ * The scene's own render can carry alpha above 1 (a real defect in what
+ * renders the gem/metal, out of scope here — see HighlightShader for the
+ * fuller account of why that matters on a premultipliedAlpha canvas).
+ * Highlight Recovery and Film already guard their own output, but between
+ * them sit two passes this app does not own the source of — `BokehPass`
+ * (Depth of Field) and `SSRPass` — and either can end up as the last thing
+ * `OutputPass` reads from, depending on which effects are on. Measured
+ * directly: Bloom on its own is safe (`OutputPass` reads bloom's own
+ * in-place buffer), and so is Bloom+SSR (SSR runs before Bloom, so
+ * `OutputPass` still reads bloom's own buffer) — but Bloom+DOF is not
+ * (`BokehPass` runs after Bloom and swaps into a fresh buffer, which is what
+ * `OutputPass` then reads). Rather than special-case which upstream
+ * combination needs protecting, this pass always runs immediately before
+ * `OutputPass` and simply caps whatever arrives — a no-op for anything
+ * already within range.
+ */
+const AlphaClampShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      gl_FragColor = vec4(c.rgb, min(c.a, 1.0));
     }
   `,
 };
@@ -337,7 +410,12 @@ const FilmShader = {
       float noise = hash(vUv * vec2(1600.0, 900.0) + time) - 0.5;
       color += noise * grain * 0.09;
 
-      gl_FragColor = vec4(color, base.a);
+      // Alpha clamped, not carried through from base.a unexamined — see the
+      // same note in HighlightShader. min() rather than a hardcoded 1.0: the
+      // cutout behind the piece is genuinely transparent, and forcing every
+      // pixel opaque would paint that transparent area opaque black instead
+      // of leaving it as a cutout.
+      gl_FragColor = vec4(color, min(base.a, 1.0));
     }
   `,
 };
@@ -458,8 +536,16 @@ export function createSceneRenderer(
     composer.addPass(highlights);
   }
 
+  // Guards OutputPass's input regardless of what ran immediately before it
+  // (Bloom directly, or DOF/SSR having swapped in between) — see
+  // AlphaClampShader for why this runs unconditionally rather than only
+  // when a specific effect is on.
+  const alphaClamp = new ShaderPass(AlphaClampShader);
+  composer.addPass(alphaClamp);
+
   // Tone mapping and sRGB conversion for the composed frame.
-  composer.addPass(new OutputPass());
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
 
   // Last of all: the camera, not the scene — see FilmShader.
   let film: ShaderPass | null = null;
@@ -541,7 +627,24 @@ export function createSceneRenderer(
       }
     },
     dispose() {
+      /*
+       * `EffectComposer.dispose()` only frees its own two ping-pong render
+       * targets and its internal copy pass — not the passes that were added
+       * to it. Every pass constructed above owns its own GPU resources
+       * (render targets, materials, full-screen quads) and needs its own
+       * dispose call, or a settings change that rebuilds this composer
+       * (see `composerKey`) leaks the outgoing instance's textures and
+       * materials on every rebuild. `RenderPass` is the one exception: it
+       * holds no resources of its own, only references to `scene`/`camera`,
+       * which this function does not own and must not dispose.
+       */
       ssr?.dispose();
+      bloom?.dispose();
+      dof?.dispose();
+      highlights?.dispose();
+      alphaClamp.dispose();
+      outputPass.dispose();
+      film?.dispose();
       composer.dispose();
       target.dispose();
     },

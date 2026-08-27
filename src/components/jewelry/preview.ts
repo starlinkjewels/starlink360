@@ -17,10 +17,15 @@
  */
 
 /*
- * Deliberately imports nothing. The suites compile each module on its own with
- * plain tsc, and Node's ESM loader will not resolve the extensionless specifier
- * tsc emits — so a one-line helper is cheaper here than a build step.
+ * The one import here, `heightAt`, is deliberate rather than an exception to
+ * the "imports nothing" rule below: it is the single source of truth for
+ * what a finish's surface actually looks like, already used to build the
+ * real normal/roughness maps in `textures.ts`. Duplicating that math here
+ * instead would let a preview and the real render quietly disagree the
+ * moment either one changed.
  */
+import { heightAt } from "./textures.js";
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -107,6 +112,13 @@ export interface MetalSpecInput {
   color: string;
   roughness: number;
   metalness: number;
+  /**
+   * A `SURFACE_FINISHES` id, or absent/"none" for the plain gradient this
+   * always drew. Reuses `textures.ts`'s own `heightAt()` — the exact function
+   * the real render's normal/roughness maps are built from — so a preview
+   * cannot drift from what the finish actually looks like once applied.
+   */
+  finish?: string;
 }
 
 export interface GemSpecInput {
@@ -227,12 +239,57 @@ export function sparklePositions(dispersion: number): { x: number; y: number; r:
   return out;
 }
 
+/**
+ * Perturbs an already-painted sphere's shading with a finish's height field,
+ * so a hammered or brushed preview reads as textured rather than a plain
+ * gradient with a different name attached.
+ *
+ * Samples `heightAt` directly — the same function `textures.ts` builds the
+ * real normal/roughness maps from — rather than a second approximation of
+ * "what hammered looks like", so the preview cannot say one thing while the
+ * applied finish renders another.
+ *
+ * A finite-difference slope, not the height itself: shading a sphere by raw
+ * height would paint the pattern as if it were flat and lit from above,
+ * which reads as a decal. The slope is what a bump actually does to shading
+ * — it darkens one side and lightens the other — and is the same trick
+ * `finishThumbnail` in `textures.ts` uses for its own flat swatch.
+ */
+function applyFinishHeight(ctx: CanvasRenderingContext2D, size: number, finish: string) {
+  if (finish === "none") return;
+  const img = ctx.getImageData(0, 0, size, size);
+  const r = size / 2;
+  // Tiled a few times across the sphere's diameter so the pattern reads as
+  // texture rather than one soft blob at this small a preview size.
+  const tiles = 5;
+  const step = 1 / size;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x + 0.5 - r;
+      const dy = y + 0.5 - r;
+      if (dx * dx + dy * dy > r * r) continue;
+      const u = (x / size) * tiles;
+      const v = (y / size) * tiles;
+      const h = heightAt(finish, u, v);
+      const slopeX = heightAt(finish, u + step * tiles, v) - h;
+      const slopeY = heightAt(finish, u, v + step * tiles) - h;
+      const lit = clamp(1 + (-slopeX - slopeY) * 2.2, 0.6, 1.4);
+      const i = (y * size + x) * 4;
+      img.data[i] = clamp(img.data[i] * lit, 0, 255);
+      img.data[i + 1] = clamp(img.data[i + 1] * lit, 0, 255);
+      img.data[i + 2] = clamp(img.data[i + 2] * lit, 0, 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 /** Draws a spec into a square 2D context of side `size`. */
 export function paintSphere(
   ctx: CanvasRenderingContext2D,
   spec: SphereSpec,
   size: number,
   outlineColor?: string,
+  finish?: string,
 ) {
   const r = size / 2;
   ctx.clearRect(0, 0, size, size);
@@ -293,6 +350,8 @@ export function paintSphere(
     ctx.fillRect(0, 0, size, size);
   }
 
+  if (finish) applyFinishHeight(ctx, size, finish);
+
   ctx.restore();
 
   if (outlineColor) {
@@ -314,7 +373,7 @@ const cache = new Map<string, string>();
 
 export function previewKey(input: SpecInput, size: number): string {
   return input.kind === "metal"
-    ? `m|${size}|${input.color}|${input.roughness.toFixed(3)}|${input.metalness.toFixed(3)}`
+    ? `m|${size}|${input.color}|${input.roughness.toFixed(3)}|${input.metalness.toFixed(3)}|${input.finish ?? "none"}`
     : `g|${size}|${input.color}|${input.ior.toFixed(3)}|${input.dispersion.toFixed(3)}|${input.opaque ? 1 : 0}`;
 }
 
@@ -338,6 +397,7 @@ export function previewUrl(input: SpecInput, size = 44): string {
     sphereSpec(input),
     size,
     needsOutline(input.color) ? "rgba(128,128,128,0.45)" : undefined,
+    input.kind === "metal" ? input.finish : undefined,
   );
   const url = canvas.toDataURL("image/png");
   cache.set(key, url);

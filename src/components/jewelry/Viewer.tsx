@@ -14,6 +14,8 @@ import {
 } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { acceleratePicking } from "./pickBvh";
+import { ImageBackdrop3D } from "./ImageBackdrop3D";
+import type { Background } from "./background";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
@@ -23,6 +25,10 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { StudioRig, type StudioApi } from "./StudioRig";
 import type { StoneGroup } from "./stones";
 import type { GemOptics } from "./GemRefraction";
+import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
+import { DEFAULT_MODEL_ORIENTATION, type ModelOrientation } from "./modelOrientation";
+import type { PartTransforms } from "./partTransform";
+import type { PartVisibility } from "./visibility";
 import type { Stamp } from "./stamps";
 import {
   applyClick,
@@ -60,7 +66,7 @@ import {
   type ObjectMove,
 } from "./animation";
 import { DEFAULT_SHADOWS, shadowFrustum, type ShadowSettings } from "./shadows";
-import { isReasonablySized, type ProngHeights } from "./prongs";
+import { isReasonablySized, type ProngScales } from "./prongs";
 
 /** Rebuilt per call rather than shared — a module-scope instance is the hazard. */
 const origin = () => new THREE.Vector3();
@@ -670,6 +676,12 @@ export interface ViewerProps {
   post?: PostSettings;
   /** Ground grid, from the viewport toolbar. */
   showGrid?: boolean;
+  /**
+   * What sits behind the piece. Only read here for `kind: "image3d"`, which
+   * mounts a real Three.js backdrop (`ImageBackdrop3D.tsx`) — every other kind
+   * stays a CSS layer the route paints itself, unchanged by this prop.
+   */
+  background?: Background;
   /** Freezes the camera so a framing cannot be nudged by accident. */
   locked?: boolean;
   /** Colour chosen per stone group in the picker, keyed by group id. */
@@ -678,8 +690,16 @@ export interface ViewerProps {
   metalOverrides?: Record<string, { color: string; roughness: number; metalness: number }>;
   /** Library optics resolved per stone group id, from the Materials panel. */
   gemOverrides?: Record<string, GemOptics>;
+  /** Global diamond shader tuning — see `diamondOptics.ts`. */
+  diamondOptics?: DiamondOpticsSettings;
   /** Height factor per prong solid id, from the Prongs panel. 1 is unchanged. */
-  prongHeights?: ProngHeights;
+  prongScales?: ProngScales;
+  /** A live, user-adjustable rotation on top of the file's own up-axis fix. */
+  modelOrientation?: ModelOrientation;
+  /** Per-part scale/offset, from the Model panel. Whole parts only. */
+  partTransforms?: PartTransforms;
+  /** Which parts are hidden, from the Objects panel. Absent means visible. */
+  partVisibility?: PartVisibility;
   /** The selectable stone groups in the loaded piece. */
   onStones?: (groups: StoneGroup[]) => void;
   /** Fired when a stone is tapped on the piece, so the picker can follow. */
@@ -753,12 +773,17 @@ export default function Viewer({
   shadows = DEFAULT_SHADOWS,
   ground = DEFAULT_GROUND,
   post = DEFAULT_POST,
+  background,
   showGrid = false,
   locked = false,
   stoneColors,
   metalOverrides,
-  prongHeights,
+  prongScales,
+  modelOrientation = DEFAULT_MODEL_ORIENTATION,
+  partTransforms,
+  partVisibility,
   gemOverrides,
+  diamondOptics = DEFAULT_DIAMOND_OPTICS,
   onStones,
   onStoneTap,
   onParts,
@@ -801,11 +826,49 @@ export default function Viewer({
   );
 
   const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object">("checking");
+  /**
+   * The in-flight (or last completed) check, keyed by product, so a second
+   * invocation of the effect below for the SAME product can tell there is
+   * nothing left to do — and, just as importantly, so it does that WITHOUT
+   * orphaning the first invocation's fetch.
+   *
+   * The effect can legitimately fire more than once for the exact same
+   * `product`: a component revealed out of a Suspense boundary re-runs its
+   * effects once the boundary settles, which is a real React behaviour, not
+   * a bug here. Two things went wrong chasing that, in order:
+   *
+   * 1. Resetting `source` to `"checking"` on every one of those extra fires
+   *    tore down and rebuilt the entire `GLBModel`/`DressedScene`/
+   *    `GemRefraction` subtree for a product that never changed — a full
+   *    BVH-and-shader rebuild for zero visible difference, and measurably
+   *    worse WebGL stability across repeated loads.
+   * 2. The first fix for that — a ref marking a product "resolved" — used a
+   *    plain `cancelled` flag closed over per invocation, returned from the
+   *    effect as its cleanup. React runs that cleanup on every re-invocation,
+   *    including the harmless second one, which orphaned the FIRST
+   *    invocation's in-flight fetch. Nothing was left to ever call
+   *    `setSource` again, and the piece got stuck on the "checking"
+   *    placeholder forever — a real, user-facing regression, not a smaller
+   *    version of the same fix.
+   *
+   * The fix for both: identify a check by the product it belongs to, not by
+   * which invocation started it, and let a later invocation for the SAME
+   * product see that one is already running and do nothing at all — no
+   * reset, no second fetch, and no cleanup-driven cancellation of the first
+   * one's promise. A later invocation for a genuinely DIFFERENT product
+   * still correctly supersedes it, because its promise callbacks check
+   * identity against the CURRENT ref value, not a closed-over flag.
+   */
+  const checkRef = useRef<{ key: string } | null>(null);
 
   // Verify the GLB exists before handing it to the loader, so a missing asset
   // degrades to the studio stand-in instead of throwing.
   useEffect(() => {
-    let cancelled = false;
+    const productKey = product.object ? `object:${product.id}` : `glb:${product.glbUrl}`;
+    if (checkRef.current?.key === productKey) return;
+
+    const entry = { key: productKey };
+    checkRef.current = entry;
     setSource("checking");
     setFit(null);
     onLoadedChange(false);
@@ -815,17 +878,16 @@ export default function Viewer({
     }
     fetch(product.glbUrl, { method: "HEAD" })
       .then((res) => {
+        if (checkRef.current !== entry) return;
         const type = res.headers.get("content-type") ?? "";
         const ok = res.ok && !type.includes("text/html");
-        if (!cancelled) setSource(ok ? "glb" : "fallback");
+        setSource(ok ? "glb" : "fallback");
       })
       .catch(() => {
-        if (!cancelled) setSource("fallback");
+        if (checkRef.current !== entry) return;
+        setSource("fallback");
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [product.glbUrl, product.object, onLoadedChange]);
+  }, [product.glbUrl, product.object, product.id, onLoadedChange]);
 
   const handleFit = useCallback(
     (f: Fit) => {
@@ -1150,6 +1212,18 @@ export default function Viewer({
           environmentIntensity={lighting.environmentIntensity}
         />
 
+        {/*
+          A real scene object, mounted only for this one background kind — it
+          never touches `scene.environment` or anything the diamond shader
+          reads, see `ImageBackdrop3D.tsx`. `fit` may briefly be null while a
+          piece is loading; the fallback radius keeps the backdrop sized
+          sanely for that one frame rather than skipping the mount and
+          flashing the old size in once `fit` arrives.
+        */}
+        {background?.kind === "image3d" && background.image && (
+          <ImageBackdrop3D image={background.image} fitRadius={fit?.radius ?? 1} />
+        )}
+
         {dimensions.showOnCanvas && fit && (
           <DimensionOverlay fit={fit} scale={dimensionScale} summary={dimensionSummary} />
         )}
@@ -1180,7 +1254,11 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
+                diamondOptics={diamondOptics}
+                prongScales={prongScales}
+                modelOrientation={modelOrientation}
+                partTransforms={partTransforms}
+                partVisibility={partVisibility}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}
@@ -1197,7 +1275,11 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
+                diamondOptics={diamondOptics}
+                prongScales={prongScales}
+                modelOrientation={modelOrientation}
+                partTransforms={partTransforms}
+                partVisibility={partVisibility}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}
@@ -1216,7 +1298,11 @@ export default function Viewer({
                 stoneColors={stoneColors}
                 metalOverrides={metalOverrides}
                 gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
+                diamondOptics={diamondOptics}
+                prongScales={prongScales}
+                modelOrientation={modelOrientation}
+                partTransforms={partTransforms}
+                partVisibility={partVisibility}
                 onStones={onStones}
                 onParts={handleParts}
                 stamps={stamps}
@@ -1337,8 +1423,25 @@ export default function Viewer({
           Its margin is larger on a phone: at 64px the ball sat underneath the
           toolbar, which shares that corner once the panel is a sheet rather
           than a column beside the viewport.
+
+          `renderPriority` is explicit and higher than BloomRig's: drei's Hud
+          (what GizmoHelper renders through) does a second, plain
+          `gl.render(scene, camera)` of its own whenever its priority ties
+          BloomRig's default of 1 — a leftover assumption from before there
+          was a composer, when being the only priority>0 subscriber made that
+          redundant render harmless. Tied at 1, that plain render ran after
+          the composer's every frame and silently replaced its output, which
+          is why bloom and highlight recovery never appeared live even though
+          they worked in an export. Priority 2 makes the gizmo draw strictly
+          after the composer instead of racing it — its own quad is drawn
+          additively over whatever is already on screen, so the composer's
+          frame survives underneath it.
         */}
-        <GizmoHelper alignment="bottom-left" margin={compact ? [52, 108] : [64, 64]}>
+        <GizmoHelper
+          alignment="bottom-left"
+          margin={compact ? [52, 108] : [64, 64]}
+          renderPriority={2}
+        >
           <GizmoViewport axisColors={["#d15b5b", "#7bbd6a", "#5b83d1"]} labelColor="#ffffff" />
         </GizmoHelper>
 
