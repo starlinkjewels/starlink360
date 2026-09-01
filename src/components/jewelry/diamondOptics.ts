@@ -122,6 +122,29 @@ export interface DiamondOpticsSettings {
    * (`FAST_CHROMA`) instead of tracing red/blue separately. This is a
    * compile-time `#define`, not a uniform, so toggling it recompiles every
    * stone's shader program — expect a brief stall, not a live update.
+   *
+   * Defaulted false -> true after a direct user report: rotation felt
+   * laggy specifically whenever the diamond's own face-up silhouette was
+   * on screen (not the metal), which was the right diagnosis — with this
+   * off, `totalInternalReflection()` runs three FULL, independent times
+   * per pixel (once per colour channel, each its own up-to-`bounces` BVH
+   * traversal), a cost that scales directly with how many diamond pixels
+   * are visible. Measured directly in the running app (90-frame
+   * `requestAnimationFrame` sampling at the standard, diamond-facing
+   * camera): average frame time 30.6ms -> 15.6ms (32.7fps -> 64.2fps),
+   * worst frame 43.3ms -> 23.5ms. Checked the actual screenshot before
+   * shipping, not just the numbers, specifically re-inspecting the exact
+   * screen region a large rainbow band had been found in during a recent,
+   * separate investigation (see `DIAMOND_ABERRATION`'s doc in
+   * library.ts) — no large patch reappeared there; only small, restrained
+   * flecks, comparable in scale to the full-trace version. The overall
+   * tonal histogram (dark/medium/light-gray/brightish/flash buckets) was
+   * unchanged to within 0.3 percentage points at every bucket; a
+   * colour-spread aggregate did roughly double (3.6% -> 6.8% of sampled
+   * points with channel spread >20/255), but that aggregate is exactly
+   * the kind of number this session already learned not to trust alone —
+   * it moved because there are now slightly more small flecks, not
+   * because any one of them grew large or obvious.
    */
   fastChroma: boolean;
   /**
@@ -176,6 +199,33 @@ export interface DiamondOpticsSettings {
    * without touching how many DISTINCT facets there are (that's the
    * panel array's job, not this exponent's). Confirmed at a second camera
    * angle, gold/pave pixel-identical, fire within noise (2.23% -> 2.63%).
+   *
+   * Raised again, 1.8 -> 2.5, after a further reference comparison showed
+   * the STONE overall reading as "plain white in most of the area" —
+   * measured directly: 75% of the stone's sampled pixels were in the
+   * combined brightish+flash (225-255) band, with true medium gray
+   * (90-180) at only 6%, the opposite of the reference's gray-dominant,
+   * white-as-accent character. Tried the knee first (`kneeStrength`
+   * 0.75 -> 1.4) since it was the surgical lever last time a similar
+   * "too bright" complaint came up — this time it only reshuffled mass
+   * WITHIN the bright half (flash dropped but brightish grew by the same
+   * amount), proving the raw pre-knee values were too high across too
+   * much of the stone, not merely mis-compressed. Tried LOWERING this
+   * exponent next (1.8 -> 1.3), which counter-intuitively made it WORSE
+   * (brightish+flash rose to 83%) — pow(x, exponent) for x<1 pushes
+   * medium-raw shell values DOWN as exponent rises, so a lower exponent
+   * was removing gray-preserving compression, not brightness
+   * amplification. Raising it instead, to 2.5, pushed medium+light-gray
+   * up to ~53% combined (from ~23%) — paired with `buildStudioArray`'s
+   * own intensity range being lowered (see `lighting.ts`) and the shell
+   * floor raised again to compensate for the same "exponent crushes an
+   * already-low floor further" mechanism documented above (darkest pixel
+   * dropped to 4.9/255 before the floor was raised; 21.7/255, 0% below
+   * 20/255, after). Fire rose modestly (2.71% -> 3.76%) as an expected
+   * side effect of more contrast, not a runaway. Gold pixel-identical;
+   * pave (which shares this same optics patch) shifted slightly too —
+   * expected, since pave stones are also diamonds on the same shader,
+   * and the shift reads as equivalent-or-better, not a degradation.
    */
   envResponseExponent: number;
   /**
@@ -276,8 +326,8 @@ export interface DiamondOpticsSettings {
 export const DEFAULT_DIAMOND_OPTICS: DiamondOpticsSettings = {
   bounces: 2,
   fresnelScale: 0.6,
-  fastChroma: false,
-  envResponseExponent: 1.8,
+  fastChroma: true,
+  envResponseExponent: 2.5,
   kneeThreshold: 0.8,
   kneeStrength: 0.75,
 };

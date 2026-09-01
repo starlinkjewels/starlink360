@@ -448,6 +448,29 @@ function mulberry32(seed: number): () => number {
  * brightish dropped from ~80% to 56%, which is what finally read as
  * genuinely varied/faceted in the actual screenshot instead of a bright
  * mass with texture only at its edges.
+ *
+ * Lowered again, 0.5-3 -> 0.3-1.8, in a later "too plain white" pass —
+ * see `diamondOptics.ts`'s `envResponseExponent` doc for the full
+ * before/after numbers and the other half of this same fix (that
+ * exponent, and the shell floor below, both moved together with this).
+ *
+ * A ~12% "standout" boost was added after that same pass, once the stone
+ * read as correctly gray-dominant but with "sparkling white still
+ * missing" — a separate, disjoint bright population (`buildSparkleArray`,
+ * intensity 15-30 against this array's 0.3-1.8) was tried once already
+ * for a similar complaint and reverted: a full order-of-magnitude jump
+ * with nothing in between read as an artificial, pasted-on highlight
+ * rather than a real one. This time the boost is folded into the SAME
+ * distribution instead of a second population — ~12% of panels roll an
+ * extended range (0.3-6.0, a ~3.3x ceiling increase, not ~17x) rather
+ * than a hard-separated population. Measured result: flash-white grew
+ * (8.6% -> 12.1%) while genuine medium gray also grew (18.8% -> 23.1%)
+ * and the generic "brightish" middle shrank (34.1% -> 27.4%) — fewer
+ * facets sitting in a same-toned mush, more landing at either a real gray
+ * or a real, distinct flash. Confirmed in the actual screenshot: several
+ * facets visibly pop without reading as pasted on, at both camera
+ * angles. Darkest pixel and fire prevalence both stayed within the
+ * ranges already established as safe.
  */
 function buildStudioArray(count: number, seed: number): Panel[] {
   const rng = mulberry32(seed);
@@ -462,7 +485,15 @@ function buildStudioArray(count: number, seed: number): Panel[] {
     const z = Math.sin(theta) * radius;
     const len = Math.hypot(x, y, z) || 1;
     const size = 2.5 + rng() * 3.5;
-    const intensity = 0.5 + rng() * 2.5;
+    // ~12% of panels get a genuine standout boost (up to ~4x the normal
+    // ceiling) instead of a separate, disjoint "sparkle" population — see
+    // this function's own doc for why a disjoint population (tried once,
+    // reverted) read as artificial. Sampling the boost roll BEFORE the
+    // base intensity roll keeps every other panel's own value identical
+    // to what it would have been without this mechanism, so the boost is
+    // additive, not a redraw of the whole distribution.
+    const isStandout = rng() < 0.12;
+    const intensity = isStandout ? 0.3 + rng() * 5.7 : 0.3 + rng() * 1.5;
     panels.push({
       size: [size, size],
       position: [(x / len) * R, (y / len) * R, (z / len) * R],
@@ -703,6 +734,7 @@ function bakeStudioTexture(
   feather: number,
   spokeCount = 0,
   spokeStrength = 0,
+  coolShadowTint = 0,
 ): THREE.Texture {
   const data = new Uint16Array(WIDTH * HEIGHT * 4);
   const step = 1 / SUPERSAMPLE;
@@ -763,12 +795,37 @@ function bakeStudioTexture(
         }
       }
 
-      const value = THREE.DataUtils.toHalfFloat(total / samples);
+      const raw = total / samples;
       const i = (y * WIDTH + x) * 4;
-      // Neutral: a diamond takes its colour from the stone, never the tent.
-      data[i] = value;
-      data[i + 1] = value;
-      data[i + 2] = value;
+      if (coolShadowTint > 0) {
+        /*
+         * A small, deliberate cool tint in the DARK end only — real
+         * diamond photography almost always shows a blue-slate cast in
+         * shadow facets (a cool shadow reads as icy/premium; a neutral or
+         * warm one reads as flat), confirmed directly against a reference
+         * renderer's actual output. `coolFactor` fades to exactly 0 at
+         * raw >= 1 (the shell's own values top out well below 1; only
+         * panel-lit, bright directions ever reach 1+), so this can only
+         * ever affect the dark/shell-dominated population — bright,
+         * panel-lit facets stay exactly neutral, and the stone's genuine
+         * body colour (applied separately, per-stone, downstream) is
+         * untouched. Default 0 — every OTHER preset (including this same
+         * function's "tent" caller) stays bit-for-bit neutral.
+         */
+        const coolFactor = Math.max(0, Math.min(1, 1 - raw));
+        const r = raw * (1 - coolFactor * coolShadowTint);
+        const g = raw * (1 - coolFactor * coolShadowTint * 0.3);
+        const b = raw * (1 + coolFactor * coolShadowTint * 0.55);
+        data[i] = THREE.DataUtils.toHalfFloat(r);
+        data[i + 1] = THREE.DataUtils.toHalfFloat(g);
+        data[i + 2] = THREE.DataUtils.toHalfFloat(b);
+      } else {
+        // Neutral: a diamond takes its colour from the stone, never the tent.
+        const value = THREE.DataUtils.toHalfFloat(raw);
+        data[i] = value;
+        data[i + 1] = value;
+        data[i + 2] = value;
+      }
       data[i + 3] = alpha;
     }
   }
@@ -855,8 +912,44 @@ function scalePanels(panels: Panel[], factor: number): Panel[] {
  * without hand-aiming each one individually. The bounce-card floor and rim
  * pair from the base `PANELS` are kept underneath it for the low, broad
  * fill they were built for.
+ *
+ * Count raised 80 -> 150 alongside `feather`'s own reduction (see that
+ * field's doc in `diamond-studio-crisp` for the mechanism) — a narrower
+ * feather makes each panel more like a flat block again, so more panels
+ * are needed to keep the coverage a lower feather alone would shrink.
+ * More panels also directly targets what the feather change was reaching
+ * for: fewer facets falling through to shell-only sampling, which is what
+ * was producing an internal, "milky" gradient within an otherwise-flat
+ * facet. Re-balances overall brightness up somewhat (mean 203 -> 212) as
+ * a side effect of the added coverage — checked and still within the
+ * safe range (darkest pixel 28/255, 0% below 20/255).
  */
-const CRISP_PANELS: Panel[] = [...PANELS, ...buildStudioArray(80, 918273645)];
+const CRISP_PANELS: Panel[] = [
+  ...PANELS,
+  ...buildStudioArray(150, 918273645),
+  // The one remaining visually-dominant dark mass (a connected triangular
+  // region at the stone's visual centre, per the user's own screenshot
+  // comparison) was measured directly: resultant length 0.97 (tight) at
+  // direction ~(-0.10, -0.45, -0.89) — nearly IDENTICAL to a neighbouring
+  // BRIGHT region's own direction (-0.14, -0.46, -0.88). This is not a
+  // coverage gap the way earlier dark-mass fixes were; it's a facet
+  // sitting just outside an existing nearby panel's edge, made sharper by
+  // this session's own narrower `feather` (0.3). One small aimed panel to
+  // fill that specific gap, not another broad wash. Started at size 5,
+  // intensity 4 (matching the base array's own scale) — essentially zero
+  // effect (dark90 7.90% -> 7.88%, noise). Consistent with this session's
+  // recurring finding that a panel needing to compete with the CubeCamera
+  // capture's low resolution and the existing nearest-panel-wins hit test
+  // often needs far more size/intensity than a naive "match nearby panels"
+  // guess. Raised in two steps — 9/25 (dark90 -> 6.49%, one facet visibly
+  // lit) then 14/30 (dark90 -> 1.75%, the mass visibly broke into several
+  // separated bright/dark pieces instead of one connected block) — with
+  // the actual screenshot judged at each step, not the numbers alone.
+  // Darkest pixel stayed safe (35.5/255, 0% below 20/255) and fire
+  // unchanged (2.29% -> 2.04%) throughout. Confirmed at a second camera
+  // angle and gold/pave pixel-identical.
+  { size: [14, 14], position: [-R * 0.1, -R * 0.45, -R * 0.89], intensity: 18 },
+];
 /*
  * Tried and reverted: `buildSparkleArray` (14 extra panels at intensity
  * 15-30, a full order of magnitude above the base array's 0.5-3). It did
@@ -885,6 +978,8 @@ interface StudioConfig {
   /** See `studioRadiance`'s own doc — both default to 0 (no azimuthal effect) when omitted. */
   spokeCount?: number;
   spokeStrength?: number;
+  /** See `bakeStudioTexture`'s own doc — defaults to 0 (bit-for-bit neutral) when omitted. */
+  coolShadowTint?: number;
 }
 
 /*
@@ -1020,18 +1115,28 @@ const DIAMOND_STUDIO_CONFIGS: Record<string, StudioConfig> = {
     // rather than a hard flat floor, per this file's own established
     // lesson that flat plateaus are themselves a source of "facets read
     // identical" complaints.
+    //
+    // Raised again (mid/bottom stops ~0.32-0.4 -> ~0.36-0.4) alongside
+    // `envResponseExponent`'s next jump, 1.8 -> 2.5 (see that field's own
+    // doc in `diamondOptics.ts` for the "too plain white" complaint this
+    // was answering) — same mechanism as the paragraph above: a higher
+    // exponent crushes the floor further (darkest pixel measured at
+    // 4.9/255, 1.18% of the stone below 20/255, before this raise).
+    // Raised in three small steps, checking the actual darkest pixel each
+    // time, until it cleared 20/255 (21.7/255, 0% below 20/255) rather
+    // than guessing one large jump.
     shellStops: [
       [0, 0.55],
       [0.15, 0.5],
       [0.3, 0.44],
-      [0.42, 0.38],
-      [0.5, 0.32],
-      [0.58, 0.28],
-      [0.66, 0.26],
-      [0.74, 0.24],
-      [0.82, 0.23],
-      [0.9, 0.22],
-      [1, 0.22],
+      [0.42, 0.4],
+      [0.5, 0.38],
+      [0.58, 0.36],
+      [0.66, 0.36],
+      [0.74, 0.37],
+      [0.82, 0.365],
+      [0.9, 0.36],
+      [1, 0.36],
     ],
     shellGain: 0.85,
     // Raised 0.015 -> 0.6 — the single biggest fix in this pass. `feather`
@@ -1058,7 +1163,22 @@ const DIAMOND_STUDIO_CONFIGS: Record<string, StudioConfig> = {
     // body which had previously been close to one flat white shape. Fire
     // unchanged (2.39% -> 2.55%, noise), dark90 unchanged, gold/pave
     // pixel-identical, confirmed at a second camera angle.
-    feather: 0.6,
+    //
+    // Lowered again, 0.6 -> 0.3, after a "foggy, lacks clarity/purity"
+    // complaint traced to something different from either fix above: a
+    // horizontal pixel scanline across a facet showed genuinely sharp,
+    // single-pixel jumps AT edges (ruling out anti-aliasing/blur), but
+    // smooth multi-pixel gradients WITHIN individual flat facets — because
+    // a facet sampling the shell's smoothly-varying background (rather
+    // than a discrete panel) legitimately gets a continuously-varying
+    // value across its own screen-space extent, which reads as a soft,
+    // "milky" quality next to a facet that reads one flat, crisp tone. A
+    // narrower feather makes each panel's OWN contribution closer to a
+    // flat block again — a partial reversion of the fix above — so this
+    // was paired with more panels (see `CRISP_PANELS`) rather than shipped
+    // alone, so fewer facets fall through to shell-only sampling in the
+    // first place instead of undoing the earlier gain.
+    feather: 0.3,
     // `spokeCount`/`spokeStrength` — see `studioRadiance`'s own doc for the
     // mechanism. Added because side-by-side comparison against the real
     // running app showed a structural problem no amount of elevation-only
@@ -1112,6 +1232,16 @@ const DIAMOND_STUDIO_CONFIGS: Record<string, StudioConfig> = {
     // facets, not by growing the bright area into a flat white mass.
     spokeCount: 6,
     spokeStrength: 0.35,
+    // A user-supplied competitor screenshot (a live oval-solitaire ring
+    // configurator, captured and inspected directly) showed its dark/
+    // pavilion facets carrying a distinct cool blue-slate cast rather than
+    // neutral gray — a well-known diamond-photography cue (a cool shadow
+    // reads as icy/premium; neutral or warm reads as flat). See
+    // `bakeStudioTexture`'s own doc for the mechanism — fades to exactly 0
+    // at raw >= 1, so it can only reach the shell-dominated dark
+    // population, never a panel-lit bright facet or the stone's own body
+    // colour.
+    coolShadowTint: 0.12,
   },
   // Sharper and brighter than the tent, with a lower shell floor and tighter
   // feathering for more clearly separated bright/dark facets.
@@ -1219,6 +1349,7 @@ export function getDiamondStudioEnvironment(id: string): THREE.Texture | null {
       config.feather,
       config.spokeCount,
       config.spokeStrength,
+      config.coolShadowTint,
     );
     studioCache.set(id, texture);
   }

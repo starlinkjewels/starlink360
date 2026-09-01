@@ -112,9 +112,28 @@ console.log("\n=== dispersion maps to the shader's aberration ===");
 // render pass, then to 0.005 and finally 0.002 in Phase 18 — see
 // DIAMOND_ABERRATION in library.ts — each time because the previous value
 // still read as more colour than the market reference shows on a mostly-white
-// brilliant.
+// brilliant. Briefly raised to 0.003 (a competitor reference showed more
+// visible fire) and reverted right back — a "foggy" complaint traced to
+// panel density/feather instead, and the extra dispersion cost some edge
+// clarity without being the actual fix. Raised again to 0.004 once that
+// fogginess fix shipped, since the same panel-density/feather change had
+// also (as a side effect) narrowed fire down to imperceptible threads —
+// then halved back to 0.002 on direct user feedback that 0.004 was too
+// much specifically when rotating the piece. Halved once more to 0.001
+// after 0.002 still showed a large, obvious colour band at a second
+// camera angle — an aggregate whole-stone stat had been diluting one
+// large salient patch that a full-array "standout" brightness boost (see
+// `buildStudioArray` in lighting.ts) had made worse. The constant itself
+// IS 0.001 — the 0.0015 checked below is `aberrationFor`'s own
+// ABERRATION_FLOOR clamping this specific call's result, a real, separate
+// guarantee for OTHER stones scaled off this anchor. The main diamond
+// mesh does not go through this function at all (`GemRefraction.tsx`
+// reads DIAMOND_ABERRATION directly as its untraced fallback), so it
+// genuinely renders at 0.001, unclamped. See DIAMOND_ABERRATION's own doc
+// for the full mechanism, including the near-miss of "fixing" this by
+// raising the constant instead of understanding the clamp.
 check(
-  Math.abs(aberrationFor(0.044) - 0.002) < 1e-9,
+  Math.abs(aberrationFor(0.044) - 0.0015) < 1e-9,
   "diamond lands exactly on the value it has always rendered at",
   `${aberrationFor(0.044)}`,
 );

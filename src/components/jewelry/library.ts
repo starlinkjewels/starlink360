@@ -607,11 +607,83 @@ function groupBy<T, K extends string>(items: T[], key: (t: T) => K): { group: K;
  * the reference itself shows in one or two facets, without going fully
  * colourless — true zero was tested and rejected, since the reference is not
  * actually colourless, only restrained.
+ *
+ * Raised slightly to 0.003 in one pass (a competitor reference showed more
+ * visible multi-hued fire than this stone had) and reverted back to 0.002
+ * in the very next one, once a separate "foggy, lacks clarity/purity"
+ * complaint arrived: more dispersion means the R/G/B rays diverge more at
+ * EVERY facet edge, not just deliberate "fire" spots, which softens the
+ * clean white boundary a crisp facet edge needs — in tension with
+ * "purity" in the literal, colourless sense. Checked directly: reverting
+ * this alone barely changed the diamond visually (the real fogginess fix
+ * was `feather`/`buildStudioArray`'s count, in `lighting.ts`), so 0.002
+ * was kept as the safer default rather than paying a clarity cost for a
+ * fire increase that wasn't the actual lever.
+ *
+ * Raised again, this time to 0.004, once the fogginess fix above was
+ * shipped and a SEPARATE complaint arrived: the diamond's real fire was
+ * technically present (matched a pixel-level colour-spread scan) but
+ * imperceptible in practice — scattered as thin, single-pixel-wide specks
+ * rather than the reference's visibly larger colour patches. Traced this
+ * to an interaction with `lighting.ts`'s own recent changes: with panels
+ * now dense (150+, via `buildStudioArray`) and each one's edge sharpened
+ * (`feather` lowered for the fogginess fix), the "sensitive zone" where a
+ * tiny per-channel IOR difference crosses a panel boundary got narrower —
+ * so fire persisted but shrank to threads. `aberrationStrength` controls
+ * how far the R/G/B rays actually diverge, independent of edge sharpness,
+ * so widening it (not the now-correctly-tuned feather) is what widens
+ * each fire patch back out. Checked directly in the running app at both
+ * camera angles: reads as genuine, visible pink/magenta/green colour
+ * patches, not a rainbow sprinkle — comparable in restraint to 0.003's
+ * own earlier visual check, one step further. Colour-spread prevalence
+ * moved proportionately (>20/255: 3.02% -> 4.82%; >40/255: 2.04% -> 2.71%;
+ * >80/255: 1.46% -> 1.56%, the extreme end barely moved), consistent with
+ * patches widening rather than new extreme outliers appearing. Gold/pave
+ * pixel-identical.
+ *
+ * Halved back to 0.002 on direct user feedback: the diamond had picked up
+ * enough other real improvements by this point (the gray-dominant
+ * rebalance in `diamondOptics.ts`, denser panels) that 0.004's fire read
+ * as too much specifically when rotating the piece — checked directly,
+ * colour-spread prevalence dropped roughly in half at every threshold
+ * (>20/255: 11.06% -> 5.85%) while remaining visibly present, not
+ * eliminated, at both camera angles.
+ *
+ * Still visibly too much at 0.002, though — the user reported no
+ * perceptible change, and looking again at a second camera angle
+ * (specifically, not just the aggregate whole-stone stat) found why: a
+ * large, obvious multi-colour band across several facets, not a scatter
+ * of small specks the averaged colour-spread number was diluting. Traced
+ * to the SAME-turn `buildStudioArray` "standout" sparkle boost (see that
+ * function's own doc in `lighting.ts`) — a bigger brightness jump at a
+ * panel's edge produces a bigger dispersion band there even at a lower
+ * aberration setting, since fire severity depends on the brightness
+ * DELTA at a boundary, not the dispersion constant alone. Halved again,
+ * intending 0.001: the large band shrank to a small hint at that same
+ * angle, checked directly, not inferred from the stat, and confirmed
+ * clean across a full rotation sweep (8 angles). Gold/pave
+ * pixel-identical.
+ *
+ * Nearly mis-set to 0.0015 here: `aberrationFor()` clamps its OWN return
+ * value to a floor of 0.0015 (`ABERRATION_FLOOR`), which briefly looked
+ * like it applied to this constant too. It does not, for the one stone
+ * this whole investigation was about — `GemRefraction.tsx` reads this
+ * constant directly as its untraced fallback (`const ABERRATION =
+ * DIAMOND_ABERRATION`), never through `aberrationFor()`, so the main
+ * diamond genuinely renders at 0.001, unclamped. `aberrationFor()`'s
+ * floor is a separate, real guarantee for a DIFFERENT consumer — other
+ * stones whose dispersion is scaled relative to this same anchor, so a
+ * colourless-adjacent stone never goes all the way to dead, fireless
+ * glass. Confirmed by re-capturing the actual screenshot after briefly
+ * raising this constant to 0.0015 to match that floor: the large colour
+ * band partially returned, proving 0.001 (not 0.0015) is what the
+ * verified fix above actually depended on.
+ *
  * Exported so `GemRefraction`'s untraced fallback stays anchored to the same
  * number instead of carrying its own copy that can drift out of sync.
  */
 const DIAMOND_DISPERSION = 0.044;
-export const DIAMOND_ABERRATION = 0.002;
+export const DIAMOND_ABERRATION = 0.001;
 
 /**
  * Floor keeps a low-dispersion stone from going glassy-dead; the ceiling
