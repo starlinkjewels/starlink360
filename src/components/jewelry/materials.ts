@@ -125,5 +125,17 @@ export function createGemMaterial() {
 export function facetGeometry(geometry: THREE.BufferGeometry) {
   const g = geometry.index ? geometry.toNonIndexed() : geometry;
   g.computeVertexNormals();
+  /*
+   * Guarantee a `smoothNormal` attribute exists once faceting is done — see
+   * `diamondGeometryBlend.ts`. The real one is captured upstream, in
+   * `loadJewelryFile.ts`'s `shadeGem`, while genuine shared connectivity
+   * still exists; this is a safety net for any geometry that reaches here
+   * without having gone through that step, falling back to the flat normal
+   * itself so the shader's blend uniform is a no-op rather than reading an
+   * attribute that was never set.
+   */
+  if (!g.getAttribute("smoothNormal")) {
+    g.setAttribute("smoothNormal", g.getAttribute("normal").clone());
+  }
   return g;
 }

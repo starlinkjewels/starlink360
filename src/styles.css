@@ -370,8 +370,16 @@
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  background: color-mix(in oklab, var(--color-background) 88%, transparent);
-  backdrop-filter: blur(6px);
+  /*
+   * Fully opaque, not a tint over the canvas. The canvas underneath is
+   * resized to the export's own dimensions and redrawn from a fresh camera
+   * angle on every one of what can be hundreds of frames, as fast as the
+   * encoder can drain them — at 88% opacity plus blur that strobing render
+   * still showed through as a flicker behind the curtain meant to hide it
+   * (the whole reason this element exists — see the call site). Nothing may
+   * bleed through here.
+   */
+  background: var(--color-background);
   pointer-events: none;
 }
 

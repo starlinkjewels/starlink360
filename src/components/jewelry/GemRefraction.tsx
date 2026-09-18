@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
+import { FloatVertexAttributeTexture, MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
 import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
-import { MeshRefractionMaterial } from "@react-three/drei/materials/MeshRefractionMaterial";
+import { GemTransportMaterial } from "./GemTransportMaterial";
 import { PATCH_ID, withPathAbsorption } from "./gemAbsorption";
 import { ENV_INTENSITY_PATCH_ID, withEnvIntensity } from "./diamondEnvIntensity";
 import { ENV_ROTATION_PATCH_ID, withEnvRotation } from "./diamondEnvRotation";
 import { ENV_RESPONSE_PATCH_ID, withEnvResponse } from "./diamondEnvResponse";
 import { HDR_KNEE_PATCH_ID, withHdrKnee } from "./gemHdrKnee";
+import { GEOMETRY_BLEND_PATCH_ID, withGeometryBlend } from "./diamondGeometryBlend";
+import { TRANSMISSION_PATCH_ID, withTransmissionGlow } from "./diamondTransmission";
 import { gemFresnel, gemTint } from "./materials";
 import { DIAMOND_ABERRATION } from "./library";
 import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
@@ -227,6 +229,12 @@ interface RefractionMaterialLike extends THREE.ShaderMaterial {
   bvh: MeshBVHUniformStruct;
   viewMatrixInverse: THREE.Matrix4;
   projectionMatrixInverse: THREE.Matrix4;
+  /** GemTransportMaterial's own transport controls — see that file. */
+  absorptionFactor: number;
+  boost: number;
+  gammaFactor: number;
+  envShoulder: number;
+  extinctionFix: number;
 }
 
 /**
@@ -296,6 +304,14 @@ export function GemRefraction({
    */
   const bvhCache = useRef(new Map<string, MeshBVHUniformStruct>());
   /**
+   * One smooth-normal lookup texture per distinct geometry, alongside the
+   * BVH it is sampled through — see `diamondGeometryBlend.ts`. Built here,
+   * not per material/spec change, for the same reason the BVH is: packing
+   * every vertex of a pave field into a texture is real work that a swatch
+   * click must never repeat.
+   */
+  const smoothNormalCache = useRef(new Map<string, FloatVertexAttributeTexture>());
+  /**
    * Whatever the last COMPLETED rebuild put on screen, so a new one can tear
    * it down before building fresh — see the debounce below for why this
    * moved out of the effect's own return.
@@ -304,14 +320,28 @@ export function GemRefraction({
 
   useLayoutEffect(() => {
     const cache = bvhCache.current;
+    const normalCache = smoothNormalCache.current;
     for (const mesh of meshes) {
       const geo = mesh.geometry;
-      if (cache.has(geo.uuid)) continue;
-      const bvh = new MeshBVHUniformStruct();
-      bvh.updateFrom(new MeshBVH(bvhSource(geo), { strategy: SAH }));
-      cache.set(geo.uuid, bvh);
+      if (!cache.has(geo.uuid)) {
+        const bvh = new MeshBVHUniformStruct();
+        bvh.updateFrom(new MeshBVH(bvhSource(geo), { strategy: SAH }));
+        cache.set(geo.uuid, bvh);
+      }
+      if (!normalCache.has(geo.uuid)) {
+        const smoothNormal = geo.getAttribute("smoothNormal") as THREE.BufferAttribute | undefined;
+        if (smoothNormal) {
+          const tex = new FloatVertexAttributeTexture();
+          tex.updateFrom(smoothNormal);
+          normalCache.set(geo.uuid, tex);
+        }
+      }
     }
-    return () => cache.clear();
+    return () => {
+      cache.clear();
+      for (const tex of normalCache.values()) tex.dispose();
+      normalCache.clear();
+    };
   }, [meshes]);
 
   /*
@@ -442,6 +472,7 @@ export function GemRefraction({
         if (!geo.boundingSphere) geo.computeBoundingSphere();
         const reference = (geo.boundingSphere?.radius ?? 0.25) * 4;
         const bvh = bvhCache.current.get(geo.uuid);
+        const smoothNormalMap = smoothNormalCache.current.get(geo.uuid);
 
         /*
          * Building the material objects themselves is deferred into the
@@ -484,7 +515,7 @@ export function GemRefraction({
             }
 
             const material = new (
-              MeshRefractionMaterial as unknown as {
+              GemTransportMaterial as unknown as {
                 new (): RefractionMaterialLike;
               }
             )();
@@ -521,86 +552,32 @@ export function GemRefraction({
              */
             const effectiveReference = reference / (s.absorptionFactor ?? 1);
 
-            material.onBeforeCompile = (shader) => {
-              const patched = withPathAbsorption(shader.fragmentShader, effectiveReference);
-              // Null means drei's shader is not the one this was written against.
-              // Keeping the original flat tint is correct; a partial patch is not.
-              if (patched) shader.fragmentShader = patched;
-              /*
-               * Say so, loudly, either way.
-               *
-               * Falling back to drei's flat tint is the safe choice but it is also
-               * indistinguishable from the colour feature being broken: the stone
-               * shows its colour only where the environment is dim, so a painted
-               * stone comes out part coloured and part white. Failing silently
-               * turned that into a long hunt through geometry that was never at
-               * fault. This runs once per program, not per frame.
-               */
-              if (import.meta.env.DEV) {
-                if (patched) console.log(`[gem] absorption patch ${PATCH_ID} compiled`);
-                else
-                  console.error(
-                    "[gem] absorption patch REJECTED — drei's shader has changed shape, so " +
-                      "stones fall back to a flat tint that washes out against a bright " +
-                      "environment. Run `npm run test:gem` to see which anchor no longer matches.",
-                  );
-              }
-
-              // Live diamond-environment-intensity uniform — see diamondEnvIntensity.ts.
-              const withIntensity = withEnvIntensity(shader.fragmentShader);
-              if (withIntensity) {
-                shader.fragmentShader = withIntensity;
-                shader.uniforms.uDiamondEnvIntensity = new THREE.Uniform(envIntensityRef.current);
-              } else if (import.meta.env.DEV) {
-                console.error(
-                  "[gem] env-intensity patch REJECTED — drei's shader has changed shape, so " +
-                    "the diamond environment intensity slider has no effect on this stone.",
-                );
-              }
-
-              // Live diamond-environment-rotation uniform — see diamondEnvRotation.ts.
-              // No-op (by design) when envMap is a cube texture; only the equirect
-              // branch has a uvv/smoothUv to rotate.
-              const withRotation = withEnvRotation(shader.fragmentShader);
-              if (withRotation) {
-                shader.fragmentShader = withRotation;
-                shader.uniforms.uDiamondEnvRotation = new THREE.Uniform(
-                  (envRotationRef.current ?? 0) / (2 * Math.PI),
-                );
-              } else if (import.meta.env.DEV && !(envMap as THREE.CubeTexture).isCubeTexture) {
-                console.error(
-                  "[gem] env-rotation patch REJECTED — drei's shader has changed shape, so " +
-                    "the diamond environment rotation slider has no effect on this stone.",
-                );
-              }
-
-              // Live environment-response-curve uniform — see diamondEnvResponse.ts.
-              const withResponse = withEnvResponse(shader.fragmentShader);
-              if (withResponse) {
-                shader.fragmentShader = withResponse;
-                shader.uniforms.uEnvResponseExponent = new THREE.Uniform(
-                  diamondOptics.envResponseExponent,
-                );
-              } else if (import.meta.env.DEV) {
-                console.error(
-                  "[gem] env-response patch REJECTED — drei's shader has changed shape, so " +
-                    "the environment response curve has no effect on this stone.",
-                );
-              }
-
-              // Live pre-ACES HDR-compression uniforms — see gemHdrKnee.ts.
-              const withKnee = withHdrKnee(shader.fragmentShader);
-              if (withKnee) {
-                shader.fragmentShader = withKnee;
-                shader.uniforms.uKneeThreshold = new THREE.Uniform(diamondOptics.kneeThreshold);
-                shader.uniforms.uKneeStrength = new THREE.Uniform(diamondOptics.kneeStrength);
-              } else if (import.meta.env.DEV) {
-                console.error(
-                  "[gem] hdr-knee patch REJECTED — drei's shader has changed shape, so " +
-                    "the diamond's pre-ACES HDR compression has no effect on this stone.",
-                );
-              }
-            };
+            /*
+             * drei's seven shader patches are deliberately NOT applied here.
+             *
+             * Every one of them (gemAbsorption, diamondEnvIntensity,
+             * diamondEnvRotation, diamondEnvResponse, gemHdrKnee,
+             * diamondGeometryBlend, diamondTransmission) rewrites drei's
+             * fragment source by string anchor. This material is not drei's, so
+             * four of them decline cleanly and one — env-rotation, whose first
+             * anchor is the `uniform float aberrationStrength;` line that both
+             * shaders happen to share — half-applied and duplicated a uniform,
+             * which failed the compile outright.
+             *
+             * Absorption, environment intensity and environment rotation are
+             * native uniforms on GemTransportMaterial instead, and the bounded
+             * `envShoulder` read covers what the HDR knee was doing. The
+             * per-frame updater below still drives `uDiamondEnvIntensity` and
+             * `uDiamondEnvRotation` by name, unchanged.
+             *
+             * STILL TO PORT (inert on this material until they are):
+             * env-response exponent, facet-normal smoothing (geometryFactor /
+             * smoothNormalMap) and the transmission-glow slider.
+             */
+            // Distance is measured in model units, so normalising by the stone's
+            // own size keeps a small melee and a large centre stone absorbing
+            // alike — the same intent as the reference length this replaces.
+            material.absorptionFactor = (s.absorptionFactor ?? 1) / Math.max(reference, 1e-6);
             /*
              * The reference length is baked into the shader text, so two stones of
              * different sizes need different programs. Without this three reuses
@@ -614,10 +591,14 @@ export function GemRefraction({
              * move when any of these do means three keeps serving a stale program,
              * and the edit silently does nothing until the renderer is torn down.
              */
-            material.customProgramCacheKey = () =>
-              `gem-absorb-${effectiveReference.toPrecision(8)}-${PATCH_ID}-envint-${ENV_INTENSITY_PATCH_ID}` +
-              `-envrot-${ENV_ROTATION_PATCH_ID}-envresp-${ENV_RESPONSE_PATCH_ID}-hdrknee-${HDR_KNEE_PATCH_ID}` +
-              `-fc${diamondOptics.fastChroma ? 1 : 0}`;
+            /*
+             * Everything that used to vary the compiled TEXT — the baked
+             * absorption reference and six string patches — is a uniform now, so
+             * one program serves every stone. The smooth-normal map is the only
+             * thing left that would change the shader's shape, and it is not
+             * wired into this material yet.
+             */
+            material.customProgramCacheKey = () => "gem-transport-v1";
             material.needsUpdate = true;
 
             created.push(material);

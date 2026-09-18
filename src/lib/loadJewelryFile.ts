@@ -413,9 +413,31 @@ async function shadeGem(geometries: THREE.BufferGeometry[]): Promise<THREE.Buffe
   if (!merged) return null;
   if (geometries.length > 1) geometries.forEach((g) => g.dispose());
 
+  /*
+   * Smooth normals, captured on the ORIGINAL connectivity before it is
+   * thrown away below — see `diamondGeometryBlend.ts` for why the refraction
+   * shader wants this. Once `toNonIndexed()` runs, sharing is gone for good:
+   * every triangle owns three private vertices and there is nothing left to
+   * average across a facet boundary. Attached as a plain custom attribute
+   * rather than computed separately, so `toNonIndexed()` expands it exactly
+   * the way it already expands position and uv — every duplicated triangle
+   * corner ends up with the same smooth value its one shared source vertex
+   * had, for free, with no separate index bookkeeping of our own.
+   */
+  if (merged.index) {
+    if (!merged.getAttribute("normal")) merged.computeVertexNormals();
+    merged.setAttribute("smoothNormal", merged.getAttribute("normal").clone());
+  }
+
   const flat = merged.index ? merged.toNonIndexed() : merged;
   if (flat !== merged) merged.dispose();
   flat.computeVertexNormals();
+  // No index to begin with means no shared connectivity to have smoothed in
+  // the first place — fall back to the flat normal, which makes the shader's
+  // blend a safe no-op rather than an undefined attribute.
+  if (!flat.getAttribute("smoothNormal")) {
+    flat.setAttribute("smoothNormal", flat.getAttribute("normal").clone());
+  }
   return flat;
 }
 

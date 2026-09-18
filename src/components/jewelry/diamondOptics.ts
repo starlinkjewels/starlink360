@@ -104,8 +104,23 @@ export interface DiamondOpticsSettings {
    * original sweep continued downward: 2 produces visibly larger, more
    * coherent facet regions much closer to the reference's structure; 1 goes
    * too far and starts losing the faceted-cut read entirely, reading almost
-   * as a smooth dome. 2 is the new closest match, confirmed at a second,
-   * unrelated camera angle so it isn't a one-viewpoint artifact.
+   * as a smooth dome. 2 was the closest match found — AT THE TIME, with no
+   * way to raise this without the facet normal itself fragmenting the
+   * result (see `geometryFactor` below).
+   *
+   * Raised 2 -> 5 once `geometryFactor` existed to blend the bounce normal
+   * toward a smooth one (see that field's own doc) specifically to let a
+   * higher bounce count avoid the shattering above. At `geometryFactor: 1.0`
+   * it did — checked at two independent camera angles, large coherent facet
+   * planes, no shards — but the shipped combination (5, 1.0) drew direct
+   * user feedback that it had "lot more detailing... but lost realism...
+   * feels like an image", rejecting the LOOK, not the higher bounce count —
+   * the extra detail was explicitly wanted. Briefly reverted bounces to 2
+   * on a misreading of that feedback as "abandon this," corrected once the
+   * user clarified: keep the added facet detail, fix the flatness. The
+   * actual fix was `geometryFactor`, not `bounces` — see that field's own
+   * doc for why 1.0 was the wrong end of the range to have settled on.
+   * Bounces stays at 5.
    */
   bounces: number;
   /**
@@ -321,13 +336,78 @@ export interface DiamondOpticsSettings {
    * 0.75 (unchanged) once that was clear.
    */
   kneeStrength: number;
+  /**
+   * Blends each bounce's exact, flat facet normal toward a smooth one — see
+   * `diamondGeometryBlend.ts` for the mechanism. 0 is an exact identity
+   * (mixing a normal with itself), so this is a genuine off switch, not an
+   * approximation of one.
+   *
+   * Shipped at 1.0 (fully smooth) first, since that was the value that most
+   * cleanly eliminated the shattering `bounces` above was raised for —
+   * checked at two camera angles, large coherent facet planes, no shards.
+   * Direct user feedback on that shipped result: more facet detail than
+   * before, genuinely, but it "lost realism... feels like an image" — and
+   * comparing the same crop at 1.0 against lower values in the sweep that
+   * had already been captured (0.15, 0.3, 0.5, 0.7, 0.85) makes the reason
+   * legible in hindsight: full smoothing doesn't just stop facets from
+   * fragmenting, it also erases the fine graduated internal texture a real
+   * stone has EVEN WITHIN one facet — the small tonal variation and
+   * micro-detail that reads as photographic complexity. At 1.0 that texture
+   * is gone and what's left is large, cleanly-bounded, near-uniform regions
+   * — coherent, but graphic/illustrative rather than photographic, which is
+   * exactly "feels like an image". Lower values keep far more of that
+   * texture while still pulling the normal enough off its raw, razor-flat
+   * value to avoid the original shattering: 0.15 shows rich, fine internal
+   * variation — small gradients, subtle colour, no large dead-flat patches
+   * — while still reading as one coherent stone rather than the disjointed
+   * shards `bounces: 5` produced at 0. That is the new default; the tonal
+   * histogram at every value from 0 to 1 was already checked and found not
+   * to be the deciding factor either way (see `bounces`' own history), so
+   * this was judged on the same thing the complaint was about — how much
+   * fine internal texture survives, not overall brightness.
+   */
+  geometryFactor: number;
+  /**
+   * Blends a soft, direct-transmission glow underneath the reflected result
+   * — see `diamondTransmission.ts` for the mechanism and the full reasoning.
+   * 0 is an exact identity (`mix(x, y, 0) == x`), so this is a genuine off
+   * switch.
+   *
+   * Added directly in response to a specific, four-part user diagnosis
+   * against a real reference photo: our dark facets read as flat opaque
+   * mirror rather than translucent glass, the tone jumps binary rather than
+   * graduating, there is no soft glow near the stone's centre, and the
+   * brightest points are broad fields rather than sharp glints. This
+   * targets the first two of those directly by construction (the blended
+   * direct ray is smooth and always non-zero, so it cannot leave a dark
+   * facet flat and dead), and the third as a side effect of the same
+   * mechanism. The fourth is a separate, already-tuned concern.
+   *
+   * Swept directly in the running app (0, 0.15, 0.25, 0.4, 0.55, 0.7) before
+   * settling on a default. 0.4 was a clear, real improvement — the dark
+   * region that previously read as flat charcoal-gray mirror was visibly
+   * lighter and softer without losing facet contrast. 0.7 overshot into the
+   * SAME failure the earlier real-transmission attempt had — visibly
+   * washed-out and milky, sparkle and contrast both dulled — reached this
+   * time by too much of a smooth blend rather than by picking up scene
+   * colour, but the symptom is the same and the ceiling is real. 0.35, one
+   * step back from the confirmed-good 0.4 and well clear of the
+   * confirmed-bad 0.7, is the shipped default. Checked at the standard
+   * camera angle only so far — still pending the same second-angle check
+   * this file's other constants have had, and pending the user's own read
+   * of the live app, which is what actually decided the last two rounds of
+   * tuning in this file.
+   */
+  transmissionGlow: number;
 }
 
 export const DEFAULT_DIAMOND_OPTICS: DiamondOpticsSettings = {
-  bounces: 2,
+  bounces: 5,
   fresnelScale: 0.6,
   fastChroma: true,
   envResponseExponent: 2.5,
   kneeThreshold: 0.8,
   kneeStrength: 0.75,
+  geometryFactor: 0.15,
+  transmissionGlow: 0.35,
 };

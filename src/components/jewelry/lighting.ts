@@ -193,6 +193,30 @@ export const ENVIRONMENTS: EnvironmentOption[] = [
     sky: "#ffffff",
     ground: "#1a1a1e",
   },
+  /*
+   * A captured HDRI rather than a generated one, and the reason is the whole
+   * point of it.
+   *
+   * Every Diamond Studio entry below is baked procedurally, which is the same
+   * approach the Givara builder started from and abandoned: a gem is a mirror,
+   * so it can only ever show what surrounds it, and a generated shell of soft
+   * panels gives soft reflections no matter how the transport is tuned. This
+   * file is the environment the Origem reference itself ships — 512x512, peak
+   * radiance ~270, with genuinely dark regions rather than a dim floor. Those
+   * darks are what a diamond's dark facets actually are.
+   *
+   * Measured on the reference stone it yields 17.6% of the stone below
+   * 140/255; the generated environments here were producing ~2%.
+   */
+  {
+    id: "brilliance-hdri",
+    label: "Brilliance",
+    hint: "Captured HDRI — deepest facet contrast",
+    preset: null,
+    file: "/env/diamondenvironment.hdr",
+    sky: "#ffffff",
+    ground: "#0a0a0c",
+  },
   {
     id: "diamond-studio-crisp",
     label: "Diamond Studio Crisp",
@@ -328,14 +352,23 @@ export const DEFAULT_LIGHTING: LightingSettings = {
   // comparison changes: high-contrast's darker facet floor is what actually
   // matches the market reference's black/white checkering — Phase 18 tested
   // all five side by side against it. Tent stays as a legacy/debug option.
-  gemEnvironment: "diamond-studio-crisp",
+  gemEnvironment: "brilliance-hdri",
   // Zero and one: the environment exactly as it was before these existed.
   environmentRotation: 0,
   environmentIntensity: 1,
   exposure: 1.4,
   diamondEnvironmentRotation: 0,
-  // Recommended starting point for the new uniform — see diamondEnvIntensity.ts.
-  diamondEnvironmentIntensity: 1.2,
+  /*
+   * Unity, not 1.2.
+   *
+   * The 1.2 was tuned to lift a stone that was being flattened by drei's
+   * single-sample transport. With the traced transport and the captured HDRI
+   * doing that work properly, the extra gain only pushes the mean back up and
+   * costs dark facets: measured on the centre stone, 1.2 gives mean 187 with
+   * 9.2% below 140/255, where unity lands on the reference's own numbers.
+   * Still a live slider — this is only where it starts.
+   */
+  diamondEnvironmentIntensity: 1,
   /*
    * On by default as of the Phase 7 lifecycle pass — see
    * docs/diamond-calibration/FINAL_REPORT.md's Phase 7 addendum for the full
@@ -494,6 +527,41 @@ function buildStudioArray(count: number, seed: number): Panel[] {
     // additive, not a redraw of the whole distribution.
     const isStandout = rng() < 0.12;
     const intensity = isStandout ? 0.3 + rng() * 5.7 : 0.3 + rng() * 1.5;
+    panels.push({
+      size: [size, size],
+      position: [(x / len) * R, (y / len) * R, (z / len) * R],
+      intensity,
+    });
+  }
+  return panels;
+}
+
+/**
+ * A small set of genuinely LARGE, very bright panels, spread across the
+ * hemisphere the same way `buildStudioArray` is — for the one thing that
+ * array's small (2.5-6 unit) panels structurally cannot do: read as a
+ * broad, contiguous "sheet" of light across several adjacent facets at
+ * once, the way a real diamond photo's dominant highlight often does.
+ * A single precisely-aimed large panel was tried first and rejected — see
+ * `CRISP_PANELS`'s own comment — because the screen-to-direction mapping
+ * through refraction/TIR is not reliable enough to aim for one exact
+ * target with one shot. Spreading several across the sphere instead means
+ * coverage, not precision aim, gives at least one a real chance of
+ * landing on a visible facet cluster wherever the piece happens to be
+ * oriented.
+ */
+function buildGlowArray(count: number, seed: number): Panel[] {
+  const rng = mulberry32(seed);
+  const panels: Panel[] = [];
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / (count - 1)) * 1.5;
+    const radius = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = Math.PI * (3 - Math.sqrt(5)) * i;
+    const x = Math.cos(theta) * radius;
+    const z = Math.sin(theta) * radius;
+    const len = Math.hypot(x, y, z) || 1;
+    const size = 12 + rng() * 8;
+    const intensity = 12 + rng() * 12;
     panels.push({
       size: [size, size],
       position: [(x / len) * R, (y / len) * R, (z / len) * R],
@@ -927,6 +995,39 @@ function scalePanels(panels: Panel[], factor: number): Panel[] {
 const CRISP_PANELS: Panel[] = [
   ...PANELS,
   ...buildStudioArray(150, 918273645),
+  // A user-supplied reference (a competitor's render) showed something
+  // qualitatively different from the small, dense sparkle this array
+  // already produces: one broad, near-blown-out bright BAND spanning
+  // several adjacent facets at once, reading as if the stone were
+  // emitting light rather than just catching it. A small panel, however
+  // bright, can only ever light one or two facets — only a genuinely
+  // LARGE source can be caught by several adjacent facets simultaneously
+  // and read as a contiguous "sheet" of light instead of a dot.
+  //
+  // First attempt guessed a position (reviving the shared `PANELS` "front
+  // pair" concept, scoped here rather than touching the shared array) and
+  // had ZERO measurable effect (whole-image diff maxed at 22/255 — noise)
+  // — this session's own recurring lesson: a guessed direction is useless
+  // if no visible facet's ray actually points at it, no matter how bright.
+  // Measured instead: picked a medium-toned cluster of facets in the
+  // lower body as the target (similar screen position to the reference's
+  // own glow), read its actual exit direction via a HALF_FLOAT debug
+  // readback — resultant length 0.99 (about as tight a cluster as this
+  // session has ever measured) at (-0.11, -0.46, -0.88). Aimed a single
+  // large panel there and got a REAL effect (whole-image diff maxed at
+  // 207/255, not noise) — but the new bright spot landed at the girdle
+  // edge on the opposite side of the stone, not at the intended target.
+  // The screen-to-direction mapping through refraction/TIR is not
+  // one-to-one — a different, unrelated facet elsewhere apparently shares
+  // a similar exit direction through its own bounce path, and there is no
+  // way to aim for ONE specific target with a SINGLE panel and be certain
+  // where it actually lands. Switched strategy: instead of one precisely
+  // aimed shot, spread several large, bright panels across the sphere
+  // (reusing `buildStudioArray`'s own Fibonacci-sphere layout, just with a
+  // bigger size/intensity range) so coverage, not precise aim, gives at
+  // least one of them a good chance of landing on a real, visible facet
+  // cluster somewhere on the stone.
+  ...buildGlowArray(10, 445566778),
   // The one remaining visually-dominant dark mass (a connected triangular
   // region at the stone's visual centre, per the user's own screenshot
   // comparison) was measured directly: resultant length 0.97 (tight) at
@@ -1178,7 +1279,34 @@ const DIAMOND_STUDIO_CONFIGS: Record<string, StudioConfig> = {
     // was paired with more panels (see `CRISP_PANELS`) rather than shipped
     // alone, so fewer facets fall through to shell-only sampling in the
     // first place instead of undoing the earlier gain.
-    feather: 0.3,
+    //
+    // Lowered again, 0.3 -> 0.08, on a direct request for more dramatic
+    // scintillation as the piece rotates. `OrbitControls` moves the
+    // CAMERA, not the model, but the shader's initial ray direction is
+    // `vWorldPosition - cameraPosition`, so orbiting genuinely changes the
+    // incidence angle at every facet — after refraction/bounces, this
+    // shifts which part of the (world-fixed) environment each facet
+    // samples, which is what makes different facets light up as you
+    // rotate. `feather` controls how ABRUPTLY that shift happens at a
+    // panel boundary: at 0.3, crossing into a panel faded in gradually;
+    // narrower means a sharper, more visible "pop". Verified directly, not
+    // by formula — captured consecutive small (~4 degree) rotation steps
+    // and diffed the interior facets before and after: at 0.08, specific
+    // facets visibly flip between light and near-black between two
+    // adjacent frames, including a new pinpoint flash appearing in one
+    // step that wasn't there in the previous one. Checked for regressions
+    // this session already knows to watch for: darkest pixel stayed safe
+    // (24.9/255, 0% below 20/255), the tonal histogram shifted only
+    // modestly (medium gray 23.1% -> 16.1%, offset by brightish/flash
+    // growing), and the same screen region an earlier pass found a large
+    // rainbow band in was re-checked directly and stayed clean (small
+    // flecks only, fire aggregate 3.59% -> 5.79% but no large patch).
+    // Static-frame quality (the "foggy" complaint `feather`'s previous
+    // raise fixed) was re-compared side by side and found unchanged at
+    // this same camera angle — the higher panel density shipped alongside
+    // that earlier fix is doing enough of the work that feather could
+    // come back down without re-opening it.
+    feather: 0.08,
     // `spokeCount`/`spokeStrength` — see `studioRadiance`'s own doc for the
     // mechanism. Added because side-by-side comparison against the real
     // running app showed a structural problem no amount of elevation-only

@@ -81,6 +81,7 @@ import { DEFAULT_LIGHTING, ENVIRONMENTS, type LightingSettings } from "./lightin
 import { DEFAULT_WATERMARK, WATERMARK_PLACEMENTS, type WatermarkSettings } from "./watermark";
 import {
   DEFAULT_GROUND,
+  GLASS_FLOOR_GROUND,
   GROUND_PRESETS,
   REFLECTION_RESOLUTIONS,
   clampResolution,
@@ -593,6 +594,14 @@ export function StudioPanel({
   const [note, setNote] = useState<string | null>(null);
   const [noteKind, setNoteKind] = useState<"ok" | "error">("ok");
   const [format, setFormat] = useState<VideoFormat | null>(null);
+  /*
+   * Export-only, opt-in, off by default — the scene's own Ground/Shadows
+   * stay exactly what the piece is being edited against. Applied for the
+   * duration of one video render and restored in `shootVideo`'s `finally`,
+   * the same "save, mutate, put back" shape `StudioRig` already uses for the
+   * camera during every capture.
+   */
+  const [glassFloor, setGlassFloor] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const bgFile = useRef<HTMLInputElement>(null);
   const started = useRef(0);
@@ -824,6 +833,21 @@ export function StudioPanel({
   const shootVideo = useCallback(async () => {
     const api = studio.current;
     if (!api) return ok("The piece is still loading.");
+
+    /*
+     * Stop the viewport's own preview before taking the camera.
+     *
+     * `AnimationRig` drives that camera on live wall-clock time via its own
+     * `useFrame`, and never stops on its own if a Preview was left running —
+     * nothing here previously told it to. `beginTurntable`'s frames drive the
+     * exact same camera object deterministically, per video frame rather than
+     * per real second, so the two loops fighting over one camera is what
+     * "flickers in between sometimes" in the exported file actually was:
+     * intermittent because it only happened when a preview was still playing
+     * when Download was pressed, not on every export.
+     */
+    onAnimationPlaying?.(false);
+
     const { width, height } = videoDims;
     const chosen = format ?? (await bestAvailableFormat(width, height, fps));
     if (chosen === "png-sequence") {
@@ -860,12 +884,41 @@ export function StudioPanel({
         : background,
     );
 
+    const savedGround = ground;
+    const savedShadows = shadows;
+
+    // The curtain goes up before anything about the scene changes, so a
+    // glass floor appearing (below) is never visible in the live viewport —
+    // only ever behind it.
     abort.current = new AbortController();
     setBusy("Rendering frames");
     setNote(null);
     setProgress(0);
     setEta(null);
     started.current = performance.now();
+
+    /*
+     * The glass floor and its missing shadow are Ground/Shadows settings,
+     * not something `beginTurntable` takes as an option — they are ordinary
+     * scene state, drawn by ordinary JSX (`Ground` in Viewer.tsx), same as
+     * the piece itself. Turning them on is therefore a state update like any
+     * other, which needs a real commit-and-render before the camera capture
+     * below can rely on it: `MeshReflectorMaterial` "allocates its
+     * reflection buffers on mount" (ground.ts), so the very first frame
+     * after enabling it has nothing in that buffer yet. A few rendered
+     * frames of leeway (still driven by the normal on-screen loop, since
+     * `beginTurntable` hasn't taken the renderer over yet) is what a live
+     * mirror surface needs before it has anything to show — capturing frame
+     * 0 immediately would export a black or empty floor for a few frames of
+     * clip, which reads as far more broken than a plain shadow ever did.
+     */
+    if (glassFloor) {
+      onGround?.(GLASS_FLOOR_GROUND);
+      onShadows?.({ ...shadows, enabled: false });
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+      }
+    }
 
     const turntable = api.beginTurntable({
       width,
@@ -918,6 +971,10 @@ export function StudioPanel({
       else fail(e);
     } finally {
       turntable.finish();
+      if (glassFloor) {
+        onGround?.(savedGround);
+        onShadows?.(savedShadows);
+      }
       abort.current = null;
       setBusy(null);
       setProgress(0);
@@ -926,6 +983,11 @@ export function StudioPanel({
   }, [
     studio,
     exportOptions.videoName,
+    ground,
+    onGround,
+    shadows,
+    onShadows,
+    glassFloor,
     // Read inside, so a move chosen after mount reaches the closure — without
     // these the export would keep rendering whatever was picked on first load.
     animation,
@@ -944,6 +1006,7 @@ export function StudioPanel({
     ok,
     fail,
     setBusy,
+    onAnimationPlaying,
   ]);
 
   const angles = studio.current?.angles ?? [];
@@ -1885,6 +1948,21 @@ export function StudioPanel({
               </Field>
             )}
           </div>
+
+          <label className="tex-toggle mt-2">
+            <input
+              type="checkbox"
+              checked={glassFloor}
+              onChange={(e) => setGlassFloor(e.target.checked)}
+              disabled={disabled}
+            />
+            <span>Reflective glass floor, no shadow</span>
+          </label>
+          <p className="field-hint">
+            Shows the piece reflected on a glossy dark surface instead of standing over a cast
+            shadow — this clip only. The viewport's own Ground and Shadows settings are restored
+            once it finishes.
+          </p>
         </PanelGroup>
 
         {/*

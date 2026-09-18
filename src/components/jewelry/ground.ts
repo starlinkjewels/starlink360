@@ -112,6 +112,25 @@ export const DEFAULT_GROUND: GroundSettings = {
   distortion: 0,
 };
 
+/**
+ * "Placed on glass" for a video export: the piece reflected on a glossy dark
+ * surface instead of standing over a cast shadow.
+ *
+ * Every number besides `enabled`/`kind`/`style` is DEFAULT_GROUND's own —
+ * "the values the mirror already rendered with", per that constant's own
+ * comment — not a new guess. The one thing a glass export needs that the
+ * default off-state doesn't specify is which of `standard`/`transparent` to
+ * use: `standard` draws the surface itself, which is the point here — a
+ * transparent ground would keep only a cast shadow, the opposite of what
+ * this is for.
+ */
+export const GLASS_FLOOR_GROUND: GroundSettings = {
+  ...DEFAULT_GROUND,
+  enabled: true,
+  kind: "standard",
+  style: "mirror",
+};
+
 export const GROUND_PRESETS = [
   { label: "Charcoal", hex: "#0e0d12" },
   { label: "Black", hex: "#000000" },
