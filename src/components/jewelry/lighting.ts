@@ -194,6 +194,29 @@ export const ENVIRONMENTS: EnvironmentOption[] = [
     ground: "#1a1a1e",
   },
   /*
+   * The metal's studio, and the reason it exists is the same reason the gem
+   * has its own.
+   *
+   * `warehouse` and the other drei presets are PHOTOGRAPHS of real rooms —
+   * windows, roof beams, light fittings. Polished gold is a mirror, so all of
+   * that structure lands in the piece: the shank picks up beams, and the melee
+   * come back dark olive where they mirror a wall instead of a light. It reads
+   * as a dirty stone rather than a lit one.
+   *
+   * This is the environment the Givara builder lights its metal with — a soft
+   * synthetic studio with broad shaped sources and nothing recognisable in it,
+   * so the metal shows highlight and falloff rather than somebody's warehouse.
+   */
+  {
+    id: "atelier",
+    label: "Atelier",
+    hint: "Soft studio — no room structure in reflections",
+    preset: null,
+    file: "/env/ringbodyenvironment.hdr",
+    sky: "#f4f1ea",
+    ground: "#cfc9bd",
+  },
+  /*
    * A captured HDRI rather than a generated one, and the reason is the whole
    * point of it.
    *
@@ -340,7 +363,7 @@ export interface LightingSettings {
  * part of "does this look photographed at all".
  */
 export const DEFAULT_LIGHTING: LightingSettings = {
-  environment: "warehouse",
+  environment: "atelier",
   separateGemEnvironment: true,
   // The tent proved the concept; the Diamond Studio family below is the
   // tuned successor. That earlier soft-studio-over-diamond-studio call was
@@ -356,7 +379,7 @@ export const DEFAULT_LIGHTING: LightingSettings = {
   // Zero and one: the environment exactly as it was before these existed.
   environmentRotation: 0,
   environmentIntensity: 1,
-  exposure: 1.4,
+  exposure: 1,
   diamondEnvironmentRotation: 0,
   /*
    * Unity, not 1.2.
@@ -387,7 +410,7 @@ export const DEFAULT_LIGHTING: LightingSettings = {
    * 20/20 fresh loads now survive with this on; see the report for the full
    * methodology.
    */
-  diamondDynamicReflections: true,
+  diamondDynamicReflections: false,
 };
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -1482,4 +1505,92 @@ export function getDiamondStudioEnvironment(id: string): THREE.Texture | null {
     studioCache.set(id, texture);
   }
   return texture;
+}
+
+/* ------------------------------------------------------------ metal studio */
+
+/*
+ * Ported from the Givara builder.
+ *
+ * `ringbodyenvironment.hdr` is a soft synthetic tent — which is exactly why it
+ * has no warehouse beams in it, but also why the gold goes pale: a mirror can
+ * only show what surrounds it, and a smooth shell gives smooth, bright
+ * reflections. Measured on this piece, the raw HDRI gives gold mean 170 / sd 49
+ * against Givara's 130 / sd 58.
+ *
+ * The fix is not more light, it is *less* in the right places. A bench
+ * photographer surrounds a piece with black flags; they cost nothing in
+ * brightness because they only ever subtract, and they give the metal the hard
+ * light-to-dark transitions a smooth tent cannot. That banding along a shank is
+ * what reads as polished gold rather than a shaded tube.
+ */
+export const STUDIO_FLAG = 0.12;
+
+function studioFlag(
+  geometry: THREE.BoxGeometry,
+  intensity: number,
+  position: [number, number, number],
+  scale: [number, number, number],
+): THREE.Mesh {
+  const material = new THREE.MeshBasicMaterial();
+  material.color.setScalar(intensity);
+  material.toneMapped = false;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(...position);
+  mesh.scale.set(...scale);
+  return mesh;
+}
+
+export function buildMetalEnvironment(
+  renderer: THREE.WebGLRenderer,
+  hdr: THREE.Texture,
+  flag = STUDIO_FLAG,
+): THREE.Texture {
+  const scene = new THREE.Scene();
+  // The reference environment, unchanged, behind everything.
+  scene.background = hdr;
+
+  const geometry = new THREE.BoxGeometry();
+  geometry.deleteAttribute("uv");
+
+  // Overhead, split front-to-back. The split is the point: an unbroken view of
+  // the tent gives one soft highlight, where flag-gap-flag gives the
+  // bright / dark / bright banding that runs the length of a polished band.
+  scene.add(studioFlag(geometry, flag, [0, 6.5, 1.5], [13, 0.4, 5]));
+  scene.add(studioFlag(geometry, flag, [0, 6.2, -1.4], [13.4, 0.5, 1.6]));
+  scene.add(studioFlag(geometry, flag, [0, 6.5, -4.6], [13, 0.4, 4]));
+
+  // Sides, so the band picks up a hard edge as it curves away rather than
+  // fading off into grey.
+  scene.add(studioFlag(geometry, flag, [-7.5, 1.6, 1.5], [0.4, 6, 9]));
+  scene.add(studioFlag(geometry, flag, [-7.1, 1.6, -4.2], [0.5, 6.4, 2.4]));
+  scene.add(studioFlag(geometry, flag, [7.5, 1.0, -0.5], [0.4, 5.5, 8]));
+  scene.add(studioFlag(geometry, flag, [7.1, 1.0, 4.4], [0.5, 5.9, 2.2]));
+
+  // Low front, which is what gives the underside of the shank an edge instead
+  // of letting it wash out into the floor of the tent.
+  scene.add(studioFlag(geometry, flag, [0, -3.4, 6.5], [10, 2.4, 0.4]));
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileCubemapShader();
+  const texture = pmrem.fromScene(scene, 0, 0.1, 100).texture;
+  pmrem.dispose();
+
+  geometry.dispose();
+  scene.traverse((object) => {
+    if (object instanceof THREE.Mesh) (object.material as THREE.Material).dispose();
+  });
+  return texture;
+}
+
+const metalStudioCache = new WeakMap<THREE.WebGLRenderer, THREE.Texture>();
+
+/** Built once per renderer; the flags never change. */
+export function getMetalStudio(renderer: THREE.WebGLRenderer, hdr: THREE.Texture): THREE.Texture {
+  let tex = metalStudioCache.get(renderer);
+  if (!tex) {
+    tex = buildMetalEnvironment(renderer, hdr);
+    metalStudioCache.set(renderer, tex);
+  }
+  return tex;
 }

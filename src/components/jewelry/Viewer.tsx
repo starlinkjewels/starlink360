@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { Canvas, useThree, useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
   Environment,
+  useEnvironment,
   OrbitControls,
   OrthographicCamera,
   PerspectiveCamera,
@@ -55,7 +56,14 @@ import {
   frameFit,
   type CameraSettings,
 } from "./camera";
-import { DEFAULT_LIGHTING, environmentById, type LightingSettings } from "./lighting";
+import {
+  DEFAULT_LIGHTING,
+  environmentById,
+  getMetalStudio,
+  type LightingSettings,
+  getDiamondStudioEnvironment,
+  getLightTent,
+} from "./lighting";
 import { DEFAULT_GROUND, groundDimensions, groundY, type GroundSettings } from "./ground";
 import { DEFAULT_LIGHTS, casterOf, type LightDef } from "./lights";
 import {
@@ -204,6 +212,48 @@ function Ground({ fit, settings }: { fit: Fit; settings: GroundSettings }) {
  * The renderer is handed upward as well, because exports call it directly. Any
  * other arrangement gives bloom on screen and none in the download.
  */
+/**
+ * The Atelier environment, flagged before use.
+ *
+ * Its own component so the hooks it needs (`useEnvironment`, the renderer) do
+ * not have to be threaded through the scene component — and so the HDRI is only
+ * fetched when this environment is actually selected.
+ *
+ * `getMetalStudio` adds the black flags; see its note in lighting.ts for why a
+ * soft tent alone leaves gold pale.
+ */
+function AtelierEnvironment({ rotation, intensity }: { rotation: number; intensity: number }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const hdr = useEnvironment({ files: "/env/ringbodyenvironment.hdr" });
+  const map = useMemo(() => getMetalStudio(gl, hdr), [gl, hdr]);
+
+  /*
+   * Assigned straight onto the scene rather than rendered as drei's
+   * `<Environment map={...} />`.
+   *
+   * That component funnels every prop it receives through `setEnvProps`, and
+   * this project's dev tooling injects a `data-tsd-source` attribute onto JSX
+   * elements — which R3F then tries to apply to the three object and throws
+   * ("Cannot set data-tsd-source"), taking the whole canvas down. The
+   * `files`/`preset` path happens to filter that out; the `map` path does not.
+   * Setting the three properties directly avoids the question entirely.
+   */
+  useEffect(() => {
+    const previousMap = scene.environment;
+    const previousIntensity = scene.environmentIntensity;
+    scene.environment = map;
+    scene.environmentIntensity = intensity;
+    scene.environmentRotation = new THREE.Euler(0, rotation, 0);
+    return () => {
+      scene.environment = previousMap;
+      scene.environmentIntensity = previousIntensity;
+    };
+  }, [scene, map, intensity, rotation]);
+
+  return null;
+}
+
 /** Keeps the renderer's exposure in sync with the Environment panel's slider. */
 function ExposureSync({ exposure }: { exposure: number }) {
   const gl = useThree((s) => s.gl);
@@ -1190,27 +1240,46 @@ export default function Viewer({
           What the metal reflects. The stones do NOT use this unless the gem
           environment is left shared — their shader samples its own map.
         */}
-        <Environment
-          /*
-           * A real HDRI `file` (see `EnvironmentOption.file`) takes priority
-           * over a drei `preset` name — see the matching logic in Model.tsx
-           * for why the gem side needs the same rule.
-           */
-          {...(environmentById(lighting.environment).file
-            ? { files: environmentById(lighting.environment).file }
-            : {
-                preset: (environmentById(lighting.environment).preset ??
-                  "warehouse") as "warehouse",
-              })}
-          /*
-           * Rotating the environment moves every reflection, which on a metal
-           * band is where the highlight sits — most of whether a render reads
-           * as composed. Only Y: tipping an environment sideways puts the
-           * horizon on a diagonal and nothing looks photographed.
-           */
-          environmentRotation={[0, lighting.environmentRotation, 0]}
-          environmentIntensity={lighting.environmentIntensity}
-        />
+        {environmentById(lighting.environment).id === "atelier" ? (
+          <AtelierEnvironment
+            rotation={lighting.environmentRotation}
+            intensity={lighting.environmentIntensity}
+          />
+        ) : (
+          <Environment
+            /*
+             * A real HDRI `file` (see `EnvironmentOption.file`) takes priority
+             * over a drei `preset` name — see the matching logic in Model.tsx
+             * for why the gem side needs the same rule.
+             */
+            /*
+             * Three cases, and the third used to be silently wrong.
+             *
+             * The generated environments (the Diamond Studio family, and the
+             * tent) carry neither a `file` nor a `preset`, so this fell through
+             * to `?? "warehouse"` — picking "Diamond Studio" for the METAL gave
+             * you a photographed warehouse instead, with its beams and windows
+             * mirrored in the gold, while the UI said otherwise. They are real
+             * textures, so hand them over directly as `map`.
+             */
+            {...(() => {
+              const env = environmentById(lighting.environment);
+              if (env.file) return { files: env.file };
+              const generated =
+                env.id === "tent" ? getLightTent() : getDiamondStudioEnvironment(env.id);
+              if (generated) return { map: generated };
+              return { preset: (env.preset ?? "warehouse") as "warehouse" };
+            })()}
+            /*
+             * Rotating the environment moves every reflection, which on a metal
+             * band is where the highlight sits — most of whether a render reads
+             * as composed. Only Y: tipping an environment sideways puts the
+             * horizon on a diagonal and nothing looks photographed.
+             */
+            environmentRotation={[0, lighting.environmentRotation, 0]}
+            environmentIntensity={lighting.environmentIntensity}
+          />
+        )}
 
         {/*
           A real scene object, mounted only for this one background kind — it

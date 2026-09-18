@@ -146,6 +146,23 @@ uniform float absorptionFactor;
 uniform float boost;
 uniform float gammaFactor;
 uniform float envShoulder;
+uniform float gemEnvIntensity;
+/*
+ * Facet-normal smoothing — the single most important control in this file for
+ * whether the stone reads as cut or as shattered.
+ *
+ * bvhIntersectFirstHit hands back the exact, razor-flat normal of whichever
+ * triangle the ray hit, and facetGeometry deliberately gives every triangle
+ * its own unblended normal. A mirror reflection off a perfectly flat plane is
+ * chaotically sensitive: two rays a pixel apart diverge after one bounce, and
+ * every further bounce compounds it. That is what turns five bounces into
+ * small disconnected shards instead of clean facet planes.
+ *
+ * Blending each hit normal a little toward a genuinely smooth one recovers the
+ * coherence. At 0 this is an exact identity, so it can be dialled out.
+ */
+uniform float uGeometryFactor;
+uniform sampler2D uSmoothNormalMap;
 uniform float extinctionFix;
 
 #include <common>
@@ -185,7 +202,12 @@ vec3 sampleEnv( vec3 dir, vec3 dirPerfect ) {
   vec3 d = normalize( dir );
   d = vec3( ca * d.x + sa * d.z, d.y, -sa * d.x + ca * d.z );
   vec3 s = max( textureGradient( envMap, d, dirPerfect ).rgb, vec3( 0.0 ) );
-  return s / ( 1.0 + s / envShoulder );
+  // Shoulder FIRST, gain SECOND — the order matters. Applying the gain before
+  // the roll-off would just push more of the range into the shoulder and
+  // compress the contrast it is there to protect. This is the reference's
+  // envMapIntensity * sampleEnvMap(dir), and it was missing: every
+  // environment read was landing at unit gain where the reference uses 1.5.
+  return ( s / ( 1.0 + s / envShoulder ) ) * gemEnvIntensity;
 }
 
 /** Karis' analytic fit to the split-sum environment BRDF. */
@@ -236,6 +258,9 @@ vec3 tracePath( vec3 incident, vec3 surfaceNormal, vec3 dirPerfect ) {
     float side = 1.0;
     float dist = 0.0;
     bvhIntersectFirstHit( bvh, origin, dir, faceIndices, faceNormal, barycoord, side, dist );
+    // three-mesh-bvh's own barycentric attribute read, at the hit point.
+    vec3 gSmoothNormal = textureSampleBarycoord( uSmoothNormalMap, barycoord, faceIndices.xyz ).xyz;
+    faceNormal = normalize( mix( faceNormal, gSmoothNormal, uGeometryFactor ) );
     vec3 hitPos = origin + dir * max( dist - 0.001, 0.0 );
 
     // Beer-Lambert over the distance actually travelled. For a colourless
@@ -360,11 +385,28 @@ export const GEM_TRANSPORT_DEFAULTS = {
   gammaFactor: 1.5,
   /** Soft roll-off applied to every environment read. */
   envShoulder: 2,
+  /** Gain on each environment read, after the roll-off. The reference's 1.5. */
+  gemEnvIntensity: 1.5,
+  /** Blend of each hit normal toward a smooth one. Stops multi-bounce shatter. */
+  geometryFactor: 0.15,
   /** Lift pixels that come back essentially dead. See the note in main(). */
   extinctionFix: 1,
 };
 
 type Uniforms = Record<string, THREE.IUniform>;
+
+/** Bound whenever a stone has no smoothNormal attribute; paired with factor 0. */
+const FALLBACK_NORMAL_TEXTURE = (() => {
+  const texture = new THREE.DataTexture(
+    new Float32Array([0, 0, 1, 0]),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  texture.needsUpdate = true;
+  return texture;
+})();
 
 /**
  * Drop-in for drei's `MeshRefractionMaterial`.
@@ -407,6 +449,12 @@ export class GemTransportMaterial extends THREE.ShaderMaterial {
         boost: { value: GEM_TRANSPORT_DEFAULTS.boost },
         gammaFactor: { value: GEM_TRANSPORT_DEFAULTS.gammaFactor },
         envShoulder: { value: GEM_TRANSPORT_DEFAULTS.envShoulder },
+        gemEnvIntensity: { value: GEM_TRANSPORT_DEFAULTS.gemEnvIntensity },
+        uGeometryFactor: { value: GEM_TRANSPORT_DEFAULTS.geometryFactor },
+        // Replaced with the real per-geometry attribute texture when there is
+        // one; a 1x1 stand-in keeps the sampler bound either way, which is
+        // cheaper than compiling a second program for stones without it.
+        uSmoothNormalMap: { value: FALLBACK_NORMAL_TEXTURE },
         extinctionFix: { value: GEM_TRANSPORT_DEFAULTS.extinctionFix },
       } satisfies Uniforms,
     });
@@ -430,6 +478,9 @@ const SCALARS = [
   "boost",
   "gammaFactor",
   "envShoulder",
+  "gemEnvIntensity",
+  "uGeometryFactor",
+  "uSmoothNormalMap",
   "extinctionFix",
   "uDiamondEnvIntensity",
   "uDiamondEnvRotation",

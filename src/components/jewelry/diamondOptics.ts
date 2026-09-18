@@ -408,6 +408,21 @@ export const DEFAULT_DIAMOND_OPTICS: DiamondOpticsSettings = {
   envResponseExponent: 2.5,
   kneeThreshold: 0.8,
   kneeStrength: 0.75,
-  geometryFactor: 0.15,
+  /*
+   * 0.7, not the 0.15 this used to sit at.
+   *
+   * 0.15 was calibrated against drei's transport, which took a single
+   * environment sample at the end of the path — the flat-normal chaos only had
+   * to survive to the final direction. GemTransportMaterial accumulates light
+   * at EVERY bounce, so each one contributes visibly and the divergence
+   * compounds into the screen image rather than averaging out. More smoothing
+   * is needed to hold coherent facet planes.
+   *
+   * Measured on SDAG076: 0.15 and 0.4 were indistinguishable; 0.7 dropped the
+   * fragmented rainbow speckle from 5.4% of the stone to 3.1% and visibly
+   * consolidated the facets. Higher starts flattening toward a dome, which is
+   * the failure mode recorded for a 1-bounce trace.
+   */
+  geometryFactor: 0.7,
   transmissionGlow: 0.35,
 };

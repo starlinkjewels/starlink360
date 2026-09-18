@@ -172,12 +172,16 @@
   --input: oklch(0.24 0.006 285 / 18%);
   --ring: oklch(0.55 0.095 82);
   --gold: #9a7530;
-  --stage-gradient: radial-gradient(
-    ellipse 70% 60% at 50% 42%,
-    #ffffff 0%,
-    #fafafb 45%,
-    #eeeef1 100%
-  );
+  /*
+   * givara's stage, copied exactly — a warm ivory rather than the cool
+   * white/grey this used to be. The stone is what the eye judges here, and a
+   * neutral-cool surround made the same diamond read colder and flatter than
+   * it does against paper. Two layers: a near-white highlight behind the
+   * piece, over a very slight vertical settle.
+   */
+  --stage-gradient:
+    radial-gradient(ellipse 60% 55% at 50% 42%, #fffefb 0%, rgb(255 254 251 / 0%) 70%),
+    linear-gradient(180deg, #f8f5ee 0%, #f5f1e9 100%);
   --dock-shadow: 0 18px 44px -18px rgba(24, 22, 18, 0.24);
   --panel-surface: rgba(255, 255, 255, 0.94);
   --panel-surface-soft: rgba(255, 255, 255, 0.75);

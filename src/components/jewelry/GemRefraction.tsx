@@ -5,6 +5,8 @@ import { FloatVertexAttributeTexture, MeshBVH, MeshBVHUniformStruct, SAH } from 
 import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { GemTransportMaterial } from "./GemTransportMaterial";
+import { createGemMaterial } from "./GivaraGemMaterial";
+import { captureNormals } from "./diamondNormalCapture";
 import { PATCH_ID, withPathAbsorption } from "./gemAbsorption";
 import { ENV_INTENSITY_PATCH_ID, withEnvIntensity } from "./diamondEnvIntensity";
 import { ENV_ROTATION_PATCH_ID, withEnvRotation } from "./diamondEnvRotation";
@@ -286,6 +288,7 @@ export function GemRefraction({
   envRotation?: number;
 }) {
   const size = useThree((s) => s.size);
+  const gl = useThree((s) => s.gl);
   const materials = useRef<RefractionMaterialLike[]>([]);
   // Read every frame, not a dependency of the rebuild effect below — see the
   // `envIntensity`/`envRotation` prop docs.
@@ -514,6 +517,64 @@ export function GemRefraction({
               return opaque as THREE.Material;
             }
 
+            /*
+             * One solid gets the reference's hull trace; a merged field keeps
+             * the BVH.
+             *
+             * `userData.solids` is only set when a mesh holds more than one
+             * solid, so its absence IS "this is a single stone" — which is
+             * exactly the condition the normal-capture cubemap requires, since
+             * it stores one surface per direction from one centre. Two hundred
+             * pave stones sharing a centre would bake nonsense.
+             */
+            const solidCount = mesh.userData?.solids
+              ? (mesh.userData.solids as ArrayLike<number>).length - 1
+              : 1;
+
+            if (solidCount === 1) {
+              try {
+                /*
+                 * drei's loader hands this back with flipY set; givara's
+                 * RGBELoader DataTexture has it clear. A flipped equirect puts
+                 * the studio's ceiling where its floor should be, so every
+                 * facet reads the wrong half of the environment.
+                 */
+                if (envMap.flipY) {
+                  envMap.flipY = false;
+                  envMap.needsUpdate = true;
+                }
+                mesh.updateWorldMatrix(true, false);
+                /*
+                 * 256, not 512. A 512 cube is ~12.6 MB of VRAM per stone;
+                 * 256 is ~3 MB and is still far more resolution than a
+                 * ~90-facet hull needs. Allocation size is half of why this
+                 * was losing the WebGL context.
+                 */
+                const capture = captureNormals(gl, mesh.geometry, 256);
+                const hull = createGemMaterial("centerStone", envMap);
+                const u = hull.uniforms;
+                u.tCubeMapNormals.value = capture.texture;
+                u.radius.value = capture.radius;
+                (u.centerOffset.value as THREE.Vector3).copy(capture.centerOffset);
+                (u.modelOffsetMatrix.value as THREE.Matrix4).copy(mesh.matrixWorld);
+                (u.modelOffsetMatrixInv.value as THREE.Matrix4).copy(mesh.matrixWorld).invert();
+                (u.color.value as THREE.Color).set(gemTint(s.color));
+                u.refractiveIndex.value = s.ior;
+                u.rIndexDelta.value = s.aberration;
+                u.reflectivity.value = s.reflectivity ?? 0.5;
+                /*
+                 * givara leaves this false and tone maps in its post chain.
+                 * Here the renderer tone maps in-material, so leaving it off
+                 * would ship a linear, blown-out stone.
+                 */
+                hull.toneMapped = true;
+                disposable.push(hull);
+                return hull as unknown as THREE.Material;
+              } catch (error) {
+                if (import.meta.env.DEV) console.warn("[hull] FAILED, using BVH path", error);
+              }
+            }
+
             const material = new (
               GemTransportMaterial as unknown as {
                 new (): RefractionMaterialLike;
@@ -578,6 +639,18 @@ export function GemRefraction({
             // own size keeps a small melee and a large centre stone absorbing
             // alike — the same intent as the reference length this replaces.
             material.absorptionFactor = (s.absorptionFactor ?? 1) / Math.max(reference, 1e-6);
+
+            /*
+             * Facet-normal smoothing. Without it, five bounces off razor-flat
+             * BVH triangles shatter the stone into small disconnected shards
+             * rather than clean facet planes — see the uniform's own note in
+             * GemTransportMaterial. Zero when the geometry carries no
+             * smoothNormal attribute, which makes the blend an exact identity.
+             */
+            material.uniforms.uGeometryFactor.value = smoothNormalMap
+              ? diamondOptics.geometryFactor
+              : 0;
+            if (smoothNormalMap) material.uniforms.uSmoothNormalMap.value = smoothNormalMap;
             /*
              * The reference length is baked into the shader text, so two stones of
              * different sizes need different programs. Without this three reuses

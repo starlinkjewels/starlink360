@@ -425,7 +425,23 @@ async function shadeGem(geometries: THREE.BufferGeometry[]): Promise<THREE.Buffe
    * had, for free, with no separate index bookkeeping of our own.
    */
   if (merged.index) {
-    if (!merged.getAttribute("normal")) merged.computeVertexNormals();
+    /*
+     * Recomputed unconditionally, NOT reused from the file.
+     *
+     * The guard that used to sit here ("only if there is no normal already")
+     * made this a no-op for exactly the geometry that needs it most. A stone
+     * authored in CAD ships FLAT normals — hard facet edges are the whole
+     * point of the model — so "capture the existing normals as the smooth
+     * ones" copied flat normals into `smoothNormal`, and the refraction
+     * shader's blend then mixed a normal with itself. The shatter it exists
+     * to prevent was never actually being prevented on any GLB.
+     *
+     * `computeVertexNormals()` on still-indexed geometry averages across
+     * shared vertices, which IS the smooth normal by definition. The flat
+     * normals are recomputed a few lines below on the non-indexed copy, so
+     * overwriting them here costs nothing.
+     */
+    merged.computeVertexNormals();
     merged.setAttribute("smoothNormal", merged.getAttribute("normal").clone());
   }
 

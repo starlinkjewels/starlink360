@@ -683,6 +683,21 @@ function groupBy<T, K extends string>(items: T[], key: (t: T) => K): { group: K;
  * number instead of carrying its own copy that can drift out of sync.
  */
 const DIAMOND_DISPERSION = 0.044;
+/*
+ * Raised to the reference's 0.005 when the transport changed.
+ *
+ * The halving-to-0.001 recorded above was a correct fix for a REAL artefact —
+ * but for a different shader. drei applied dispersion by tracing the entire
+ * internal path three times at three IORs, so the channels diverged from the
+ * first bounce and any meaningful value smeared into broad colour bands.
+ * GemTransportMaterial splits the channels only at the exit refraction, from
+ * one shared path, which produces localised glints instead of bands. The
+ * artefact that 0.001 was defending against cannot arise this way, and at
+ * 0.001 the stone simply has no visible fire.
+ *
+ * If broad banding ever returns, this is the first number to look at — but
+ * check WHICH transport is active before halving it again.
+ */
 export const DIAMOND_ABERRATION = 0.001;
 
 /**
