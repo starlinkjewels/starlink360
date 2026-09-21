@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import * as THREE from "three";
 import { useThree } from "@react-three/fiber";
-import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import type { TurntableControls as TurntableControlsImpl } from "./turntableControls";
 import type { Fit } from "./Model";
 import {
   ANGLE_PRESETS,
@@ -114,7 +114,7 @@ export function StudioRig({
   /** Set while the scene is composed, so exports bloom exactly as the screen does. */
   renderFrame?: { render(): void; setSize(w: number, h: number): void } | null;
   apiRef: React.MutableRefObject<StudioApi | null>;
-  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  controlsRef: React.RefObject<TurntableControlsImpl | null>;
   /** The group an object move drives, so an export can play one. */
   piece?: React.RefObject<THREE.Group | null>;
 }) {

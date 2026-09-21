@@ -6,7 +6,7 @@ import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { GemTransportMaterial } from "./GemTransportMaterial";
 import { createGemMaterial } from "./GivaraGemMaterial";
-import { captureNormals } from "./diamondNormalCapture";
+import { captureNormals, captureSizeForRadius } from "./diamondNormalCapture";
 import { PATCH_ID, withPathAbsorption } from "./gemAbsorption";
 import { ENV_INTENSITY_PATCH_ID, withEnvIntensity } from "./diamondEnvIntensity";
 import { ENV_ROTATION_PATCH_ID, withEnvRotation } from "./diamondEnvRotation";
@@ -151,6 +151,14 @@ function stoneId(mesh: THREE.Mesh): string {
  * optics at all) can't drift out of sync with the catalogue's own diamond
  * entry.
  */
+/**
+ * Reused by the hull-capture sizing below. `decompose` needs all three outputs
+ * even though only the scale is read, and this runs per stone per rebuild.
+ */
+const scratchPos = new THREE.Vector3();
+const scratchQuat = new THREE.Quaternion();
+const scratchScale = new THREE.Vector3();
+
 const ABERRATION = DIAMOND_ABERRATION;
 
 /*
@@ -545,12 +553,21 @@ export function GemRefraction({
                 }
                 mesh.updateWorldMatrix(true, false);
                 /*
-                 * 256, not 512. A 512 cube is ~12.6 MB of VRAM per stone;
-                 * 256 is ~3 MB and is still far more resolution than a
-                 * ~90-facet hull needs. Allocation size is half of why this
-                 * was losing the WebGL context.
+                 * Resolution is chosen from how large this stone actually is,
+                 * not fixed. A hero stone can be dollied into until it fills
+                 * the frame and needs the angular detail; melee never can, and
+                 * a flat constant either starves the one or wastes tens of MB
+                 * on the other. See `captureSizeForRadius`.
                  */
-                const capture = captureNormals(gl, mesh.geometry, 256);
+                mesh.matrixWorld.decompose(scratchPos, scratchQuat, scratchScale);
+                const worldRadius =
+                  (mesh.geometry.boundingSphere?.radius ?? 0) *
+                  Math.max(scratchScale.x, scratchScale.y, scratchScale.z);
+                const capture = captureNormals(
+                  gl,
+                  mesh.geometry,
+                  captureSizeForRadius(worldRadius),
+                );
                 const hull = createGemMaterial("centerStone", envMap);
                 const u = hull.uniforms;
                 u.tCubeMapNormals.value = capture.texture;
@@ -563,9 +580,18 @@ export function GemRefraction({
                 u.rIndexDelta.value = s.aberration;
                 u.reflectivity.value = s.reflectivity ?? 0.5;
                 /*
-                 * givara leaves this false and tone maps in its post chain.
-                 * Here the renderer tone maps in-material, so leaving it off
-                 * would ship a linear, blown-out stone.
+                 * Kept true, and it costs nothing: three only compiles
+                 * in-material tone mapping when drawing straight to the canvas
+                 * (`WebGLPrograms` forces NoToneMapping whenever a render
+                 * target is bound). `BloomRig` always renders through its
+                 * EffectComposer, so on the normal path this flag is inert and
+                 * ACES arrives once, from `OutputPass` — the same single
+                 * application givara gets, which is why the material's own
+                 * `toneMapped = false` is not what matters here.
+                 *
+                 * It earns its place only if something ever renders this
+                 * material direct to the canvas, where it is the difference
+                 * between a tone mapped stone and a blown-out one.
                  */
                 hull.toneMapped = true;
                 disposable.push(hull);
@@ -762,7 +788,10 @@ export function GemRefraction({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [meshes, envMap, size.width, size.height, overrides, optics, diamondOptics]);
+    // `gl` is the renderer, stable for the canvas's lifetime, so listing it
+    // changes nothing in practice — and is right if one is ever recreated,
+    // since the normal captures belong to the renderer that made them.
+  }, [meshes, envMap, size.width, size.height, overrides, optics, diamondOptics, gl]);
 
   // Unmount only — every other teardown path runs through `disposeCurrentRef`
   // itself, from the next build that supersedes this one.

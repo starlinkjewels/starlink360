@@ -219,7 +219,9 @@ console.log("\n=== the frustum scales with the piece ===");
 
 console.log("\n=== the warnings fire before the render, not after ===");
 {
+  // Quiet because shadows now default to OFF — the piece is shown without one.
   check(shadowWarning(DEFAULT_SHADOWS, 1) === null, "the defaults are quiet");
+  check(DEFAULT_SHADOWS.enabled === false, "and the default really is off");
   check(
     shadowWarning({ ...DEFAULT_SHADOWS, mode: "directional", enabled: false }, 1) === null,
     "a disabled shadow says nothing",
@@ -230,13 +232,19 @@ console.log("\n=== the warnings fire before the render, not after ===");
     "and contact mode ignores the shadow-camera settings entirely",
   );
   const huge = shadowWarning(
-    { ...DEFAULT_SHADOWS, mode: "directional", mapWidth: 4096, mapHeight: 4096 },
+    { ...DEFAULT_SHADOWS, enabled: true, mode: "directional", mapWidth: 4096, mapHeight: 4096 },
     1,
   );
   check(!!huge && /GPU/.test(huge), "a 4096 map warns about the cost", huge?.slice(0, 40));
-  const stretched = shadowWarning({ ...DEFAULT_SHADOWS, mode: "directional", size: 40 }, 1);
+  const stretched = shadowWarning(
+    { ...DEFAULT_SHADOWS, enabled: true, mode: "directional", size: 40 },
+    1,
+  );
   check(!!stretched && /blocky/.test(stretched), "a stretched map warns it will look blocky");
-  const many = shadowWarning({ ...DEFAULT_SHADOWS, mode: "directional", samples: 40 }, 1);
+  const many = shadowWarning(
+    { ...DEFAULT_SHADOWS, enabled: true, mode: "directional", samples: 40 },
+    1,
+  );
   check(!!many && /softer/.test(many), "and pointless samples say so");
 }
 

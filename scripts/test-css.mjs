@@ -60,9 +60,14 @@ console.log("\n=== every class in the markup has a rule ===");
    * skipped. The list is deliberately broad: a false positive costs somebody an
    * investigation, and the faults worth catching are project-specific names
    * like `upload-float` that nothing else could be responsible for.
+   *
+   * Both branches allow a leading `-`, because Tailwind spells a negative
+   * utility that way: `-mt-0.5` is its own `mt`, not a project class. Without
+   * it every negative margin in the app reported as undefined — which is the
+   * false positive this comment warns about.
    */
   const builtin =
-    /^(?:[a-z]+-)?(?:\[|\d)|^(?:flex|grid|hidden|block|inline|relative|absolute|fixed|sticky|w|h|min|max|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|text|font|bg|border|rounded|shadow|opacity|z|top|left|right|bottom|inset|overflow|cursor|select|pointer|transition|duration|ease|scale|rotate|translate|origin|items|justify|self|order|col|row|space|divide|ring|outline|size|aspect|object|truncate|whitespace|break|list|align|leading|tracking|uppercase|lowercase|capitalize|underline|sr|not|group|peer|dark|sm|md|lg|xl|touch|antialiased|appearance|backdrop|contents|isolate|mix|will|snap|scroll|resize|accent|caret|fill|stroke)(?:$|-|:)/;
+    /^-?(?:[a-z]+-)?(?:\[|\d)|^-?(?:flex|grid|hidden|block|inline|relative|absolute|fixed|sticky|w|h|min|max|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|text|font|bg|border|rounded|shadow|opacity|z|top|left|right|bottom|inset|overflow|cursor|select|pointer|transition|duration|ease|scale|rotate|translate|origin|items|justify|self|order|col|row|space|divide|ring|outline|size|aspect|object|truncate|whitespace|break|list|align|leading|tracking|uppercase|lowercase|capitalize|underline|sr|not|group|peer|dark|sm|md|lg|xl|touch|antialiased|appearance|backdrop|contents|isolate|mix|will|snap|scroll|resize|accent|caret|fill|stroke)(?:$|-|:)/;
 
   const files = [];
   (function walk(dir) {

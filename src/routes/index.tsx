@@ -51,8 +51,7 @@ import { gemById, metalById, resolveGem, resolveMetal } from "@/components/jewel
 import type { GemOptics } from "@/components/jewelry/GemRefraction";
 import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
 import { DEFAULT_TEXTURE, type TextureAssignment } from "@/components/jewelry/textures";
-import { DEFAULT_CAMERA, guessUpAxis, type CameraSettings } from "@/components/jewelry/camera";
-import { ImportOrientation } from "@/components/jewelry/ImportOrientation";
+import { DEFAULT_CAMERA, type CameraSettings } from "@/components/jewelry/camera";
 import {
   DEFAULT_LIGHTING,
   ENVIRONMENTS,
@@ -239,7 +238,6 @@ function Index() {
    * their file, and does not know to go looking for the words "up axis".
    * Suppressed for the built-in piece, which is already upright.
    */
-  const [orientFor, setOrientFor] = useState<string | null>(null);
 
   const [exportOptions, setExportOptions] = useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
 
@@ -1065,13 +1063,20 @@ function Index() {
     setLoaded(false);
     setShowUpload(false);
     /*
-     * Ask which way up, pre-filled with the guess from the extension. Only for
-     * a loaded file: the built-in piece is already upright, and prompting about
-     * it would be a dialog in front of something that is plainly fine.
+     * No "which way is up?" prompt, and no guess from the extension.
+     *
+     * A file used to arrive behind a modal demanding an up-axis before anything
+     * could be looked at, pre-answered by a guess that was wrong often enough
+     * to matter — and whichever way it was answered, the piece was then locked
+     * into that pose. Y up is simply the default now. A piece that lands on its
+     * side is turned like any other: the viewer orbits freely, and the up-axis
+     * itself is still there in the Camera panel for anyone who wants to set it
+     * properly rather than just look.
+     *
+     * `upAxis` is deliberately left as it is rather than forced back to Y, so
+     * somebody working through a batch of Z-up CAD files sets it once instead
+     * of on every upload. A fresh session starts at Y — `DEFAULT_CAMERA`.
      */
-    const name = p.ref || p.name || "";
-    setCameraSettings((c) => ({ ...c, upAxis: guessUpAxis(name) }));
-    setOrientFor(name || "this model");
   }, []);
 
   /*
@@ -1511,20 +1516,6 @@ function Index() {
         </SectionPanel>
 
         <IconRail active={section} onSelect={pickSection} />
-
-        {/*
-          Asked once, when a file arrives. The stage is behind it and updates as
-          the choice changes, which is the whole point — the answer is obvious
-          from looking, and impossible to reason about from the words alone.
-        */}
-        {orientFor && (
-          <ImportOrientation
-            fileName={orientFor}
-            value={cameraSettings.upAxis}
-            onChange={(upAxis) => setCameraSettings((c) => ({ ...c, upAxis }))}
-            onClose={() => setOrientFor(null)}
-          />
-        )}
       </div>
     </div>
   );

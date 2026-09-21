@@ -22,7 +22,6 @@ import {
   cameraPosition,
   clipPlanes,
   frameFit,
-  guessUpAxis,
   isPinned,
 } from "../.tmp-jewelry/camera.js";
 
@@ -293,15 +292,10 @@ console.log("\n=== which way up ===");
   );
 
   /*
-   * A guess, offered as one. Rhino and the CAD interchange formats are almost
-   * all Z-up, while a GLB is written by a web tool and already upright. Our own
-   * .3dm worker outputs Y-up, so it must not be guessed as Z.
+   * `guessUpAxis` was deleted with the "Which way is up?" import prompt it fed.
+   * Nothing guesses an up-axis from the file name now: Y is simply the default
+   * and the Camera panel sets it explicitly, so there is no guess left to test.
    */
-  check(guessUpAxis("ring.obj") === "z", "OBJ is guessed Z-up");
-  check(guessUpAxis("RING.STL") === "z", "so is STL, whatever the case");
-  check(guessUpAxis("piece.glb") === "y", "a GLB is already upright");
-  check(guessUpAxis("LP 043.3dm") === "y", "and our own .3dm decoder outputs Y-up");
-  check(guessUpAxis("no-extension") === "y", "an unknown file is left alone");
 }
 
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);

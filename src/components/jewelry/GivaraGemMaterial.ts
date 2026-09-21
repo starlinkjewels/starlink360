@@ -349,16 +349,7 @@ interface GemPreset {
  */
 const CENTER_PRESET: GemPreset = {
   color: 0xffffff,
-  /*
-   * 1.35, where givara uses 1.5.
-   *
-   * Not a free choice — measured. givara tone maps the gem in its post chain
-   * with the material's own tone mapping off; here it happens in-material, and
-   * that difference makes the same gain arrive hotter. At a true 1.5 the stone
-   * measures mean 181.5 with only 15.5% of it below 140/255, against givara's
-   * 175.3 / 21.6%. At 1.35 it lands on 173.0 / 20.2%.
-   */
-  envMapIntensity: 1.35,
+  envMapIntensity: 1.5,
   dispersion: 0.005,
   squashFactor: 0.98,
   geometryFactor: 0.5,
@@ -427,23 +418,7 @@ export function createGemMaterial(role: GemRole, envMap: THREE.Texture): THREE.S
       centerOffset: { value: new THREE.Vector3() },
       modelOffsetMatrix: { value: new THREE.Matrix4() },
       modelOffsetMatrixInv: { value: new THREE.Matrix4() },
-      /*
-       * OFF here, where givara runs it at 1 — and this is the single biggest
-       * thing that was making this stone read milky.
-       *
-       * The fix lifts any pixel whose traced result comes back near zero
-       * toward the surrounding environment, so a facet that finds no light
-       * does not render as a dead black hole. On givara's stone that fires
-       * rarely: 338 triangles give the hull enough resolution that the trace
-       * almost always lands somewhere real. This piece's centre stone is ~170
-       * triangles, so the trace bottoms out across far more of the surface,
-       * the lift fires over large areas at once, and the result is a uniform
-       * pale veil over the whole gem — exactly the "too white" being reported.
-       *
-       * With it off the dark facets come back and the cut reads crisply. If a
-       * future stone shows genuinely dead black patches, this is the dial.
-       */
-      useExtinctionFix: { value: 0 },
+      useExtinctionFix: { value: 1 },
     },
   });
   // The trace is emissive by construction and already gamma-shaped; letting

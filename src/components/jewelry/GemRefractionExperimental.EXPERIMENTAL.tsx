@@ -361,7 +361,17 @@ export function GemRefractionExperimental({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [meshes, envMap, size.width, size.height, overrides, optics, diamondOptics, sampleCount, sampleSpread]);
+  }, [
+    meshes,
+    envMap,
+    size.width,
+    size.height,
+    overrides,
+    optics,
+    diamondOptics,
+    sampleCount,
+    sampleSpread,
+  ]);
 
   useEffect(() => {
     return () => {

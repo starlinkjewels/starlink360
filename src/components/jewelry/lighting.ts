@@ -1304,7 +1304,7 @@ const DIAMOND_STUDIO_CONFIGS: Record<string, StudioConfig> = {
     // first place instead of undoing the earlier gain.
     //
     // Lowered again, 0.3 -> 0.08, on a direct request for more dramatic
-    // scintillation as the piece rotates. `OrbitControls` moves the
+    // scintillation as the piece rotates. The controls move the
     // CAMERA, not the model, but the shader's initial ray direction is
     // `vWorldPosition - cameraPosition`, so orbiting genuinely changes the
     // incidence angle at every facet — after refraction/bounces, this

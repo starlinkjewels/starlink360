@@ -27,6 +27,7 @@
     "test:lighting": "tsc src/components/jewelry/lighting.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-lighting.mjs",
     "test:ground": "tsc src/components/jewelry/ground.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-ground.mjs",
     "test:export": "tsc src/components/jewelry/watermark.ts src/components/jewelry/videoExport.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-export.mjs",
+    "test:turntable": "tsc src/components/jewelry/turntableControls.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-turntable.mjs",
     "test:textures": "tsc src/components/jewelry/textures.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-textures.mjs",
     "test:selection": "tsc src/components/jewelry/selection.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-selection.mjs",
     "test:library": "tsc src/components/jewelry/library.ts src/components/jewelry/preview.ts src/components/jewelry/textures.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && tsc -p tsconfig.suites.json && node scripts/test-library.mjs",

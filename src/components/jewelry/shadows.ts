@@ -62,7 +62,19 @@ export interface ShadowSettings {
 }
 
 export const DEFAULT_SHADOWS: ShadowSettings = {
-  enabled: true,
+  /*
+   * Off.
+   *
+   * A cast shadow puts the piece on a surface, and this viewer is not shooting
+   * a piece on a surface — it is showing the piece. The shadow only ever
+   * competed with it: a wide grey shape sitting under a ring, moving with every
+   * turn, and on a pierced piece like a filigree band it becomes a field of
+   * grey noise louder than the metal it falls from.
+   *
+   * The whole rig underneath is untouched and every control still works, so
+   * this is one switch in the Shadows panel for anyone who wants one back.
+   */
+  enabled: false,
   mode: "directional",
 
   // Transcribed from DEFAULT_LIGHTING, which is where these lived before.

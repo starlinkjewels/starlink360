@@ -4,7 +4,6 @@ import { Canvas, useThree, useFrame, type ThreeEvent } from "@react-three/fiber"
 import {
   Environment,
   useEnvironment,
-  OrbitControls,
   OrthographicCamera,
   PerspectiveCamera,
   ContactShadows,
@@ -13,7 +12,7 @@ import {
   GizmoViewport,
   Grid,
 } from "@react-three/drei";
-import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import type { TurntableControls as TurntableControlsImpl } from "./turntableControls";
 import { acceleratePicking } from "./pickBvh";
 import { ImageBackdrop3D } from "./ImageBackdrop3D";
 import type { Background } from "./background";
@@ -27,6 +26,7 @@ import { StudioRig, type StudioApi } from "./StudioRig";
 import type { StoneGroup } from "./stones";
 import type { GemOptics } from "./GemRefraction";
 import { DEFAULT_DIAMOND_OPTICS, type DiamondOpticsSettings } from "./diamondOptics";
+import { TurntableRig } from "./TurntableRig";
 import { DEFAULT_MODEL_ORIENTATION, type ModelOrientation } from "./modelOrientation";
 import type { PartTransforms } from "./partTransform";
 import type { PartVisibility } from "./visibility";
@@ -53,6 +53,7 @@ import {
   DEFAULT_CAMERA,
   applyAspect,
   cameraPosition,
+  clipPlanes,
   frameFit,
   type CameraSettings,
 } from "./camera";
@@ -79,6 +80,21 @@ import { isReasonablySized, type ProngScales } from "./prongs";
 /** Rebuilt per call rather than shared — a module-scope instance is the hazard. */
 const origin = () => new THREE.Vector3();
 
+/*
+ * Module scope, so the array identity never changes.
+ *
+ * As a literal in the JSX this was a NEW array on every render, which R3F
+ * re-applies — silently teleporting the camera back to 5 units out, mid-drag,
+ * many times a second. Two bugs came out of that one line: the piece jumped
+ * smaller the moment anything re-rendered (a framed distance of 3.32 replaced
+ * by a hard 5), and the controls, which re-derive their angles whenever
+ * something else moves the camera, were being reset continuously.
+ *
+ * It is only a seed. The framing effect places the camera properly as soon as
+ * there is a piece to frame.
+ */
+const CAMERA_SEED: [number, number, number] = [0, 0, 5];
+
 function Framing({
   fit,
   settings,
@@ -89,15 +105,32 @@ function Framing({
   fit: Fit | null;
   settings: CameraSettings;
   resetSignal: number;
-  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  controlsRef: React.RefObject<TurntableControlsImpl | null>;
   /** Reports where the camera actually is, so the panel can show real numbers. */
   onMoved?: (position: [number, number, number]) => void;
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
-  // Re-fit whenever the canvas resizes — phone rotation, or a narrow portrait
-  // window where the horizontal axis is the tight one.
   const size = useThree((s) => s.size);
+  /** The framing distance the current view was built from — see the resize effect. */
+  const framingRef = useRef<number | null>(null);
 
+  /*
+   * Framing moves the camera, so it runs for a REASON — a new piece, changed
+   * camera settings, or Reset view — and deliberately not on a resize.
+   *
+   * It used to depend on `size` as well, which is what made the piece change
+   * size the first time anyone touched a phone. Mobile browsers show and hide
+   * the URL bar on the first interaction, which changes the canvas height,
+   * which re-ran this and re-framed the piece out from under the hand that was
+   * only trying to turn it. Measured on an iPhone viewport: the framing
+   * distance ran from 4.62 to 5.76, a quarter of the size of the piece, with
+   * nothing but browser chrome moving.
+   *
+   * `frameFit` is not at fault and is unchanged — a relatively narrower frame
+   * really does need more standoff to hold the piece's width. The mistake was
+   * treating a canvas resize as a request to re-frame. The projection effect
+   * below keeps the image correct across a resize without touching the camera.
+   */
   useEffect(() => {
     if (!fit) return;
 
@@ -118,12 +151,77 @@ function Framing({
     const controls = controlsRef.current;
     if (controls) {
       controls.target.set(0, 0, 0);
-      // Let people get right up to a stone, and pull back off the whole piece.
-      controls.minDistance = fit.radius * 0.12;
-      controls.maxDistance = framing.distance * 5;
+      /*
+       * Givara's range, and measured against the same thing it measures
+       * against — the distance that frames the whole piece — so it holds for a
+       * ring and a necklace alike.
+       *
+       * This was `fit.radius * 0.12` and `framing.distance * 5`. Since the
+       * framing distance is roughly 3.2 radii at this field of view, that let
+       * the camera get about twelve times closer than Givara allows and more
+       * than twice as far out: close enough to sit inside the metal, far
+       * enough to lose the piece in the frame. It read as zoom with no end.
+       *
+       * At 0.45 the centre stone still fills about half the frame, which is
+       * as close as inspecting one needs.
+       */
+      controls.minDistance = framing.distance * 0.45;
+      controls.maxDistance = framing.distance * 2.2;
       controls.update();
     }
-  }, [fit, settings, resetSignal, camera, controlsRef, size.width, size.height]);
+    // What the resize effect below rescales from.
+    framingRef.current = framing.distance;
+    // `size` is read to frame for the CURRENT shape of the canvas, but is not a
+    // dependency: a resize must not re-frame. See the block comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fit, settings, resetSignal, camera, controlsRef]);
+
+  /*
+   * A resize keeps the picture, rather than re-taking it.
+   *
+   * Two things have to hold at once and they pull in opposite directions.
+   *
+   * Re-framing outright (what this used to do) called `camera.position.set`,
+   * which throws the camera back to the default angle and distance — so a
+   * resize silently undid whatever the user had turned or zoomed to. On a
+   * phone that fires on the FIRST TOUCH, because showing or hiding the URL bar
+   * changes the canvas height, and the piece jumps back to its opening pose.
+   *
+   * But simply not moving the camera is worse for size: with a fixed distance
+   * and a fixed vertical field of view, the piece's size in pixels is
+   * proportional to the canvas HEIGHT, so the same browser chrome would scale
+   * it by however much it changed.
+   *
+   * So the distance is rescaled by the ratio of the new framing distance to
+   * the old. The piece keeps exactly the same fraction of the frame it had —
+   * no size jump — while the direction, and the user's zoom relative to the
+   * framing, are left untouched.
+   */
+  useEffect(() => {
+    if (!fit) return;
+    const aspect = size.width / Math.max(size.height, 1);
+    const framing = frameFit(fit, settings, aspect);
+
+    const controls = controlsRef.current;
+    const target = controls?.target ?? origin();
+    const previous = framingRef.current;
+
+    if (previous && Math.abs(framing.distance - previous) > 1e-9) {
+      const ratio = framing.distance / previous;
+      camera.position.sub(target).multiplyScalar(ratio).add(target);
+      if (controls) {
+        controls.minDistance = framing.distance * 0.45;
+        controls.maxDistance = framing.distance * 2.2;
+      }
+    }
+    framingRef.current = framing.distance;
+
+    const { near, far } = clipPlanes(camera.position.distanceTo(target), settings, fit.radius);
+    camera.near = near;
+    camera.far = far;
+    applyAspect(camera, aspect, framing.orthoHalfHeight);
+    controls?.update();
+  }, [size.width, size.height, fit, settings, camera, controlsRef]);
 
   /*
    * Published on a change, not every frame.
@@ -350,7 +448,7 @@ function SelectionHighlight({
  *
  * Half resolution while the pointer is down and full resolution the moment it
  * is released: motion hides the softness, and a still frame is what anyone
- * actually looks at. Restoring is delayed a beat because OrbitControls damping
+ * actually looks at. Restoring is delayed a beat because the controls' damping
  * keeps gliding after release, and sharpening mid-glide costs a frame exactly
  * where it shows.
  *
@@ -360,7 +458,7 @@ function SelectionHighlight({
 function InteractionQuality({
   controlsRef,
 }: {
-  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  controlsRef: React.RefObject<TurntableControlsImpl | null>;
 }) {
   const setDpr = useThree((s) => s.setDpr);
 
@@ -555,7 +653,7 @@ function LightRig({
  * The same `poseAt` the exporter uses, so what is previewed is what is
  * downloaded — the two used to be different code with no reason to agree.
  *
- * While a move is playing OrbitControls is left alone rather than disabled: it
+ * While a move is playing the controls are left alone rather than disabled: they
  * is only ever asked for its target, and writing the camera position under it
  * each frame is enough. Disabling it would drop the user's zoom on stop.
  */
@@ -628,58 +726,6 @@ function AnimationRig({
     object.position.y = 0;
     object.rotation.set(0, 0, 0);
   }, [objectMove, object]);
-
-  return null;
-}
-
-interface Focus {
-  point: THREE.Vector3;
-  dist: number;
-}
-
-/**
- * Glides the orbit centre onto whatever the user tapped.
- *
- * OrbitControls always zooms and rotates about `target`. On a necklace that
- * target is the middle of the chain loop, so pinching to inspect the pendant
- * drives it straight out of frame. `zoomToCursor` fixes this for a mouse wheel
- * but three's touch handlers never set `performCursorZoom`, so it does nothing
- * for pinch — hence moving the target itself.
- */
-function FocusRig({
-  focus,
-  controlsRef,
-  onArrived,
-}: {
-  focus: Focus | null;
-  controlsRef: React.RefObject<OrbitControlsImpl | null>;
-  onArrived: () => void;
-}) {
-  const camera = useThree((s) => s.camera);
-
-  useFrame((_, delta) => {
-    const controls = controlsRef.current;
-    if (!focus || !controls) return;
-
-    // Frame-rate independent easing — same feel at 30fps and 120fps.
-    const k = 1 - Math.pow(0.0015, Math.min(delta, 0.1));
-    controls.target.lerp(focus.point, k);
-
-    const dir = camera.position.clone().sub(controls.target);
-    if (dir.lengthSq() > 1e-12) {
-      const want = focus.point.clone().addScaledVector(dir.normalize(), focus.dist);
-      camera.position.lerp(want, k);
-    }
-    controls.update();
-
-    // Done only once the centre has arrived AND the dolly has settled —
-    // checking the target alone ends the animation early when the tap lands
-    // near the existing centre, cancelling the zoom.
-    const tol = Math.max(focus.dist, 1e-4) * 0.02;
-    const centred = controls.target.distanceTo(focus.point) < tol;
-    const dollied = Math.abs(camera.position.distanceTo(controls.target) - focus.dist) < tol;
-    if (centred && dollied) onArrived();
-  });
 
   return null;
 }
@@ -853,11 +899,10 @@ export default function Viewer({
 }: ViewerProps) {
   const localStudio = useRef<StudioApi | null>(null);
   const studio = studioRef ?? localStudio;
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const controlsRef = useRef<TurntableControlsImpl | null>(null);
   // Held in state, not a ref: StudioRig has to re-read it when it appears.
   const [sceneRenderer, setSceneRenderer] = useState<SceneRenderer | null>(null);
   const [fit, setFit] = useState<Fit | null>(null);
-  const [focus, setFocus] = useState<Focus | null>(null);
   const [partList, setPartList] = useState<Part[]>([]);
   const handleParts = useCallback(
     (parts: Part[]) => {
@@ -949,7 +994,6 @@ export default function Viewer({
   );
 
   // "Reset view" pulls back to the whole piece, so drop any focus with it.
-  useEffect(() => setFocus(null), [resetSignal]);
 
   const downAt = useRef<{ x: number; y: number } | null>(null);
   const onPointerDownCapture = useCallback((e: React.PointerEvent) => {
@@ -1120,20 +1164,20 @@ export default function Viewer({
         return;
       }
 
+      /*
+       * A tap picks a stone and moves nothing.
+       *
+       * It used to fly the camera in on whatever was tapped, which only worked
+       * because it also dragged the orbit centre onto that point — the very
+       * thing that made the piece swing in a circle afterwards. With the centre
+       * pinned there is nothing left for it to frame: it would just lurch
+       * inward on the middle of the piece. Zoom is the wheel and pinch, which
+       * is where people look for it.
+       */
       if (stone) onStoneTap?.(stone);
-
-      const current = e.camera.position.distanceTo(controlsRef.current?.target ?? origin());
-      setFocus({
-        point: e.point.clone(),
-        // Close enough to read a setting, but never pull back out if they've
-        // already pinched in tighter than that.
-        dist: Math.min(current, fit.radius * 0.55),
-      });
     },
     [fit, selecting, prongPicking, onStoneTap, selected, onSelected, onPaintPart, onPlaceStamp],
   );
-
-  const clearFocus = useCallback(() => setFocus(null), []);
 
   /*
    * Hover tells you what a click will select before you commit to it, which is
@@ -1206,17 +1250,17 @@ export default function Viewer({
       >
         {/*
           Two real cameras, not one faked with a long lens. Swapping the default
-          re-points OrbitControls at the new one; `key` forces a fresh instance
+          re-points the controls at the new one; `key` forces a fresh instance
           so drei cannot keep the old projection alive.
         */}
         {cameraSettings.projection === "orthographic" ? (
-          <OrthographicCamera key="ortho" makeDefault position={[0, 0, 5]} />
+          <OrthographicCamera key="ortho" makeDefault position={CAMERA_SEED} />
         ) : (
           <PerspectiveCamera
             key="persp"
             makeDefault
             fov={cameraSettings.fov}
-            position={[0, 0, 5]}
+            position={CAMERA_SEED}
           />
         )}
 
@@ -1474,7 +1518,6 @@ export default function Viewer({
           controlsRef={controlsRef}
           piece={pieceRef}
         />
-        <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
         <InteractionQuality controlsRef={controlsRef} />
         {/*
           Bloom was written, tuned and given a panel, and then never mounted.
@@ -1524,13 +1567,29 @@ export default function Viewer({
           Turntable move in Animation, which drives the camera along the same
           path the video export renders.
         */}
-        <OrbitControls
+        {/*
+          Givara's rig, value for value — damped, `dampingFactor` 0.06,
+          `rotateSpeed` 0.85, no pan — on a camera model that has no poles, so
+          it also turns without ever stopping.
+
+          Those two things were in conflict while this used stock controls.
+          OrbitControls gives the feel but clamps the vertical angle and then
+          calls `Spherical.makeSafe()`, which pins it inside [EPS, PI-EPS]
+          whatever `min/maxPolarAngle` say. A trackball turns without limit but
+          rolls the piece as a side effect, which is the wobble. Neither is a
+          setting away from the other.
+
+          `turntableControls.ts` keeps OrbitControls' input and damping maths
+          exactly and replaces only the spherical-plus-`lookAt` pose with a
+          quaternion, which removes the pole the clamp was there to protect.
+          Read that file before changing anything here.
+        */}
+        <TurntableRig
           ref={controlsRef}
           enabled={!locked}
           enableDamping
           dampingFactor={0.06}
-          enablePan
-          zoomToCursor
+          rotateSpeed={0.85}
           makeDefault
         />
       </Canvas>

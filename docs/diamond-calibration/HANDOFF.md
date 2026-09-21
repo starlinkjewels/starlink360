@@ -56,8 +56,8 @@ Do not "tidy" these without re-measuring.
 | setting | value | why |
 | --- | --- | --- |
 | `DIAMOND_ABERRATION` | **0.001** | Raised to Givara's 0.005, then **reverted**. At this stone's facet size, 0.005/0.002/0.001 render near-identically; the owner's original 0.001 was correctly tuned for this geometry. |
-| `GivaraGemMaterial` `envMapIntensity` | **1.35** | Givara uses 1.5. Givara tone maps the gem in post with in-material tone mapping off; here it happens in-material, so the same gain arrives hotter. At 1.5: mean 181.5, only 15.5% of stone below 140/255. At 1.35: 173.0 / 20.2%. Target 175.3 / 21.6%. |
-| `useExtinctionFix` | **0** | Givara runs it at 1. It lifts near-zero pixels toward the environment so dead facets aren't black holes. Givara's stone is 338 tris so it rarely fires; this one is ~170 tris, the trace bottoms out over large areas, and the lift became a **uniform pale veil** — the reported "too white". |
+| `GivaraGemMaterial` `envMapIntensity` | **1.5** | Givara's own value. It was 1.35 on the theory that this app tone maps in-material and so the same gain "arrives hotter" — **that theory was wrong**, see §7. |
+| `useExtinctionFix` | **1** | Givara's own value. It was 0 because at a 256 capture the trace bottomed out over large areas and the lift became a pale veil. At the 1024 capture (§6) the trace rarely bottoms out, so it now fires only where it should and **lowers** zoomed edge noise 0.893 → 0.800. |
 | `geometryFactor` | **0.7** | Was 0.15, which was calibrated for drei's single-sample transport. `GemTransportMaterial` accumulates at every bounce so flat-normal divergence compounds. Only affects the **BVH path** (melee), not the hull. |
 | `exposure` | **1** | Was 1.4. Givara uses 1.0; ACES at 1.4 flattens contrast through its shoulder. |
 | `diamondDynamicReflections` | **false** | Givara has no scene capture. Measured: it softened the stone (σ 43.0 → 38.9). |
@@ -113,7 +113,105 @@ the way to settle it:
 
 ---
 
-## 6. Gotchas
+## 6. Hull capture resolution — why it is not a constant
+
+Reported as "the diamond looks blurry when you zoom in". It is not blur: at
+full zoom every facet edge broke into a visible **staircase**.
+
+The hull cubemap's angular resolution is fixed when it is baked — 90°/size per
+texel — but a stone's on-screen size is not, and `OrbitControls.minDistance`
+here is `fit.radius * 0.12`. Past the crossover one texel covers several screen
+pixels. The target is sampled with `NearestFilter`, correctly — interpolating
+across a facet edge invents a normal belonging to neither facet — so the
+quantisation shows up as ragged edges rather than a soft blur.
+
+Givara never exposes this: it has fixed views and no free zoom.
+
+Measured on the reference piece's 0.27-radius centre stone, at full zoom:
+
+| capture | edge noise | staircase px |
+| --- | --- | --- |
+| 256 (was) | 1.150 | 0.12% |
+| 512 | 0.969 | 0.07% |
+| **1024** | **0.893** | **0.05%** |
+
+512 was clearly better but still visibly stepped along the long facets; 1024
+was clean.
+
+`captureSizeForRadius()` now picks from the stone's **world** radius. Note the
+geometry's own radius is useless for this — the same stone measured 7.17 in
+geometry units and 0.27 once the node scale was applied, because a piece is
+normalised by its transform, not by baking the scale into the geometry.
+
+**The cache budget is in bytes, not entries.** 128 → 0.8 MB but 1024 → 50.3 MB,
+so the old four-entry cap was either far too loose or far too tight depending
+on which sizes landed in it. Eviction is LRU and **skips anything touched in
+the last 5 s**, because freeing a texture a live material still points at is a
+black stone, not a slow one; every capture for a piece is taken within one
+build pass. If nothing is old enough to drop, the budget is allowed to
+overshoot rather than break the render.
+
+---
+
+## 7. Parity audit — and one wrong assumption corrected
+
+Asked to make this app's gem setup identical to Givara's, every surface was
+diffed. `GivaraGemMaterial.ts` is now **byte-identical to Givara's
+`GemMaterial.ts` apart from comments** — GLSL, presets and uniforms.
+
+Everything else already matched, which was not obvious:
+
+| surface | Givara | here |
+| --- | --- | --- |
+| renderer | `antialias: true`, dpr ≤ 2, ACES, exposure 1 | same |
+| composer target | half-float, `samples: 4` | same (`bloom.ts`) |
+| chain | RenderPass → … → OutputPass | same |
+| gem HDRI | `diamondenvironment.hdr` | same |
+| capture filter/type | Nearest, no mipmaps, half-float | same |
+
+**The wrong assumption.** The 1.35 above was justified by "Givara tone maps in
+post, here it happens in-material, so the gain arrives hotter". Three.js only
+compiles in-material tone mapping when drawing **straight to the canvas** —
+`WebGLPrograms` forces `NoToneMapping` whenever a render target is bound:
+
+```js
+if ( material.toneMapped ) {
+  if ( currentRenderTarget === null || currentRenderTarget.isXRRenderTarget === true ) {
+    toneMapping = renderer.toneMapping;
+  }
+}
+```
+
+`DEFAULT_FILM.enabled` and `DEFAULT_HIGHLIGHTS.enabled` are both `true`, so
+`BloomRig`'s composer is always up and the gem is drawn into a render target.
+ACES therefore arrives exactly once, from `OutputPass` — the same as Givara.
+`hull.toneMapped = true` in `GemRefraction` is inert on that path; it is kept
+only to cover a hypothetical direct-to-canvas render.
+
+**What identical settings do NOT buy.** With Givara's exact numbers this stone
+still reads brighter and flatter than Givara's, measured on the centre stone at
+default framing:
+
+| config | mean | sd | dark ≤140 | deep ≤100 | zoomed edge noise |
+| --- | --- | --- | --- | --- | --- |
+| env 1.35, ext 0 | 176.7 | 42.8 | 17.3% | 5.9% | 0.893 |
+| env 1.50, ext 0 | 185.0 | 41.2 | 13.4% | 4.9% | 0.852 |
+| env 1.35, ext 1 | 178.8 | 38.2 | 16.9% | 3.9% | 0.838 |
+| **env 1.50, ext 1 (Givara)** | 186.8 | 36.7 | 13.0% | 2.8% | **0.800** |
+| Givara's actual look | 175.3 | 46.1 | 21.6% | 10.6% | — |
+
+Givara's values are kept: they are the requested parity *and* the lowest edge
+noise. The residual gap is contrast (sd 36.7 vs 46.1), and it is **evidence for
+the facet-density hypothesis in §5, not against parity**. The extinction fix is
+the diagnostic: on a 338-triangle stone it fires rarely, so contrast survives
+and no facet goes dead. On this ~170-triangle stone the trace bottoms out far
+more, so the fix either fires widely (contrast drops) or is off (dead black
+facets and edge speckle). Both symptoms have the same cause, and no shader
+setting adds facets.
+
+---
+
+## 8. Gotchas
 
 - **Headless screenshots of this app are unreliable** — it frequently renders a
   blank canvas under Playwright even with a real GPU, with no console errors,

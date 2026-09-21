@@ -32,11 +32,18 @@ const check = (ok, label, detail) => {
 
 console.log("=== defaults are the photographic combination ===");
 const APPROVED = {
-  // Studio was tried here and reverted — see lighting.ts. At this product's
-  // boosted envMapIntensity it punches black crescents into every chain link.
-  environment: "warehouse",
+  /*
+   * Atelier, not warehouse. Warehouse is a photograph of a real building, and
+   * polished gold is a mirror: its beams and windows landed in the piece, and
+   * melee stones facing a wall rendered dark olive. Atelier is a soft
+   * synthetic tent with nothing recognisable in it to reflect.
+   *
+   * Exposure 1.0, not 1.4, matching Givara — ACES at 1.4 flattens contrast
+   * through its shoulder.
+   */
+  environment: "atelier",
   separateGemEnvironment: true,
-  exposure: 1.4,
+  exposure: 1,
 };
 for (const [k, want] of Object.entries(APPROVED)) {
   check(DEFAULT_LIGHTING[k] === want, `${k} is ${want}`, `got ${DEFAULT_LIGHTING[k]}`);
@@ -72,7 +79,11 @@ check(
 );
 
 console.log("\n=== environment list ===");
-check(ENVIRONMENTS[0].id === "warehouse", "warehouse is first, and is the default");
+check(
+  ENVIRONMENTS.some((e) => e.id === DEFAULT_LIGHTING.environment),
+  "the default environment is one the list actually offers",
+  DEFAULT_LIGHTING.environment,
+);
 /*
  * The tent must stay generated; how many others are is not this test's call.
  *
@@ -127,7 +138,16 @@ check(
   "nothing renders as a black hole (<90)",
   `${pc((v) => v < 90).toFixed(1)}%`,
 );
-check(px[0] >= 120, "even the darkest direction is a readable grey", `min ${px[0]}`);
+/*
+ * 105, lowered from 120 when the metal environment gained its black flags.
+ *
+ * The flags are subtractive on purpose — they are what gives metal its
+ * light-to-dark banding instead of an even sheen — so the darkest direction is
+ * MEANT to be darker than an unflagged tent's. The guard against a dead hole
+ * is the <90 check above; this one only asks that the floor stay a grey you
+ * can still read a form in.
+ */
+check(px[0] >= 105, "even the darkest direction is a readable grey", `min ${px[0]}`);
 const bright = pc((v) => v >= 180);
 check(
   bright > 50 && bright < 85,
@@ -188,10 +208,7 @@ check(getLightTent() === getLightTent(), "baked once and cached, not per model")
    * break gets through.
    */
   check(ENVIRONMENTS.length >= 12, "a dozen or more to choose from", String(ENVIRONMENTS.length));
-  check(
-    new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length,
-    "every id is unique",
-  );
+  check(new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length, "every id is unique");
   check(
     ENVIRONMENTS.every((e) => /^#[0-9a-f]{6}$/i.test(e.sky) && /^#[0-9a-f]{6}$/i.test(e.ground)),
     "every one has a sky and a ground colour for its swatch",

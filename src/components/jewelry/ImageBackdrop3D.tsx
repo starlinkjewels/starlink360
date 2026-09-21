@@ -119,7 +119,7 @@ export function ImageBackdrop3D({ image, fitRadius }: ImageBackdrop3DProps) {
     if (!mesh || !image) return;
 
     /*
-     * `OrbitControls.target` is recentred to the origin on every fit (see
+     * The controls' `target` is recentred to the origin on every fit (see
      * Viewer.tsx), so the direction from the origin to the camera is a safe
      * stand-in for "which way is the camera looking from" without needing the
      * controls ref threaded all the way down here.
@@ -131,7 +131,7 @@ export function ImageBackdrop3D({ image, fitRadius }: ImageBackdrop3DProps) {
     /*
      * Comfortably inside the camera's own far plane (itself already sized off
      * the piece and the current camera settings in `camera.ts`), and always
-     * well beyond `OrbitControls.maxDistance` — both scale off the same
+     * well beyond the controls' `maxDistance` — both scale off the same
      * framing distance, so reading `camera.far` live tracks any FOV/near/far
      * change instead of duplicating that formula here. Floored at a multiple
      * of the piece's own radius so a degenerate near/far pair on a tiny or
