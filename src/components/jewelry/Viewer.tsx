@@ -320,6 +320,33 @@ function Ground({ fit, settings }: { fit: Fit; settings: GroundSettings }) {
  * `getMetalStudio` adds the black flags; see its note in lighting.ts for why a
  * soft tent alone leaves gold pale.
  */
+/**
+ * Reports the frame on which the scene actually has an environment.
+ *
+ * Building a piece and building the environment are both bursts of GPU work,
+ * and they must not land together. Measured on the opening piece: a cold load
+ * fetches the GLB at +1.0s and is fine, while a warm reload fetches it from
+ * cache at +0.5s — early enough to collide with `getMetalStudio`'s PMREM — and
+ * the context is lost at +1.6s, leaving a white canvas. Three reloads in a
+ * row, every time. A 2.5 MB piece never reproduced it, because it could not
+ * arrive early enough to collide.
+ *
+ * So the piece waits for the environment rather than racing it. This watches
+ * for `scene.environment` instead of guessing at a delay, which means it
+ * tracks however long the HDRI and its PMREM actually take on the machine it
+ * is running on.
+ */
+function EnvironmentGate({ onReady }: { onReady: () => void }) {
+  const scene = useThree((s) => s.scene);
+  const fired = useRef(false);
+  useFrame(() => {
+    if (fired.current || !scene.environment) return;
+    fired.current = true;
+    onReady();
+  });
+  return null;
+}
+
 function AtelierEnvironment({ rotation, intensity }: { rotation: number; intensity: number }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
@@ -921,6 +948,9 @@ export default function Viewer({
   );
 
   const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object">("checking");
+  /** The piece mounts once the environment is up — see `EnvironmentGate`. */
+  const [envReady, setEnvReady] = useState(false);
+  const markEnvReady = useCallback(() => setEnvReady(true), []);
   /**
    * The in-flight (or last completed) check, keyed by product, so a second
    * invocation of the effect below for the SAME product can tell there is
@@ -971,6 +1001,21 @@ export default function Viewer({
       setSource("object");
       return;
     }
+    /*
+     * No URL is not a missing asset — it is a piece that has not arrived yet.
+     *
+     * The opening piece is a `.3dm` decoded in the browser, so it carries no
+     * `glbUrl` and has no `object` until that finishes. Probing an empty URL
+     * asks the server for the CURRENT PAGE, which answers with HTML, which
+     * looks exactly like a broken asset — so this dropped to `FallbackPendant`,
+     * the stand-in meant for a genuinely missing file, and sat there rendering
+     * a piece nobody asked for until the WebGL context gave out.
+     *
+     * Staying in "checking" shows the loader instead, and the decoded object
+     * replaces it the moment it lands.
+     */
+    if (!product.glbUrl) return;
+
     fetch(product.glbUrl, { method: "HEAD" })
       .then((res) => {
         if (checkRef.current !== entry) return;
@@ -1356,7 +1401,7 @@ export default function Viewer({
             onPointerMove={handleHover}
             onPointerOut={clearHover}
           >
-            {source === "glb" && (
+            {source === "glb" && envReady && (
               <GLBModel
                 key={product.id}
                 url={product.glbUrl}
@@ -1400,7 +1445,7 @@ export default function Viewer({
                 selectedStampId={selectedStampId}
               />
             )}
-            {source === "object" && product.object && (
+            {source === "object" && envReady && product.object && (
               <ObjectModel
                 key={product.id}
                 object={product.object}
@@ -1584,6 +1629,8 @@ export default function Viewer({
           quaternion, which removes the pole the clamp was there to protect.
           Read that file before changing anything here.
         */}
+        <EnvironmentGate onReady={markEnvReady} />
+
         <TurntableRig
           ref={controlsRef}
           enabled={!locked}

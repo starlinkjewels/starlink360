@@ -186,6 +186,23 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+let openingPiece: Promise<import("three").Object3D> | null = null;
+
+function decodeOpeningPiece(source: string): Promise<import("three").Object3D> {
+  openingPiece ??= (async () => {
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`Could not fetch ${source}`);
+    const blob = await response.blob();
+    const name = source.slice(source.lastIndexOf("/") + 1);
+    const { loadJewelryFile } = await import("@/lib/loadJewelryFile");
+    return loadJewelryFile(new File([blob], name));
+  })().catch((e) => {
+    openingPiece = null;
+    throw e;
+  });
+  return openingPiece;
+}
+
 function Index() {
   const [product, setProduct] = useState<Product>(products[0]);
   const [finish, setFinish] = useState<Finish>(finishes[0]);
@@ -1077,6 +1094,24 @@ function Index() {
      * somebody working through a batch of Z-up CAD files sets it once instead
      * of on every upload. A fresh session starts at Y — `DEFAULT_CAMERA`.
      */
+  }, []);
+
+  useEffect(() => {
+    const source = products[0].sourceUrl;
+    if (!source) return;
+    let live = true;
+    void (async () => {
+      try {
+        const object = await decodeOpeningPiece(source);
+        if (!live) return;
+        setProduct((c) => (c.id === products[0].id ? { ...c, object: object.clone(true) } : c));
+      } catch {
+        /* the loader stays up rather than an error over a piece nobody asked for */
+      }
+    })();
+    return () => {
+      live = false;
+    };
   }, []);
 
   /*
