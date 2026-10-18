@@ -33,7 +33,7 @@ export function TopBar({
   return (
     <header className="topbar">
       <span className="brand">
-        Starlink<span className="brand-mark">✦</span>
+        Netram<span className="brand-mark">✦</span>
       </span>
 
       <div className="topbar-actions">

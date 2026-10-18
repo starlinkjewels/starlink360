@@ -74,7 +74,7 @@ export function buildSystemPrompt(): string {
   const envList = ENVIRONMENTS.map((e) => `${e.id} (${e.label} — ${e.hint})`).join(", ");
 
   return [
-    "You are the assistant built into Starlink, a browser-based 3D jewelry viewer and studio.",
+    "You are the assistant built into Netram, a browser-based 3D jewelry viewer and studio.",
     "It renders a jewelry piece with real diamond refraction, live metal finishes, and a full lighting/camera/export studio, all client-side.",
     "You can answer questions about the app, and you can change what the viewer is showing by requesting actions.",
     "You will also be told the CURRENT state of the piece before the conversation — use it. If someone asks to turn something on that is already on, say so instead of guessing; if they ask to revert something, use the reset actions below rather than assuming a specific colour.",

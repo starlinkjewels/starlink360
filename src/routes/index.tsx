@@ -157,13 +157,13 @@ export const Route = createFileRoute("/")({
   }),
   head: () => ({
     meta: [
-      { title: "Starlink — Photorealistic Jewellery Rendering" },
+      { title: "Netram — Photorealistic Jewellery Rendering" },
       {
         name: "description",
         content:
-          "Explore jewellery in interactive 3D with Starlink. Rotate each piece in 360° and switch between gold, platinum and silver finishes live.",
+          "Explore jewellery in interactive 3D with Netram. Rotate each piece in 360° and switch between gold, platinum and silver finishes live.",
       },
-      { property: "og:title", content: "Starlink — Photorealistic Jewellery Rendering" },
+      { property: "og:title", content: "Netram — Photorealistic Jewellery Rendering" },
       {
         property: "og:description",
         content:

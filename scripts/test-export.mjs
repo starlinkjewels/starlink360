@@ -26,7 +26,7 @@ const check = (ok, label, detail) => {
 };
 
 console.log("=== the mark keeps its proportions at any size ===");
-const ON = { ...DEFAULT_WATERMARK, enabled: true, text: "Starlink Jewels" };
+const ON = { ...DEFAULT_WATERMARK, enabled: true, text: "Netram Jewels" };
 for (const [w, h] of [
   [512, 512],
   [1920, 1080],
@@ -118,7 +118,7 @@ check(isVisible(ON), "a real mark is visible");
     JSON.stringify(text?.slice(2)),
   );
   check(
-    calls.some((c) => Array.isArray(c) && c[0] === "fillText" && c[1] === "Starlink Jewels"),
+    calls.some((c) => Array.isArray(c) && c[0] === "fillText" && c[1] === "Netram Jewels"),
     "text is trimmed",
   );
 }

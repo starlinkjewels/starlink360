@@ -85,19 +85,19 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#06050a" },
       // Defaults for any route that doesn't set its own; "/" overrides the
       // title and descriptions with piece-specific copy.
-      { title: "Starlink — Photorealistic Jewellery Rendering" },
+      { title: "Netram — Photorealistic Jewellery Rendering" },
       {
         name: "description",
-        content: "Explore Starlink in interactive 3D — 360° turntable and live metal finishes.",
+        content: "Explore Netram in interactive 3D — 360° turntable and live metal finishes.",
       },
-      { name: "author", content: "Starlink" },
-      { property: "og:title", content: "Starlink — Photorealistic Jewellery Rendering" },
+      { name: "author", content: "Netram" },
+      { property: "og:title", content: "Netram — Photorealistic Jewellery Rendering" },
       {
         property: "og:description",
-        content: "Explore Starlink in interactive 3D — 360° turntable and live metal finishes.",
+        content: "Explore Netram in interactive 3D — 360° turntable and live metal finishes.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:site_name", content: "Starlink" },
+      { property: "og:site_name", content: "Netram" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
