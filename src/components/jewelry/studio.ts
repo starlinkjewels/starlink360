@@ -546,8 +546,7 @@ export function canvasToBlob(
  * the plain link already works every time.
  */
 export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
-  const isMobile =
-    typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+  const isMobile = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
 
   if (isMobile && typeof navigator !== "undefined" && navigator.share && navigator.canShare) {
     const file = new File([blob], filename, { type: blob.type });

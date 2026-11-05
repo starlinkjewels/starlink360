@@ -188,10 +188,7 @@ check(getLightTent() === getLightTent(), "baked once and cached, not per model")
    * break gets through.
    */
   check(ENVIRONMENTS.length >= 12, "a dozen or more to choose from", String(ENVIRONMENTS.length));
-  check(
-    new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length,
-    "every id is unique",
-  );
+  check(new Set(ENVIRONMENTS.map((e) => e.id)).size === ENVIRONMENTS.length, "every id is unique");
   check(
     ENVIRONMENTS.every((e) => /^#[0-9a-f]{6}$/i.test(e.sky) && /^#[0-9a-f]{6}$/i.test(e.ground)),
     "every one has a sky and a ground colour for its swatch",

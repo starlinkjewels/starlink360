@@ -422,7 +422,9 @@ function Index() {
     // asking, same as before.
     const detected = lastFitRef.current;
     const knownWidthMM =
-      detected?.detectedMMPerUnit !== undefined ? detected.detectedMMPerUnit * detected.width : null;
+      detected?.detectedMMPerUnit !== undefined
+        ? detected.detectedMMPerUnit * detected.width
+        : null;
     setDimensions({ ...DEFAULT_DIMENSIONS, knownWidthMM, autoDetected: knownWidthMM !== null });
   }, []);
 

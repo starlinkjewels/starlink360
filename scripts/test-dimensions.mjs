@@ -29,20 +29,21 @@ check(mmPerUnit(50, 5) === 10, "known width over model width gives mm per unit")
 check(mmPerUnit(50, 0) === null, "a zero-width piece cannot be calibrated, not a divide by zero");
 check(mmPerUnit(50, -1) === null, "nor a negative one");
 
-console.log("\n=== the default is a guess, not a blank ===");
+console.log("\n=== the default is uncalibrated, not a guess ===");
 {
-  // A panel showing dashes until someone finds a calibration field reads as
-  // broken. The default is a plausible starting figure, not null — real
-  // uncalibrated (null) is still reachable, just no longer the first thing
-  // anyone sees.
+  // A made-up starting width (it used to be 40 mm) silently scaled every mm
+  // figure and carat weight by the wrong ratio. The real width now comes from
+  // the file's own unit (Rhino document unit, glTF metres) when it has one,
+  // and is asked for when it doesn't — so the default is honestly unknown.
   check(
-    DEFAULT_DIMENSIONS.knownWidthMM !== null && DEFAULT_DIMENSIONS.knownWidthMM > 0,
-    "ships with a real starting width, so figures show immediately",
+    DEFAULT_DIMENSIONS.knownWidthMM === null,
+    "ships uncalibrated, so no figure is computed from a made-up scale",
     `${DEFAULT_DIMENSIONS.knownWidthMM}`,
   );
+  check(!DEFAULT_DIMENSIONS.autoDetected, "and does not claim the width was detected");
   check(
-    DEFAULT_DIMENSIONS.showOnCanvas && DEFAULT_DIMENSIONS.showTable,
-    "both visualisations start on",
+    !DEFAULT_DIMENSIONS.showOnCanvas && !DEFAULT_DIMENSIONS.showTable,
+    "both visualisations start off",
   );
 }
 

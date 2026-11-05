@@ -4,7 +4,13 @@ import type { DecodedBucket, DecodedDocument } from "./rhinoDecode";
 
 export type LoadProgress = { phase: string; percent: number | null };
 
-export const RHINO_LIB = "https://cdn.jsdelivr.net/npm/rhino3dm@8.17.0/";
+/*
+ * 8.35 is the first rhino3dm whose JavaScript build exposes Brep loops and
+ * trims, which is what lets parts saved without a render mesh be meshed in
+ * the browser (brepMesher.ts). Keep this in step with package.json, which the
+ * Node suites run against.
+ */
+export const RHINO_LIB = "https://cdn.jsdelivr.net/npm/rhino3dm@8.35.0/";
 export const DRACO_LIB = "https://www.gstatic.com/draco/versioned/decoders/1.5.7/";
 
 /**
@@ -144,11 +150,13 @@ const CONSTRUCTION_WORDS =
   /\b(finger\s*sizes?|cutting\s*objects?|cutters?|construction|reference|guides?|layouts?|dimensions?|annotations?|texts?|sketch(es)?|scale|notes?|hidden|temp|temporary|backup|old|obsolete|scrap|junk)\b/i;
 
 /**
- * Rhino stores NURBS; only the cached render mesh is drawable. A file saved
- * without those meshes yields nothing for the affected objects, and the loader
- * records it as a warning rather than an error — which is how a ring can arrive
- * with its stones but no band. Nothing client-side can tessellate NURBS, so the
- * best we can do is say precisely what happened.
+ * For three's Rhino3dmLoader, which only draws Rhino's cached render meshes: a
+ * file saved without them yields nothing for the affected objects, recorded as
+ * a warning — which is how a ring can arrive with its stones but no band.
+ *
+ * The app's own .3dm path (rhinoDecode.ts) no longer has this problem: it
+ * meshes such parts from their NURBS itself (brepMesher.ts). This remains for
+ * any root that still comes through the three loader.
  */
 function missingMeshNotice(root: THREE.Object3D): string | null {
   const warnings = (root.userData as { warnings?: { message?: string }[] }).warnings;
@@ -490,8 +498,7 @@ export async function compressToJewelryScene(
    * correction, so this stays correct whichever axis a piece is rotated
    * about, unlike deriving it from any one edge of the box.
    */
-  const detectedMMPerUnit =
-    sourceUnitsAreMeters && sphere.radius > 0 ? sphere.radius * 1000 : null;
+  const detectedMMPerUnit = sourceUnitsAreMeters && sphere.radius > 0 ? sphere.radius * 1000 : null;
   const scale = 1 / (sphere.radius || 1);
   const normalise = new THREE.Matrix4()
     .makeScale(scale, scale, scale)

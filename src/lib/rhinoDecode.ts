@@ -17,7 +17,18 @@
  * So this walks the document in a worker, writes vertices straight into
  * Float32Arrays, merges everything into the two buckets the viewer actually
  * renders, and transfers two ArrayBuffers back with zero copying.
+ *
+ * Parts Rhino saved WITHOUT a render mesh are meshed here too, from their
+ * exact NURBS geometry — see brepMesher.ts.
  */
+
+/*
+ * The ".js" is required, not a slip: the Node suites compile this module with
+ * plain tsc and run it directly, and Node's ESM loader will not resolve an
+ * extensionless specifier. TypeScript and Vite both map it back to the .ts.
+ */
+import { BREP_MESHER_SOURCE } from "./brepMesher.js";
+import { EARCUT_SOURCE } from "./vendor/earcutSource.js";
 
 export interface DecodedBucket {
   position: Float32Array;
@@ -65,8 +76,16 @@ export interface DecodedDocument {
    */
   gems: DecodedGem[];
   notices: string[];
-  /** Objects skipped because Rhino stored no render mesh for them. */
+  /**
+   * Objects that drew nothing at all: no render mesh in the file AND the
+   * geometry could not be meshed here either.
+   */
   missingMesh: number;
+  /**
+   * Faces meshed here from their NURBS because the file carried no render
+   * mesh for them. Informational: these render normally.
+   */
+  autoMeshed: number;
   /**
    * Millimetres per one native Rhino model unit, read straight from the
    * file's own document settings — not a guess. Null when the file has no
@@ -126,8 +145,15 @@ export interface DecodeRules {
 
 /* The worker runs as a classic script so it can `importScripts` the same
  * rhino3dm build the loader uses — proven to work, and already prefetched.
- * Written without template literals so it survives being embedded in one. */
-export const WORKER_SOURCE = String.raw`
+ * Written without template literals so it survives being embedded in one.
+ *
+ * earcut and the Brep mesher are prepended as plain source: a classic worker
+ * built from a string cannot import modules, and inlining them means meshing
+ * a part with no render mesh needs no second download. */
+export const WORKER_SOURCE =
+  EARCUT_SOURCE +
+  BREP_MESHER_SOURCE +
+  String.raw`
 self.onmessage = function (e) {
   var msg = e.data;
   var lib = msg.libraryPath;
@@ -432,6 +458,37 @@ self.onmessage = function (e) {
 
     var chunks = [];
     var missingMesh = 0;
+    /* Faces drawn from our own mesh because the file had none for them. */
+    var autoMeshed = 0;
+    /* Faces with no cached mesh that could not be meshed either. */
+    var unmeshedFaces = 0;
+
+    /*
+     * Rhino's own meshes are always preferred: they are what the jeweller saw.
+     * Only a face with none falls through to the mesher.
+     */
+    var mesher = null;
+    try { mesher = createBrepMesher(rhino, earcut); } catch (err) { mesher = null; }
+
+    /** Meshes the listed faces of a Brep and pushes each one that succeeds. */
+    function meshFaces(brep, faceIndices, bucket, xf, solid, mat) {
+      if (!mesher || !faceIndices.length) {
+        unmeshedFaces += faceIndices.length;
+        return 0;
+      }
+      var got = 0;
+      var results = mesher.meshBrepFaces(brep, faceIndices);
+      for (var i = 0; i < results.length; i++) {
+        var m = results[i];
+        if (m && pushArrays(m.position, m.normal, m.index, bucket, xf, solid, mat)) {
+          got++;
+          autoMeshed++;
+        } else {
+          unmeshedFaces++;
+        }
+      }
+      return got;
+    }
     // Chunks are per BRep face; this groups the faces of one solid together so
     // winding can be judged against the solid's own centre.
     var groupId = 0;
@@ -452,16 +509,30 @@ self.onmessage = function (e) {
         var faces = null;
         try { faces = geometry.faces(); } catch (err) { faces = null; }
         if (faces) {
+          var bare = [];
           for (var f = 0; f < faces.count; f++) {
             var fm = null;
             try { fm = faces.get(f).getMesh(rhino.MeshType.Any); } catch (err) { fm = null; }
             if (fm) got += push(fm, bucket, xf, solid, mat) ? 1 : 0;
+            else bare.push(f);
           }
+          // Saved without a render mesh: mesh those faces from the NURBS.
+          if (bare.length) got += meshFaces(geometry, bare, bucket, xf, solid, mat);
         }
       } else if (type === "Extrusion") {
         var em = null;
         try { em = geometry.getMesh(rhino.MeshType.Any); } catch (err) { em = null; }
         if (em) got += push(em, bucket, xf, true, mat) ? 1 : 0;
+        else {
+          // No cached mesh: an extrusion is exactly a Brep, so mesh that.
+          var eb = null;
+          try { eb = geometry.toBrep(true); } catch (err) { eb = null; }
+          if (eb) {
+            var all = [];
+            for (var ef = 0; ef < eb.faces().count; ef++) all.push(ef);
+            got += meshFaces(eb, all, bucket, xf, true, mat);
+          }
+        }
       } else if (type === "SubD") {
         var sm = null;
         try { sm = rhino.Mesh.createFromSubDControlNet(geometry, false); } catch (err) { sm = null; }
@@ -477,10 +548,16 @@ self.onmessage = function (e) {
       try { json = rhinoMesh.toThreejsJSON(); } catch (err) { return false; }
       var attrs = json && json.data && json.data.attributes;
       if (!attrs || !attrs.position) return false;
+      return pushArrays(
+        attrs.position.array,
+        attrs.normal ? attrs.normal.array : null,
+        json.data.index ? json.data.index.array : null,
+        bucket, xf, solid, mat
+      );
+    }
 
-      var P = attrs.position.array;
-      var N = attrs.normal ? attrs.normal.array : null;
-      var srcIdx = json.data.index ? json.data.index.array : null;
+    /* One mesh chunk from raw arrays — Rhino's cached mesh or our own. */
+    function pushArrays(P, N, srcIdx, bucket, xf, solid, mat) {
       var vCount = P.length / 3;
       if (!vCount) return false;
 
@@ -930,6 +1007,8 @@ self.onmessage = function (e) {
         metals: metals,
         gems: gems,
         missingMesh: missingMesh,
+        autoMeshed: autoMeshed,
+        unmeshedFaces: unmeshedFaces,
         unitSystem: modelUnitSystem,
       },
       transfer,
@@ -975,10 +1054,22 @@ export function decodeRhinoDocument(
       }
       if (data.type === "done") {
         const notices: string[] = [];
+        /*
+         * Parts saved without a render mesh are meshed in the worker now, so
+         * this only fires for geometry that could not be meshed even from its
+         * NURBS — a damaged Brep, or a face whose boundary does not lie on its
+         * own surface.
+         */
         if (data.missingMesh > 0) {
           notices.push(
-            `${data.missingMesh} part${data.missingMesh === 1 ? "" : "s"} had no render mesh and ` +
-              `could not be shown. In Rhino, select all and run Mesh, then re-save.`,
+            `${data.missingMesh} part${data.missingMesh === 1 ? "" : "s"} could not be shown: ` +
+              `the file has no render mesh for ${data.missingMesh === 1 ? "it" : "them"} and the ` +
+              `geometry could not be meshed. In Rhino, run Check on the part, then re-save.`,
+          );
+        } else if (data.unmeshedFaces > 0) {
+          notices.push(
+            `${data.unmeshedFaces} surface${data.unmeshedFaces === 1 ? "" : "s"} could not be meshed ` +
+              `and may show as a gap. In Rhino, run Check on the affected part, then re-save.`,
           );
         }
         finish(() =>
@@ -987,6 +1078,7 @@ export function decodeRhinoDocument(
             gems: data.gems ?? [],
             notices,
             missingMesh: data.missingMesh,
+            autoMeshed: data.autoMeshed ?? 0,
             mmPerUnit: typeof data.unitSystem === "number" ? mmPerRhinoUnit(data.unitSystem) : null,
           }),
         );

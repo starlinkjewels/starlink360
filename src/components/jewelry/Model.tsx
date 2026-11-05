@@ -274,8 +274,7 @@ export function DressedScene({
     // portrait phone that difference is what keeps the piece from looking tiny.
     const halfX = Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
     const halfZ = Math.max(Math.abs(box.min.z), Math.abs(box.max.z));
-    const detectedMMPerUnit = (object.userData as { detectedMMPerUnit?: number })
-      .detectedMMPerUnit;
+    const detectedMMPerUnit = (object.userData as { detectedMMPerUnit?: number }).detectedMMPerUnit;
     onFit({
       radius,
       radiusXZ: Math.hypot(halfX, halfZ) || radius,

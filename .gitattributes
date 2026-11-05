@@ -1,1 +1,6 @@
+# Always LF in the working tree, whatever core.autocrlf says. Prettier (via
+# ESLint) enforces LF, so a Windows checkout with autocrlf=true otherwise
+# reports an error on every line of every file.
+* text=auto eol=lf
+
 attached_assets/LP_043_1785154540041.3dm filter=lfs diff=lfs merge=lfs -text
