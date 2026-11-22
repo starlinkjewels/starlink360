@@ -6,6 +6,7 @@ import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
 import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
 import { GemRefraction, type GemOptics } from "./GemRefraction";
+import { getGemStudio } from "./gemStudio";
 import { DEFAULT_LIGHTING, environmentById, getLightTent, type LightingSettings } from "./lighting";
 import { collectStoneGroups, type StoneGroup } from "./stones";
 import { StampDecals } from "./StampDecals";
@@ -499,7 +500,13 @@ export function DressedScene({
       ? { files: activeFile }
       : { preset: (gemChoice.preset ?? metalEnv.preset ?? "warehouse") as "warehouse" },
   );
-  const envMap = gemChoice.id === "tent" ? getLightTent() : presetMap;
+  // The two generated rooms, then anything downloaded.
+  const envMap =
+    gemChoice.id === "tent"
+      ? getLightTent()
+      : gemChoice.id === "gem-studio"
+        ? getGemStudio()
+        : presetMap;
 
   return (
     <>

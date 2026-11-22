@@ -43,10 +43,12 @@
     "test:animation": "tsc src/components/jewelry/animation.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-animation.mjs",
     "test:dimensions": "tsc src/components/jewelry/dimensions.ts src/components/jewelry/selection.ts src/components/jewelry/plan.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-dimensions.mjs",
     "test:mesher": "tsc src/lib/brepMesher.ts src/lib/vendor/earcutSource.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-brep-mesher.mjs",
-    "test:meshless": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node --max-old-space-size=4096 scripts/test-meshless-3dm.mjs"
+    "test:meshless": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node --max-old-space-size=4096 scripts/test-meshless-3dm.mjs",
+    "test:tryon": "tsc src/components/tryon/anchors.ts src/components/tryon/filters.ts src/components/tryon/brilliant.ts --outDir .tmp-jewelry/tryon --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-tryon.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@mediapipe/tasks-vision": "0.10.17",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",

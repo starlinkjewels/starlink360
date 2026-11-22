@@ -794,22 +794,32 @@ function Index() {
      * brighter than this on purpose should not be dimmed back down in the
      * name of "best".
      */
+    /*
+     * Re-based when the defaults moved to ACES at exposure 1.0 with the room
+     * at 1.5 (lighting.ts): the old 1.55 exposure was a lift from a 1.4
+     * default and, on the multi-path diamond shader, blows the stones' white
+     * facets into one flat patch. A small lift above the new default keeps
+     * "best look" visibly brighter without that.
+     */
     setLighting((current) => ({
       ...current,
-      exposure: Math.max(current.exposure, 1.55),
-      environmentIntensity: Math.max(current.environmentIntensity, 1.15),
+      exposure: Math.max(current.exposure, 1.15),
+      environmentIntensity: Math.max(current.environmentIntensity, 1.5),
     }));
     setShowcaseOn(true);
 
     // Each of these is a real GPU allocation and only worth doing — or
     // waiting a frame for — when the value genuinely isn't there yet.
     const needsDirectionalShadow = shadows.mode !== "directional";
-    const needsGemTent = !(lighting.separateGemEnvironment && lighting.gemEnvironment === "tent");
+    // The gem studio replaced the light tent as the stones' best room.
+    const needsGemTent = !(
+      lighting.separateGemEnvironment && lighting.gemEnvironment === "gem-studio"
+    );
     const applyGemTent = () =>
       setLighting((current) => ({
         ...current,
         separateGemEnvironment: true,
-        gemEnvironment: "tent",
+        gemEnvironment: "gem-studio",
       }));
 
     if (needsDirectionalShadow) {

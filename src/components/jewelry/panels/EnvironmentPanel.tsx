@@ -287,10 +287,14 @@ export function EnvironmentPanel({
               <button
                 className="chip mt-2"
                 onClick={() =>
-                  onLighting({ ...lighting, separateGemEnvironment: true, gemEnvironment: "tent" })
+                  onLighting({
+                    ...lighting,
+                    separateGemEnvironment: true,
+                    gemEnvironment: "gem-studio",
+                  })
                 }
               >
-                Use the light tent
+                Use the gem studio
               </button>
             </>
           )}

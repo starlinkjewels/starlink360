@@ -32,11 +32,15 @@ const check = (ok, label, detail) => {
 
 console.log("=== defaults are the photographic combination ===");
 const APPROVED = {
-  // Studio was tried here and reverted — see lighting.ts. At this product's
-  // boosted envMapIntensity it punches black crescents into every chain link.
-  environment: "warehouse",
+  // drei's "studio" preset was tried and reverted (black crescents in chain
+  // links). The white studio CAPTURE is a different, even map, and is what
+  // matched the commercial reference look — see DEFAULT_LIGHTING in lighting.ts.
+  environment: "white-studio",
   separateGemEnvironment: true,
-  exposure: 1.4,
+  gemEnvironment: "gem-studio",
+  // ACES at exposure 1 with the room at 1.5, as the reference viewer runs.
+  exposure: 1,
+  environmentIntensity: 1.5,
 };
 for (const [k, want] of Object.entries(APPROVED)) {
   check(DEFAULT_LIGHTING[k] === want, `${k} is ${want}`, `got ${DEFAULT_LIGHTING[k]}`);
@@ -72,7 +76,17 @@ check(
 );
 
 console.log("\n=== environment list ===");
-check(ENVIRONMENTS[0].id === "warehouse", "warehouse is first, and is the default");
+check(ENVIRONMENTS[0].id === "warehouse", "warehouse is still first in the list");
+check(
+  ENVIRONMENTS.some((e) => e.id === DEFAULT_LIGHTING.environment) &&
+    ENVIRONMENTS.some((e) => e.id === DEFAULT_LIGHTING.gemEnvironment),
+  "both default environments exist in the list",
+);
+check(
+  ENVIRONMENTS.find((e) => e.id === "gem-studio")?.preset === null &&
+    !ENVIRONMENTS.find((e) => e.id === "gem-studio")?.file,
+  "the gem studio is generated rather than downloaded",
+);
 /*
  * The tent must stay generated; how many others are is not this test's call.
  *
@@ -96,9 +110,16 @@ check(environmentById("nonsense").id === "warehouse", "an unknown id falls back,
 check(environmentById("tent").preset === null, "the tent is looked up correctly");
 
 console.log("\n=== the tent, as it will actually render ===");
+/*
+ * The exposure the tent was designed and signed off at. It used to be read
+ * from DEFAULT_LIGHTING, which was right while the tent was the default room;
+ * the defaults have since moved to the gem studio at exposure 1.0, and the
+ * tent's own contract (nothing below a readable grey) is about the tent.
+ */
+const TENT_EXPOSURE = 1.4;
 /* three's ACESFilmicToneMapping, scalar form, then sRGB. */
 const aces = (c) => {
-  c *= DEFAULT_LIGHTING.exposure / 0.6;
+  c *= TENT_EXPOSURE / 0.6;
   const a = c * (c + 0.0245786) - 0.000090537;
   const b = c * (0.983729 * c + 0.432951) + 0.238081;
   return Math.min(1, Math.max(0, a / b));
@@ -213,8 +234,8 @@ check(getLightTent() === getLightTent(), "baked once and cached, not per model")
 
 {
   check(
-    DEFAULT_LIGHTING.environmentRotation === 0 && DEFAULT_LIGHTING.environmentIntensity === 1,
-    "zero and one — the environment exactly as it was before these existed",
+    DEFAULT_LIGHTING.environmentRotation === 0,
+    "zero rotation — the room as captured, a per-piece framing choice beyond that",
   );
 }
 

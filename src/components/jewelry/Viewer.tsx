@@ -17,6 +17,7 @@ import { acceleratePicking } from "./pickBvh";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
+import { buildStudioPiece } from "@/components/tryon/studioPieces";
 import { DimensionOverlay } from "./DimensionOverlay";
 import { DEFAULT_DIMENSIONS, mmPerUnit, summariseGems, type DimensionSettings } from "./dimensions";
 import { LoadingOverlay } from "./LoadingOverlay";
@@ -802,6 +803,20 @@ export default function Viewer({
 
   const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object">("checking");
 
+  /*
+   * A built-in piece made in the browser (the try-on's own ring), rather than
+   * loaded. Built here, in the lazily loaded viewer chunk, so the builders
+   * never reach the server bundle.
+   */
+  const procedural = product.procedural;
+  const proceduralKey = procedural ? JSON.stringify(procedural) : "";
+  const proceduralObject = useMemo(
+    () => (procedural ? buildStudioPiece(procedural) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [proceduralKey],
+  );
+  const pieceObject = product.object ?? proceduralObject;
+
   // Verify the GLB exists before handing it to the loader, so a missing asset
   // degrades to the studio stand-in instead of throwing.
   useEffect(() => {
@@ -809,7 +824,7 @@ export default function Viewer({
     setSource("checking");
     setFit(null);
     onLoadedChange(false);
-    if (product.object) {
+    if (pieceObject) {
       setSource("object");
       return;
     }
@@ -825,7 +840,7 @@ export default function Viewer({
     return () => {
       cancelled = true;
     };
-  }, [product.glbUrl, product.object, onLoadedChange]);
+  }, [product.glbUrl, pieceObject, onLoadedChange]);
 
   const handleFit = useCallback(
     (f: Fit) => {
@@ -1205,10 +1220,10 @@ export default function Viewer({
                 selectedStampId={selectedStampId}
               />
             )}
-            {source === "object" && product.object && (
+            {source === "object" && pieceObject && (
               <ObjectModel
                 key={product.id}
-                object={product.object}
+                object={pieceObject}
                 finish={finish}
                 onFit={handleFit}
                 camera={cameraSettings}

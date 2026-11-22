@@ -1,4 +1,5 @@
-import { FolderOpen, RotateCcw, Save, Upload, X } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { FolderOpen, RotateCcw, Save, Sparkles, Upload, X } from "lucide-react";
 import { SECTIONS, sectionById } from "./sections";
 
 /*
@@ -37,6 +38,11 @@ export function TopBar({
       </span>
 
       <div className="topbar-actions">
+        <Link to="/try-on" className="tb-btn" title="Try jewellery on live through your camera">
+          <Sparkles className="size-3.5" />
+          <span className="tb-label">Try On</span>
+        </Link>
+
         <button className="tb-btn" onClick={onReset} title="Back to the default view">
           <RotateCcw className="size-3.5" />
           <span className="tb-label">Reset Scene</span>

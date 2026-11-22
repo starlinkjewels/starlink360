@@ -67,6 +67,21 @@ export const ENVIRONMENTS: EnvironmentOption[] = [
     sky: "#ffffff",
     ground: "#d6d6da",
   },
+  /*
+   * Generated, like the tent, but laid out as a gem photographer's studio:
+   * mostly dark, lit by separate strip lights, with the camera's own dark
+   * reflection in front. Built for the multi-path diamond shader
+   * (diamondMaterial.ts), where it breaks a stone into the crisp white, grey
+   * and black facet mosaic of a real diamond. See gemStudio.ts.
+   */
+  {
+    id: "gem-studio",
+    label: "Gem studio",
+    hint: "Built for diamonds — crisp facet contrast",
+    preset: null,
+    sky: "#4a4a52",
+    ground: "#16161a",
+  },
   {
     id: "studio",
     label: "Studio",
@@ -238,15 +253,28 @@ export interface LightingSettings {
  * `environmentRotation` and `environmentIntensity` are the untouched original
  * values — rotating or dimming the room is a per-piece framing choice, not
  * part of "does this look photographed at all".
+ *
+ * REVISED, to match the leading commercial real-time jewellery viewer, whose
+ * live settings were read off its page: ACES at exposure 1.0, environment at
+ * 1.5, stones in their own studio. Concretely:
+ *
+ *  - `environment` → "white-studio", the real CC0 studio capture. The black
+ *    crescent problem above was drei's "studio" PRESET, with its near-black
+ *    gaps; the white studio capture is large and even, and gives polished gold
+ *    the soft, light, creamy gradients of product photography where warehouse
+ *    rendered it brown-tinged.
+ *  - `environmentIntensity` 1.5 and `exposure` 1.0: the same overall
+ *    brightness as before, but carried by the room rather than by the camera,
+ *    so the metal brightens without the stones' highlights clipping harder.
+ *  - `gemEnvironment` → "gem-studio", built for the multi-path diamond shader.
  */
 export const DEFAULT_LIGHTING: LightingSettings = {
-  environment: "warehouse",
+  environment: "white-studio",
   separateGemEnvironment: true,
-  gemEnvironment: "tent",
-  // Zero and one: the environment exactly as it was before these existed.
+  gemEnvironment: "gem-studio",
   environmentRotation: 0,
-  environmentIntensity: 1,
-  exposure: 1.4,
+  environmentIntensity: 1.5,
+  exposure: 1,
 };
 
 /* ────────────────────────────────────────────────────────────────────────────

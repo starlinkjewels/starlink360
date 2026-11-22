@@ -132,7 +132,7 @@ export function ViewportActions({
         title={
           defaultSettingsOn
             ? "Back to your settings"
-            : "Best look — gem light tent, a real shadow, sparkle bloom"
+            : "Best look — gem studio, a real shadow, sparkle bloom"
         }
         aria-label="Best look"
         aria-pressed={defaultSettingsOn}
