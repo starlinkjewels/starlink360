@@ -37,7 +37,7 @@ const APPROVED = {
   // matched the commercial reference look — see DEFAULT_LIGHTING in lighting.ts.
   environment: "white-studio",
   separateGemEnvironment: true,
-  gemEnvironment: "gem-studio",
+  gemEnvironment: "white-studio",
   // ACES at exposure 1 with the room at 1.5, as the reference viewer runs.
   exposure: 1,
   environmentIntensity: 1.5,

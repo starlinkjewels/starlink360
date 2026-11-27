@@ -66,7 +66,10 @@ const withHighlights = (patch) => ({
  * is asked for.
  */
 console.log("=== bloom is on, the rest is off ===");
-check(DEFAULT_BLOOM.enabled, "bloom is on, because sparkle is the product");
+check(
+  !DEFAULT_BLOOM.enabled,
+  "bloom is off by default: it hazed the diamond (matched to the try-on)",
+);
 check(
   DEFAULT_BLOOM.threshold > 0.9,
   "and kept honest by a high threshold, so metal does not glow",
@@ -75,8 +78,8 @@ check(
 check(!DEFAULT_DOF.enabled, "depth of field is off");
 check(!DEFAULT_SSR.enabled, "SSR is off");
 check(
-  usesComposer(DEFAULT_POST),
-  "so a composer is built, which is what puts bloom on screen at all",
+  !usesComposer(DEFAULT_POST),
+  "so no composer is built by default: plain rendering, lighter on the GPU",
 );
 check(
   DEFAULT_BLOOM.resolutionX === 0 && DEFAULT_BLOOM.resolutionY === 0,
@@ -90,7 +93,7 @@ check(
  * and that absence alone is enough to read a correct render as computed.
  */
 console.log("\n=== film is on, subtly ===");
-check(DEFAULT_FILM.enabled, "film is on — a frame with none of this reads as computed");
+check(!DEFAULT_FILM.enabled, "film is off by default: a clean product shot, like the try-on");
 check(
   DEFAULT_FILM.grain > 0 && DEFAULT_FILM.grain < 0.1,
   "grain is present but subtle",
@@ -112,10 +115,10 @@ check(
  * mapping, not after like Film — it is compressing light, not photographing
  * a finished frame — so it gets its own section rather than living in Film.
  */
-console.log("\n=== highlight recovery is on, and leaves midtones alone ===");
+console.log("\n=== highlight recovery is off by default, and leaves midtones alone ===");
 check(
-  DEFAULT_HIGHLIGHTS.enabled,
-  "on — otherwise two different blown facets both read as the same flat white",
+  !DEFAULT_HIGHLIGHTS.enabled,
+  "off by default: it greyed the diamond's brightest facets (matched to the try-on)",
 );
 check(
   DEFAULT_HIGHLIGHTS.strength > 0 && DEFAULT_HIGHLIGHTS.strength <= 10,
@@ -218,8 +221,8 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
    * nothing, which is the failure that looks like a broken control.
    */
   check(
-    composerKey(base) !== composerKey(withBloom({ enabled: false })),
-    "turning an effect off changes which passes exist",
+    composerKey(base) !== composerKey(withBloom({ enabled: true })),
+    "turning an effect on changes which passes exist",
   );
   check(
     composerKey(withBloom({ enabled: true })) !==
@@ -237,12 +240,12 @@ console.log("\n=== the chain is rebuilt only when its shape changes ===");
     "and its buffer size",
   );
   check(
-    composerKey(base) !== composerKey(withFilm({ enabled: false })),
-    "turning film off changes which passes exist too",
+    composerKey(base) !== composerKey(withFilm({ enabled: true })),
+    "turning film on changes which passes exist too",
   );
   check(
-    composerKey(base) !== composerKey(withHighlights({ enabled: false })),
-    "and so does turning off highlight recovery",
+    composerKey(base) !== composerKey(withHighlights({ enabled: true })),
+    "and so does turning on highlight recovery",
   );
 }
 

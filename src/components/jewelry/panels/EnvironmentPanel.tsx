@@ -290,11 +290,11 @@ export function EnvironmentPanel({
                   onLighting({
                     ...lighting,
                     separateGemEnvironment: true,
-                    gemEnvironment: "gem-studio",
+                    gemEnvironment: "white-studio",
                   })
                 }
               >
-                Use the gem studio
+                Use the diamond studio light
               </button>
             </>
           )}

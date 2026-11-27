@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useEnvironment, useGLTF } from "@react-three/drei";
@@ -6,7 +6,7 @@ import type { Finish } from "@/data/finishes";
 import { DRACO_LIB } from "@/lib/loadJewelryFile";
 import { createGemMaterial, createMetalMaterial, facetGeometry } from "./materials";
 import { GemRefraction, type GemOptics } from "./GemRefraction";
-import { getGemStudio } from "./gemStudio";
+import { getGemStudio, loadGemPhoto } from "./gemStudio";
 import { DEFAULT_LIGHTING, environmentById, getLightTent, type LightingSettings } from "./lighting";
 import { collectStoneGroups, type StoneGroup } from "./stones";
 import { StampDecals } from "./StampDecals";
@@ -500,13 +500,34 @@ export function DressedScene({
       ? { files: activeFile }
       : { preset: (gemChoice.preset ?? metalEnv.preset ?? "warehouse") as "warehouse" },
   );
-  // The two generated rooms, then anything downloaded.
+  /*
+   * A photographed room chosen for the stones gets the stones' own compact
+   * copy (loadGemPhoto); see gemStudio.ts for why not the metal's full map.
+   */
+  const gemFile = lighting.separateGemEnvironment ? gemChoice.file : undefined;
+  const [gemPhoto, setGemPhoto] = useState<{ url: string; tex: THREE.Texture } | null>(null);
+  useEffect(() => {
+    if (!gemFile) return;
+    let live = true;
+    loadGemPhoto(gemFile)
+      .then((tex) => live && setGemPhoto({ url: gemFile, tex }))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [gemFile]);
+
+  // The two generated rooms, then a photographed one, then the shared room.
   const envMap =
     gemChoice.id === "tent"
       ? getLightTent()
       : gemChoice.id === "gem-studio"
         ? getGemStudio()
-        : presetMap;
+        : gemFile
+          ? gemPhoto?.url === gemFile
+            ? gemPhoto.tex
+            : null // waits for the photo: one material build, not two
+          : presetMap;
 
   return (
     <>
@@ -516,6 +537,13 @@ export function DressedScene({
         optics={gemOverrides}
         meshes={stones}
         envMap={envMap}
+        /*
+         * A room chosen for the stones alone travels with the camera ("oriented
+         * lighting"); one shared with the metal stays put, so the stones agree
+         * with the reflections in the band.
+         */
+        viewLocked={lighting.separateGemEnvironment}
+        tune={gemChoice.gemTune}
       />
       {/*
         Struck into the dressed scene, so a hallmark rides the piece through the

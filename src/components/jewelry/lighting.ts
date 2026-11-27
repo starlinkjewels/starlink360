@@ -14,7 +14,25 @@ import * as THREE from "three";
  */
 
 /** Environments the scene can sample. */
+/**
+ * How a map is set up when the STONES look into it: turned to where it gives
+ * the best sparkle, its brightness, and contrast. The same three dials the
+ * commercial gem renderers (iJewel3D, WebGi) expose per gem map.
+ */
+export interface GemTune {
+  /** Turn about the vertical, radians, relative to the camera. */
+  yaw?: number;
+  /** Tilt, radians, relative to the camera. */
+  pitch?: number;
+  /** Multiplier on the map, as the stones see it. */
+  intensity?: number;
+  /** Contrast; 1 is neutral, higher deepens the greys between facets. */
+  gamma?: number;
+}
+
 export interface EnvironmentOption {
+  /** Gem tuning when this map lights the stones. */
+  gemTune?: GemTune;
   id: string;
   label: string;
   hint: string;
@@ -176,6 +194,17 @@ export const ENVIRONMENTS: EnvironmentOption[] = [
     file: "/env/white_studio_02_2k.hdr",
     sky: "#f5f5f2",
     ground: "#c9c9c6",
+    /*
+     * The default room for the STONES, set side by side against the leading
+     * commercial jewellery renders: a real photographed studio gives a
+     * diamond the irregular, detailed light that drawn rectangles cannot
+     * (iJewel3D's own docs name the wrong gem HDRI as the commonest cause of a
+     * flat white stone). Bright and even, so the stone reads icy white; the
+     * light of 2.0 with contrast 1.3 keeps it bright white (1.75 read as grey)
+     * while still bringing back the crisp mid-grey facets and the
+     * arrows. Camera-locked when used for stones (GemRefraction viewLocked).
+     */
+    gemTune: { intensity: 2.0, gamma: 1.3 },
   },
   {
     id: "studio-small",
@@ -266,12 +295,14 @@ export interface LightingSettings {
  *  - `environmentIntensity` 1.5 and `exposure` 1.0: the same overall
  *    brightness as before, but carried by the room rather than by the camera,
  *    so the metal brightens without the stones' highlights clipping harder.
- *  - `gemEnvironment` → "gem-studio", built for the multi-path diamond shader.
+ *  - `gemEnvironment` → "white-studio" for the stones too, camera-locked and
+ *    tuned (see its `gemTune`): a real photographed studio, matched side by
+ *    side against the leading commercial renders. "Gem studio" stays a choice.
  */
 export const DEFAULT_LIGHTING: LightingSettings = {
   environment: "white-studio",
   separateGemEnvironment: true,
-  gemEnvironment: "gem-studio",
+  gemEnvironment: "white-studio",
   environmentRotation: 0,
   environmentIntensity: 1.5,
   exposure: 1,

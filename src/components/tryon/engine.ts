@@ -40,7 +40,8 @@ import {
 } from "./jewelry";
 import { categoryById, type Category, type TrackerKind } from "./catalog";
 import { loadTracker, type Tracker } from "./landmarkers";
-import { getGemStudio } from "@/components/jewelry/gemStudio";
+import { environmentById } from "@/components/jewelry/lighting";
+import { loadGemPhoto } from "@/components/jewelry/gemStudio";
 import { backdropById, backdropCss } from "./backdrops";
 
 /*
@@ -409,12 +410,14 @@ export class TryOnEngine {
     // needs it to read light and creamy rather than dark and mirror-like.
     this.scene.environmentIntensity = 1.5;
     /*
-     * Stones trace into a diamond photography box, not the room: a diamond is
-     * a picture of whatever its rays land on, and a real HDRI seen face-up is
-     * a flat grey wall. See gemStudio.ts for why its dark flags matter as
-     * much as its lights.
+     * Stones trace into the same real studio capture, with the gem tuning the
+     * studio viewer uses for it (lighting.ts, white-studio `gemTune`). The
+     * try-on camera never moves, so this is already the camera-locked
+     * "oriented lighting" the studio sets up explicitly.
      */
-    this.stones = new StoneMaterials(getGemStudio());
+    const gemRoom = await loadGemPhoto(ENV_URL);
+    if (this.disposed) return;
+    this.stones = new StoneMaterials(gemRoom, environmentById("white-studio").gemTune);
   }
 
   private async ensureTracker() {

@@ -67,7 +67,9 @@ export interface BloomSettings {
  * so the stones bloom and the metal does not turn to fog.
  */
 export const DEFAULT_BLOOM: BloomSettings = {
-  enabled: true,
+  // Off: matched against the try-on, a halo around every facet read as haze
+  // on the multi-path diamond shader, and it costs GPU headroom the studio lacks.
+  enabled: false,
   strength: 0.35,
   radius: 0.4,
   threshold: 0.95,
@@ -168,7 +170,8 @@ export interface FilmSettings {
 }
 
 export const DEFAULT_FILM: FilmSettings = {
-  enabled: true,
+  // Off by default: grain and vignette dirty a clean product shot.
+  enabled: false,
   grain: 0.035,
   vignette: 0.35,
   aberration: 0.15,
@@ -214,7 +217,8 @@ export interface HighlightSettings {
 }
 
 export const DEFAULT_HIGHLIGHTS: HighlightSettings = {
-  enabled: true,
+  // Off by default: it compressed the diamond's brightest facets toward grey.
+  enabled: false,
   strength: 2,
 };
 

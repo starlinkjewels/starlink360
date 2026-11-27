@@ -72,9 +72,10 @@ const PATCHES: Patch[] = [
   { az: -135, el: 54, hw: 9, hh: 5, radiance: 2.8, feather: 3 },
   { az: -45, el: 46, hw: 7, hh: 7, radiance: 3.2, feather: 3 },
   // Bounce card under the piece.
-  { az: 0, el: -62, hw: 30, hh: 30, radiance: 0.9, feather: 10, round: true },
-  // The camera and the person behind it: the arrows in a face-up stone.
-  { az: 0, el: 6, hw: 22, hh: 22, radiance: 0.004, feather: 6, round: true },
+  { az: 0, el: -62, hw: 30, hh: 30, radiance: 1.2, feather: 10, round: true },
+  // The camera and the person behind it: the arrows in a face-up stone. Dark
+  // grey, not black: black arrows read as a hole in the stone on screen.
+  { az: 0, el: 6, hw: 18, hh: 18, radiance: 0.07, feather: 8, round: true },
   // Pinpoint sources: one facet, one flash.
   { az: -32, el: 38, hw: 2.2, hh: 2.2, radiance: 40, feather: 1, round: true },
   { az: 38, el: 30, hw: 2, hh: 2, radiance: 36, feather: 1, round: true },
@@ -84,11 +85,18 @@ const PATCHES: Patch[] = [
 ];
 
 /** The studio itself, by elevation, before any light: dark, never black. */
+/*
+ * Light grey walls, never dark. Tuned against the leading commercial viewer's
+ * stones, which read as bright white and light grey with soft mid-grey
+ * structure and almost no true black: the strip lights still give the facet
+ * mosaic (about 8:1 against these walls), but a facet that misses a light
+ * lands on pale grey instead of black, which is what keeps the stone "icy".
+ */
 function shell(elDeg: number): number {
-  if (elDeg > 40) return 0.22;
-  if (elDeg > 0) return 0.06 + (elDeg / 40) * 0.16;
-  if (elDeg > -30) return 0.06;
-  return 0.12;
+  if (elDeg > 40) return 0.42;
+  if (elDeg > 0) return 0.22 + (elDeg / 40) * 0.2;
+  if (elDeg > -30) return 0.17;
+  return 0.3;
 }
 
 function wrap180(a: number): number {
@@ -155,4 +163,95 @@ export function getGemStudio(): THREE.DataTexture {
   tex.needsUpdate = true;
   cached = tex;
   return tex;
+}
+
+/*
+ * A real studio photograph, prepared for the STONES.
+ *
+ * The same HDRI the metal reflects, but the stones get their own copy: half
+ * size (1024 x 512) and half-float, box-filtered down on the CPU once. Handing
+ * the diamond shader the full-size map drei loads for the metal reliably made
+ * an integrated Intel GPU drop the WebGL context in the studio (the try-on,
+ * which loads its own copy, never did). Half size is also a quarter of the
+ * memory on a phone, and a stone is far too small for the difference to show.
+ */
+/** The camera lens painted into a photographed gem room; see loadGemPhoto. */
+const LENS = { el: 4, radius: 20, feather: 9, floor: 0.06 };
+
+const photoCache = new Map<string, Promise<THREE.DataTexture>>();
+
+export function loadGemPhoto(url: string): Promise<THREE.DataTexture> {
+  const hit = photoCache.get(url);
+  if (hit) return hit;
+  const p = (async () => {
+    const { HDRLoader } = await import("three/examples/jsm/loaders/HDRLoader.js");
+    const src = await new HDRLoader().setDataType(THREE.HalfFloatType).loadAsync(url);
+    const sw = src.image.width as number;
+    const sh = src.image.height as number;
+    const sd = src.image.data as Uint16Array;
+    const w = Math.max(1, sw >> 1);
+    const h = Math.max(1, sh >> 1);
+    const out = new Uint16Array(w * h * 4);
+    const from = THREE.DataUtils.fromHalfFloat;
+    const to = THREE.DataUtils.toHalfFloat;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        for (let c = 0; c < 3; c++) {
+          let sum = 0;
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              const i = ((y * 2 + dy) * sw + (x * 2 + dx)) * 4 + c;
+              sum += from(sd[i]);
+            }
+          }
+          // Clamped: a lamp in a real HDR can sit far past what half-float
+          // post effects survive (bloom turns it into Inf and the GPU resets).
+          out[(y * w + x) * 4 + c] = to(Math.min(sum / 4, 64));
+        }
+        out[(y * w + x) * 4 + 3] = to(1);
+      }
+    }
+    /*
+     * The photographer's camera: a dark disc straight in front of the stone.
+     *
+     * Looking down into a real diamond you see your own dark lens reflected
+     * and split by the pavilion mains into the eight dark arrows; that crisp
+     * pattern is most of what reads as "real diamond" face-up. A bright, even
+     * studio photo has light where the camera would be, so the arrows never
+     * form and the stone reads as white glass. The stones look into their
+     * room camera-locked (GemRefraction viewLocked), so +Z is always the
+     * camera and the arrows hold from every angle.
+     */
+    const flip = src.flipY; // HDR rows run top to bottom when flipped
+    for (let y = 0; y < h; y++) {
+      const t = (y + 0.5) / h;
+      const el = flip ? 90 - t * 180 : t * 180 - 90;
+      for (let x = 0; x < w; x++) {
+        const lon = ((x + 0.5) / w - 0.5) * 360;
+        const az = wrap180(90 - lon);
+        const d = Math.hypot(az * Math.cos(el * DEG), el - LENS.el) - LENS.radius;
+        if (d >= LENS.feather) continue;
+        const k = d <= 0 ? 1 : 1 - d / LENS.feather;
+        const s = k * k * (3 - 2 * k);
+        const keep = 1 - s * (1 - LENS.floor);
+        const i = (y * w + x) * 4;
+        for (let c = 0; c < 3; c++) out[i + c] = to(from(out[i + c]) * keep);
+      }
+    }
+    src.dispose();
+    const tex = new THREE.DataTexture(out, w, h, THREE.RGBAFormat, THREE.HalfFloatType);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.LinearSRGBColorSpace;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.RepeatWrapping;
+    // Same orientation HDRLoader gives the metal's map, so the two agree.
+    tex.flipY = src.flipY;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+  })();
+  p.catch(() => photoCache.delete(url));
+  photoCache.set(url, p);
+  return p;
 }

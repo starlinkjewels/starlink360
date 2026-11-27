@@ -812,15 +812,15 @@ function Index() {
     // Each of these is a real GPU allocation and only worth doing — or
     // waiting a frame for — when the value genuinely isn't there yet.
     const needsDirectionalShadow = shadows.mode !== "directional";
-    // The gem studio replaced the light tent as the stones' best room.
+    // The white studio capture is the stones. best room (see lighting.ts).
     const needsGemTent = !(
-      lighting.separateGemEnvironment && lighting.gemEnvironment === "gem-studio"
+      lighting.separateGemEnvironment && lighting.gemEnvironment === "white-studio"
     );
     const applyGemTent = () =>
       setLighting((current) => ({
         ...current,
         separateGemEnvironment: true,
-        gemEnvironment: "gem-studio",
+        gemEnvironment: "white-studio",
       }));
 
     if (needsDirectionalShadow) {

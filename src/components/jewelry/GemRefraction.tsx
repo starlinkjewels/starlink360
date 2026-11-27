@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { useFrame, useThree } from "@react-three/fiber";
 import { MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
 import { buildBVH } from "@/lib/bvhAsync";
 import { requestRender } from "./renderNow";
 import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
-import { createDiamondMaterial } from "./diamondMaterial";
+import { STONE_ENV_INTENSITY, createDiamondMaterial } from "./diamondMaterial";
+import type { GemTune } from "./lighting";
 
 /*
  * A real diamond, rather than a transmissive approximation of one.
@@ -131,9 +133,12 @@ export function GemRefraction({
   envMap,
   overrides,
   optics,
+  viewLocked = false,
+  tune,
 }: {
   meshes: THREE.Mesh[];
-  envMap: THREE.Texture;
+  /** Null while the stones' room is still loading; the stones wait. */
+  envMap: THREE.Texture | null;
   /**
    * Colour chosen in the picker, by stone-group id. Absent means the group
    * keeps whatever the file specified.
@@ -148,7 +153,64 @@ export function GemRefraction({
    * what makes moissanite throw more fire than diamond rather than the same.
    */
   optics?: Record<string, GemOptics>;
+  /**
+   * Lock the stones' environment to the camera, as a photographer's light rig
+   * travels with the camera.
+   *
+   * A generated gem room (gemStudio.ts, the light tent) puts the camera's own
+   * dark reflection, the thing that draws the black arrows in a face-up
+   * diamond, IN FRONT of the stone. Fixed in the world, that is only true from
+   * the front: orbit to the top and the stone looks straight into the
+   * overhead softbox and every facet goes white. Locked to the view, the dark
+   * reflection is always behind the viewer and the stone keeps its contrast
+   * from every angle; it still sparkles as it turns, because the stone moves
+   * relative to the rig. This is what WebGi and iJewel3D call "oriented
+   * lighting" for their gem environments.
+   */
+  viewLocked?: boolean;
+  /**
+   * Per-environment gem tuning (see `EnvironmentOption.gemTune`): where the
+   * room is turned for the best sparkle, how bright it is, and contrast. The
+   * same three dials the commercial gem renderers expose, because the right
+   * values belong to the map, not to the stone.
+   */
+  tune?: GemTune;
 }) {
+  /*
+   * The stones' environment rotation: the camera's view rotation when locked
+   * (then turned by the tuning offset), identity otherwise. One matrix shared
+   * by every stone material, updated in place each frame, so it costs one 3×3
+   * copy however many stones there are.
+   */
+  const envRotation = useRef(new THREE.Matrix3()).current;
+  // Dev only: timestamp a lost WebGL context against the material builds.
+  const glEl = useThree((st) => st.gl.domElement);
+  useLayoutEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onLost = () =>
+      console.warn(`[gem] WebGL context lost at ${Math.round(performance.now())}ms`);
+    glEl.addEventListener("webglcontextlost", onLost);
+    return () => glEl.removeEventListener("webglcontextlost", onLost);
+  }, [glEl]);
+  const offset = useRef({ m: new THREE.Matrix4(), e: new THREE.Euler() }).current;
+  const live = useRef<THREE.ShaderMaterial[]>([]);
+  useFrame(({ camera }) => {
+    // Dev only: window.__gemTune = { yaw, pitch, intensity, gamma } tunes live.
+    const t =
+      (import.meta.env.DEV && (window as unknown as { __gemTune?: GemTune }).__gemTune) || tune;
+    if (viewLocked) {
+      offset.m.makeRotationFromEuler(offset.e.set(t?.pitch ?? 0, t?.yaw ?? 0, 0));
+      offset.m.multiply(camera.matrixWorldInverse);
+      envRotation.setFromMatrix4(offset.m);
+    } else {
+      envRotation.identity();
+    }
+    for (const m of live.current) {
+      m.uniforms.envIntensity.value = t?.intensity ?? STONE_ENV_INTENSITY;
+      m.uniforms.gamma.value = t?.gamma ?? 1;
+    }
+  });
+
   /*
    * The BVH, cached per geometry.
    *
@@ -343,10 +405,12 @@ export function GemRefraction({
            */
           if (!bvh) return null;
           const material = createDiamondMaterial(bvh, envMap, s, {
+            envRotation,
             absorbRef: reference,
             epsilon: (geo.boundingSphere?.radius ?? 0.25) * 1e-4,
           });
           disposable.push(material);
+          live.current.push(material);
           return material as THREE.Material;
         });
 
@@ -395,7 +459,15 @@ export function GemRefraction({
       requestRender();
       raf = requestAnimationFrame(() => step(i + 1));
     }
-    step(0);
+    /*
+     * The first build waits a few frames too. Its room usually arrives at the
+     * same moment as other GPU setup (the metal's environment is prefiltered
+     * from the very same HDR file), and two heavy jobs in one frame is what
+     * has been seen to drop the WebGL context on integrated GPUs.
+     */
+    const settle = (frames: number) =>
+      frames <= 0 ? step(0) : (raf = requestAnimationFrame(() => settle(frames - 1)));
+    settle(4);
 
     return () => {
       cancelled = true;
@@ -406,6 +478,7 @@ export function GemRefraction({
         if (previous[i]) mesh.material = previous[i];
       });
       disposable.forEach((m) => m.dispose());
+      live.current = live.current.filter((m) => !disposable.includes(m));
     };
   }, [meshes, envMap, overrides, optics, bvhVersion]);
 

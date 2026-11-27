@@ -812,6 +812,9 @@ export interface ViewerProps {
   studioRef?: React.MutableRefObject<StudioApi | null>;
 }
 
+/** How many times the 3D view rebuilds itself after a lost context. */
+const MAX_GL_REBUILDS = 3;
+
 export default function Viewer({
   product,
   finish,
@@ -1160,6 +1163,29 @@ export default function Viewer({
     if (!selecting) setHovered(null);
   }, [selecting]);
 
+  /*
+   * Recovery from a lost WebGL context.
+   *
+   * On integrated GPUs this renderer runs close to the limit (see the note on
+   * Best look in routes/index.tsx), and when the driver drops the context the
+   * canvas goes blank for good: three cannot restore it while the GPU is still
+   * resetting. So the whole Canvas is rebuilt, a moment later, under a new key
+   * and in a lighter safe mode (1x pixel density). The piece, materials and
+   * settings live outside the Canvas, so they come straight back. Capped, so a
+   * machine that cannot hold even the safe mode does not loop forever.
+   */
+  const [glGeneration, setGlGeneration] = useState(0);
+  const safeMode = glGeneration > 0;
+  const handleCreated = useCallback(({ gl }: { gl: THREE.WebGLRenderer }) => {
+    const el = gl.domElement;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      console.warn("[viewer] WebGL context lost; rebuilding the 3D view in safe mode");
+      setTimeout(() => setGlGeneration((g) => (g < MAX_GL_REBUILDS ? g + 1 : g)), 500);
+    };
+    el.addEventListener("webglcontextlost", onLost, { once: true });
+  }, []);
+
   const glConfig = useMemo(
     () => ({
       antialias: true,
@@ -1174,8 +1200,13 @@ export default function Viewer({
     [],
   );
 
-  /** The Canvas's resolution cap. */
-  const maxDpr = 2;
+  /*
+   * Up to 1.5x, not 2x: 2x is 78% more pixels than 1.5x for a difference that
+   * is hard to see on a jewellery render, and on an integrated GPU those pixels
+   * are the margin between running and losing the context. Safe mode (after a
+   * loss) drops to 1x.
+   */
+  const maxDpr = safeMode ? 1 : 1.5;
   /*
    * Lower resolution while the piece is being dragged (see InteractionQuality):
    * half the full ratio, never below 1, since under 1x reads as a soft,
@@ -1199,8 +1230,10 @@ export default function Viewer({
   return (
     <div className="absolute inset-0" onPointerDownCapture={onPointerDownCapture}>
       <Canvas
+        key={glGeneration}
         dpr={dpr}
         frameloop={continuous ? "always" : "demand"}
+        onCreated={handleCreated}
         gl={glConfig}
         style={{ background: "transparent" }}
         shadows={{ type: THREE.PCFShadowMap }}

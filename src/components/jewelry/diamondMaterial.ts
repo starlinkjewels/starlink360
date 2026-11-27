@@ -84,6 +84,9 @@ const FRAG = /* glsl */ `
   uniform float ior;
   uniform float dispersion;
   uniform float surface;
+  // Contrast, as iJewel3D's "Gamma": above 1 deepens the greys between
+  // facets and lifts the brightest flashes; 1 leaves the stone as traced.
+  uniform float gamma;
   uniform vec3 tint;
   uniform float tintChroma;
   uniform float absorbRef;
@@ -132,7 +135,20 @@ const FRAG = /* glsl */ `
       vec3 body = pow(max(tint, vec3(1e-4)), vec3(clamp(travelled / absorbRef, 0.0, 3.0)));
       if (F < 1.0) {
         vec3 out_ = refract(rd, faceNormal, n);
-        gathered += carried * (1.0 - F) * body * env(normalize(vToWorld * out_));
+        vec3 light = env(normalize(vToWorld * out_));
+        #ifdef DISPERSION
+          /*
+           * Fire, split where light LEAVES the stone: red and blue refract out
+           * at their own index. Three cheap lookups instead of three full
+           * traces through the BVH, which tripled the shader's size and cost
+           * and was enough to make weaker GPUs drop the WebGL context.
+           */
+          vec3 outR = refract(rd, faceNormal, n - dispersion);
+          vec3 outB = refract(rd, faceNormal, n + dispersion);
+          if (dot(outR, outR) > 0.0) light.r = env(normalize(vToWorld * outR)).r;
+          if (dot(outB, outB) > 0.0) light.b = env(normalize(vToWorld * outB)).b;
+        #endif
+        gathered += carried * (1.0 - F) * body * light;
       }
       carried *= F;
       if (carried < 0.015) return gathered;
@@ -157,22 +173,20 @@ const FRAG = /* glsl */ `
     float cosV = clamp(-dot(V, N), 0.0, 1.0);
     float Fs = fresnel(cosV, 1.0, ior);
 
-    #ifdef DISPERSION
-      vec3 inside = vec3(
-        enter(V, N, ior - dispersion).r,
-        enter(V, N, ior).g,
-        enter(V, N, ior + dispersion).b
-      );
-    #else
-      vec3 inside = enter(V, N, ior);
-    #endif
+    // One trace; fire is split at each exit facet inside trace().
+    vec3 inside = enter(V, N, ior);
 
     // A coloured stone's highlights are pulled into range so its hue survives
     // them; a colourless stone (chroma 0) is untouched.
     inside = inside / (1.0 + tintChroma * inside);
 
     vec3 refl = env(reflect(V, N)) * Fs * surface;
-    gl_FragColor = vec4(inside * (1.0 - Fs) + refl, outputAlpha);
+    vec3 stone = inside * (1.0 - Fs) + refl;
+    stone = pow(max(stone, vec3(0.0)), vec3(gamma));
+    // Bounded, and never NaN, so half-float post effects downstream stay finite.
+    stone = min(stone, vec3(256.0));
+    if (any(isnan(stone))) stone = vec3(0.0);
+    gl_FragColor = vec4(stone, outputAlpha);
 
     #include <tonemapping_fragment>
     // Body colour once more on the bounded value, where no highlight can hide
@@ -225,6 +239,10 @@ export interface DiamondOptions {
   /** Alpha written; the try-on marks stones with a hair under 1 for its glints. */
   outputAlpha?: number;
   bounces?: number;
+  /** Multiplier on the gem environment; defaults to STONE_ENV_INTENSITY. */
+  envIntensity?: number;
+  /** Contrast; 1 is neutral. */
+  gamma?: number;
 }
 
 export type DiamondMaterial = THREE.ShaderMaterial;
@@ -245,10 +263,11 @@ export function createDiamondMaterial(
       bvh: { value: bvh },
       envMap: { value: envMap },
       envRotation: { value: o.envRotation ?? new THREE.Matrix3() },
-      envIntensity: { value: STONE_ENV_INTENSITY },
+      envIntensity: { value: o.envIntensity ?? STONE_ENV_INTENSITY },
       ior: { value: Math.min(MAX_RENDER_IOR, 1 + (optics.ior - 1) * IOR_BOOST) },
       dispersion: { value: dispersion },
       surface: { value: 1 },
+      gamma: { value: o.gamma ?? 1 },
       tint: { value: new THREE.Color(gemTint(optics.color)) },
       tintChroma: { value: gemChroma(optics.color) },
       absorbRef: { value: o.absorbRef ?? 4 },

@@ -6,6 +6,7 @@ import { createMetalMaterial } from "@/components/jewelry/materials";
 import { gemById, metalById, resolveGem } from "@/components/jewelry/library";
 import { roundBrilliant, caratToDiameterMm } from "./brilliant";
 import { createDiamondMaterial } from "@/components/jewelry/diamondMaterial";
+import type { GemTune } from "@/components/jewelry/lighting";
 import { STONE_ALPHA } from "./sparkle";
 import type { Category } from "./catalog";
 
@@ -86,7 +87,11 @@ export class StoneMaterials {
   private rot = new THREE.Matrix4();
   private euler = new THREE.Euler();
 
-  constructor(private readonly env: THREE.Texture) {}
+  constructor(
+    private readonly env: THREE.Texture,
+    /** The gem tuning of the room the stones look into (lighting.ts). */
+    private readonly tune: GemTune = {},
+  ) {}
 
   make(gemId: string): THREE.Material {
     const gem = gemById(gemId) ?? gemById("diamond")!;
@@ -110,6 +115,8 @@ export class StoneMaterials {
       envRotation: this.envRotation,
       // Marks stone pixels for the glint pass (sparkle.ts).
       outputAlpha: STONE_ALPHA,
+      envIntensity: this.tune.intensity,
+      gamma: this.tune.gamma,
     });
     this.made.push(material);
     return material;
