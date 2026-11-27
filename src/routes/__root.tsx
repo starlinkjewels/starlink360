@@ -6,8 +6,9 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  type ErrorComponentProps,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -34,7 +35,14 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+// The router types `error` as unknown — anything can be thrown — so it is
+// wrapped here rather than claimed to be an Error in the signature.
+function ErrorComponent({ error: thrown, reset }: ErrorComponentProps) {
+  // Memoised so a non-Error throw does not report again on every render.
+  const error = useMemo(
+    () => (thrown instanceof Error ? thrown : new Error(String(thrown))),
+    [thrown],
+  );
   console.error(error);
   const router = useRouter();
   useEffect(() => {

@@ -7,11 +7,26 @@ export type LoadProgress = { phase: string; percent: number | null };
 /*
  * 8.35 is the first rhino3dm whose JavaScript build exposes Brep loops and
  * trims, which is what lets parts saved without a render mesh be meshed in
- * the browser (brepMesher.ts). Keep this in step with package.json, which the
- * Node suites run against.
+ * the browser (brepMesher.ts).
+ *
+ * Both decoders are served by the site itself from public/vendor, copied out
+ * of node_modules by scripts/vendor-decoders.mjs, so they are always the
+ * versions package-lock.json pins and the Node suites run against. They used
+ * to come from jsDelivr and gstatic, which meant those hosts could change the
+ * code the viewer runs. After upgrading rhino3dm or three, run
+ * `npm run vendor:decoders`.
  */
-export const RHINO_LIB = "https://cdn.jsdelivr.net/npm/rhino3dm@8.35.0/";
-export const DRACO_LIB = "https://www.gstatic.com/draco/versioned/decoders/1.5.7/";
+export const RHINO_LIB = "/vendor/rhino3dm/";
+export const DRACO_LIB = "/vendor/draco/";
+
+/**
+ * A library path as a full URL. The Rhino worker is started from a blob: URL,
+ * and a root-relative path cannot be resolved against one, so the worker has
+ * to be handed the page's own origin explicitly.
+ */
+export function absoluteLibPath(path: string): string {
+  return typeof location === "undefined" ? path : new URL(path, location.href).href;
+}
 
 /**
  * Edges meeting at less than this angle get blended normals; sharper edges stay
@@ -702,7 +717,7 @@ export async function loadJewelryFile(
     const { decodeRhinoDocument } = await import("./rhinoDecode");
     const decoded = await decodeRhinoDocument(
       buffer,
-      RHINO_LIB,
+      absoluteLibPath(RHINO_LIB),
       {
         gemLayer: GEM_LAYER.source,
         metalLayer: METAL_LAYER.source,

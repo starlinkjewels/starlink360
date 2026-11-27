@@ -14,13 +14,13 @@ and no server involved on our side.
 
 ## Parameters
 
-| Parameter | Required | Description                                                                             |
-| --------- | -------- | --------------------------------------------------------------------------------------- |
-| `file`    | yes      | URL of a `.3dm`, `.glb` or `.gltf`. **Must be URL-encoded.** Relative paths also work.  |
-| `embed`   | no       | `true` hides the brand header and the upload button. Use it inside an iframe.           |
-| `name`    | no       | Piece name to display. Defaults to the filename.                                        |
-| `ref`     | no       | Reference / SKU line. Defaults to the filename.                                         |
-| `key`     | no       | `bhumit` reveals the upload button. Omit it and there is no way to load a file by hand. |
+| Parameter | Required | Description                                                                                                    |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `file`    | yes      | URL of a `.3dm`, `.glb` or `.gltf`. **Must be URL-encoded.** Relative paths also work.                         |
+| `embed`   | no       | `true` hides the brand header and the upload button. Use it inside an iframe.                                  |
+| `name`    | no       | Piece name to display. Defaults to the filename.                                                               |
+| `ref`     | no       | Reference / SKU line. Defaults to the filename.                                                                |
+| `key`     | no       | A passphrase from `UPLOAD_KEYS` reveals the upload button. Omit it and there is no way to load a file by hand. |
 
 Encode `file` — a raw URL containing `?` or `&` will be cut short:
 
@@ -36,11 +36,14 @@ redirect, because the router normalises them.
 Hidden everywhere by default — on the plain `/` route and behind a `?file=` link
 alike — so a client-facing link shows the piece it was given and nothing else.
 
-Add `?key=bhumit` to get it back for your own use.
+Add `?key=<passphrase>` to get it back for your own use. The passphrases are set
+on the server in the `UPLOAD_KEYS` environment variable, comma-separated (see
+`.env.example`). They are checked server-side, so they never appear in the page
+source. With `UPLOAD_KEYS` unset, no key works.
 
-This is obscurity, not security: the key travels in the address bar, so anyone
-sent such a link can use it. That is fine for hiding a control; do not rely on it
-to protect anything.
+This is still obscurity, not security: the key travels in the address bar, so
+anyone sent such a link can use it. That is fine for hiding a control; do not
+rely on it to protect anything.
 
 ## The one requirement on your side: CORS
 

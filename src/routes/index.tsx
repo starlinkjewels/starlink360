@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finishById, finishes, type Finish } from "@/data/finishes";
 import { products, type Product } from "@/data/products";
+import { checkUploadKey } from "@/lib/uploadAccess";
 import { IconRail, SectionPanel, TopBar } from "@/components/jewelry/shell/Shell";
 import { DEFAULT_SECTION } from "@/components/jewelry/shell/sections";
 import {
@@ -111,16 +112,6 @@ export interface ViewerSearch {
   key?: string;
 }
 
-/*
- * Passphrases that reveal the upload control, one per person.
- *
- * Obscurity, not security: it travels in the address bar, so anyone who is sent
- * a link with it — or who reads it out of the page source — can use it. That is
- * acceptable for hiding a control, and must not be relied on for anything that
- * needs actually protecting.
- */
-const UPLOAD_KEYS = ["bhumit", "dishant", "hardik"];
-
 const asText = (v: unknown, max: number): string | undefined => {
   const s = typeof v === "string" ? v.trim() : "";
   return s ? s.slice(0, max) : undefined;
@@ -155,6 +146,13 @@ export const Route = createFileRoute("/")({
     embed: parseEmbed(search.embed),
     key: asText(search.key, 40),
   }),
+  /*
+   * The upload passphrase is checked on the server (lib/uploadAccess.ts), so
+   * the list of keys never reaches the browser. Re-checked only when the key
+   * in the link changes; no key, no request.
+   */
+  loaderDeps: ({ search }) => ({ key: search.key }),
+  loader: ({ deps }) => (deps.key ? checkUploadKey({ data: deps.key }) : { canUpload: false }),
   head: () => ({
     meta: [
       { title: "Netram — Photorealistic Jewellery Rendering" },
@@ -759,11 +757,14 @@ function Index() {
        * this rig in testing.
        */
       bloom: { ...post.bloom, enabled: true, strength: 0.4, radius: 0.5, threshold: 1.6 },
-      // Compresses highlights already above white a little harder than the
-      // everyday default, so the extra exposure/reflection below reads as
-      // brighter facets rather than a flat white patch — the mechanism this
-      // file already built for exactly that problem (see HighlightSettings).
-      highlights: { ...post.highlights, enabled: true, strength: 3 },
+      /*
+       * Highlight compression is left as the person has it. Best Look used to
+       * force it on at strength 3, but on the multi-path diamond shader it
+       * pulls the brightest facets toward grey, which is why it is now off by
+       * default (bloom.ts DEFAULT_HIGHLIGHTS). Forcing it here undid that on
+       * exactly the render meant to look best. The exposure lift below is
+       * kept small enough not to need it.
+       */
       /*
        * Vignette, grain and chromatic aberration all zeroed — the same
        * reference config ships every one of these OFF by default. They are
@@ -1020,12 +1021,10 @@ function Index() {
    * matters: swapping pieces mid-download would otherwise let the first fetch
    * finish later and overwrite the second.
    */
-  const { file: fileUrl, name: linkName, ref: linkRef, embed, key } = Route.useSearch();
+  const { file: fileUrl, name: linkName, ref: linkRef, embed } = Route.useSearch();
   // Hidden everywhere by default — on the plain route and behind a ?file= link
-  // alike. Only the passphrase brings it back.
-  // Case-insensitive: these are typed into an address bar by hand, and a
-  // capital letter is not a reason to hide the control.
-  const canUpload = !!key && UPLOAD_KEYS.includes(key.trim().toLowerCase());
+  // alike. Only a passphrase the server accepts brings it back.
+  const { canUpload } = Route.useLoaderData();
 
   useEffect(() => {
     if (!fileUrl) return;

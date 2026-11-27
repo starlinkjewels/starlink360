@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { GEMS, METALS } from "./library";
-import { ENVIRONMENTS } from "./lighting";
+import { DEFAULT_LIGHTING, ENVIRONMENTS } from "./lighting";
 
 /*
  * The AI chat's tool-calling layer.
@@ -95,7 +95,10 @@ export function buildSystemPrompt(): string {
     '- { "type": "toggleGround", "enabled": true | false } — shows or hides the ground/plinth surface under the piece.',
     '- { "type": "setGroundStyle", "style": "matte" | "mirror" } — the ground surface finish; "mirror" gives a reflective floor.',
     '- { "type": "setBloom", "enabled": true | false } — the sparkle/glow post-processing effect around bright highlights.',
-    '- { "type": "setExposure", "value": <number 0.1-4> } — overall scene brightness. Higher is brighter. 1.4 is the default.',
+    // Read from the real default rather than typed out: a hand-written "1.4"
+    // went stale when the default moved to 1.0, so "back to normal" set the
+    // wrong brightness.
+    `- { "type": "setExposure", "value": <number 0.1-4> } — overall scene brightness. Higher is brighter. ${DEFAULT_LIGHTING.exposure} is the default.`,
     '- { "type": "setEnvironmentRotation", "degrees": <number 0-360> } — turns the lighting environment around the piece, which moves where reflections/highlights fall on the metal. "Rotate the lighting/environment/reflection" means this.',
     '- { "type": "setCameraProjection", "projection": "perspective" | "orthographic" } — the camera lens model. "Perspective" is normal 3D depth; "orthographic" removes perspective distortion (flat, technical-drawing look).',
     '- { "type": "setSpin", "enabled": true | false } — turns the piece\'s auto-rotation (turntable spin) on or off.',

@@ -7,6 +7,8 @@ import {
   parseModelReply,
   type ChatReply,
 } from "@/components/jewelry/chatProtocol";
+import { MAX_CHAT_MESSAGES, MAX_MESSAGE_CHARS } from "@/components/jewelry/chatHistory";
+import { clientKey, createRateLimiter, isSameOrigin, isTooLarge } from "@/lib/requestGuard";
 
 /*
  * Proxies chat messages to Sarvam, so the API key never reaches the browser.
@@ -21,17 +23,30 @@ const RequestSchema = z.object({
     .array(
       z.object({
         role: z.enum(["user", "assistant"]),
-        content: z.string(),
+        content: z.string().max(MAX_MESSAGE_CHARS),
       }),
     )
     .min(1)
-    .max(40),
+    // The client trims to this before sending (chatHistory.ts).
+    .max(MAX_CHAT_MESSAGES),
   /** A one-line description of the piece's current state, built client-side
    *  (routes/index.tsx) from live app state — see `describeContext`. */
   context: z.string().max(2000).optional(),
 });
 
 const SARVAM_URL = "https://api.sarvam.ai/v1/chat/completions";
+
+/*
+ * Every request is paid for on the Sarvam key, so the endpoint refuses other
+ * sites, oversized bodies and rapid repeats before any of it reaches Sarvam.
+ * See lib/requestGuard.ts for what each of these does and does not stop.
+ *
+ * The body cap is the largest a valid request can be (every message at full
+ * length, plus the context) with room for JSON escaping.
+ */
+const MAX_BODY_BYTES = 2 * (MAX_CHAT_MESSAGES * MAX_MESSAGE_CHARS + 2000) + 4096;
+/** Generous for a person typing, far too slow for a script draining the key. */
+const limiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 
 const FALLBACK_REPLY: ChatReply = {
   reply: "Sorry, I didn't quite follow that — could you try rephrasing?",
@@ -51,6 +66,25 @@ export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        if (!isSameOrigin(request)) {
+          return json({ error: "Requests must come from this site." }, 403);
+        }
+        if (isTooLarge(request, MAX_BODY_BYTES)) {
+          return json({ error: "That conversation is too long to send." }, 413);
+        }
+        const wait = limiter.hit(clientKey(request));
+        if (wait > 0) {
+          return new Response(
+            JSON.stringify({
+              error: `You're sending messages too quickly. Try again in ${wait} seconds.`,
+            }),
+            {
+              status: 429,
+              headers: { "content-type": "application/json", "retry-after": `${wait}` },
+            },
+          );
+        }
+
         const apiKey = process.env.SARVAM_API_KEY;
         if (!apiKey) {
           return json({ error: "AI chat is not configured on this server." }, 500);

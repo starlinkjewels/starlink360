@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
 import type { ChatAction, ChatMessage } from "./chatProtocol";
+import { MAX_INPUT_CHARS, MAX_MESSAGE_CHARS, recentMessages } from "./chatHistory";
 
 /**
  * What a completed exchange with the assistant looks like on screen: the
@@ -77,7 +78,14 @@ export function AIChat({
     setBusy(true);
 
     try {
-      const messages: ChatMessage[] = next.map((h) => ({ role: h.role, content: h.text }));
+      // Only the recent turns: the server refuses more than MAX_CHAT_MESSAGES,
+      // and sending the whole history killed the chat after ~20 questions.
+      // Each one is clipped to the server's per-message cap too, so one long
+      // reply in the history cannot get every later request refused.
+      const messages: ChatMessage[] = recentMessages(next).map((h) => ({
+        role: h.role,
+        content: h.text.slice(0, MAX_MESSAGE_CHARS),
+      }));
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -140,6 +148,7 @@ export function AIChat({
           ref={inputRef}
           className="ai-chat-input"
           value={input}
+          maxLength={MAX_INPUT_CHARS}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

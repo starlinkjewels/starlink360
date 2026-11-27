@@ -44,6 +44,10 @@
     "test:dimensions": "tsc src/components/jewelry/dimensions.ts src/components/jewelry/selection.ts src/components/jewelry/plan.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-dimensions.mjs",
     "test:mesher": "tsc src/lib/brepMesher.ts src/lib/vendor/earcutSource.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-brep-mesher.mjs",
     "test:meshless": "tsc src/lib/rhinoDecode.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node --max-old-space-size=4096 scripts/test-meshless-3dm.mjs",
+    "test:chat": "tsc src/components/jewelry/chatHistory.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-chat-history.mjs",
+    "vendor:decoders": "node scripts/vendor-decoders.mjs",
+    "test:vendor": "node scripts/vendor-decoders.mjs --check",
+    "test:guard":"tsc src/lib/requestGuard.ts --outDir .tmp-jewelry --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-request-guard.mjs",
     "test:tryon": "tsc src/components/tryon/anchors.ts src/components/tryon/filters.ts src/components/tryon/brilliant.ts --outDir .tmp-jewelry/tryon --module esnext --target es2022 --moduleResolution bundler --skipLibCheck && node scripts/test-tryon.mjs"
   },
   "dependencies": {
