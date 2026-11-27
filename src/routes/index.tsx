@@ -47,7 +47,6 @@ import type { GemOptics } from "@/components/jewelry/GemRefraction";
 import type { Textures } from "@/components/jewelry/panels/TexturesPanel";
 import { DEFAULT_TEXTURE, type TextureAssignment } from "@/components/jewelry/textures";
 import { DEFAULT_CAMERA, guessUpAxis, type CameraSettings } from "@/components/jewelry/camera";
-import { ImportOrientation } from "@/components/jewelry/ImportOrientation";
 import {
   DEFAULT_LIGHTING,
   ENVIRONMENTS,
@@ -174,8 +173,30 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+/*
+ * What the stage holds while a `?file=` link is still downloading: nothing.
+ * An empty `glbUrl` and no object tells the viewer to leave the stage empty
+ * behind its loading screen (Viewer.tsx, source "none").
+ */
+const LINK_PENDING: Product = {
+  id: "link-pending",
+  name: "",
+  ref: "",
+  glbUrl: "",
+  description: "",
+};
+
 function Index() {
-  const [product, setProduct] = useState<Product>(products[0]);
+  /*
+   * A link to a piece opens on that piece, not on the built-in solitaire. The
+   * solitaire used to render first and get swapped out when the download
+   * finished, so a client opening a link to their ring saw a different ring
+   * for the first few seconds, and kept seeing it if the link failed.
+   */
+  const { file: initialFileUrl } = Route.useSearch();
+  const [product, setProduct] = useState<Product>(() =>
+    initialFileUrl ? LINK_PENDING : products[0],
+  );
   const [finish, setFinish] = useState<Finish>(finishes[0]);
   const [resetSignal, setResetSignal] = useState(0);
   const [mounted, setMounted] = useState(false);
@@ -217,16 +238,6 @@ function Index() {
    * hundredth-of-a-unit change rather than every frame.
    */
   const [livePosition, setLivePosition] = useState<[number, number, number]>([0, 0, 0]);
-
-  /*
-   * Which way up the file meant.
-   *
-   * Asked at the moment it matters rather than left buried in a panel: someone
-   * whose ring has just loaded on its side concludes the viewer cannot open
-   * their file, and does not know to go looking for the words "up axis".
-   * Suppressed for the built-in piece, which is already upright.
-   */
-  const [orientFor, setOrientFor] = useState<string | null>(null);
 
   const [exportOptions, setExportOptions] = useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
 
@@ -1004,13 +1015,13 @@ function Index() {
     setLoaded(false);
     setShowUpload(false);
     /*
-     * Ask which way up, pre-filled with the guess from the extension. Only for
-     * a loaded file: the built-in piece is already upright, and prompting about
-     * it would be a dialog in front of something that is plainly fine.
+     * The up axis is guessed from the extension and applied without asking.
+     * There used to be a "Which way is up?" prompt here, in front of every
+     * loaded piece including client-facing links; the choice is still in the
+     * Studio panel's camera section for the odd file that needs it.
      */
     const name = p.ref || p.name || "";
     setCameraSettings((c) => ({ ...c, upAxis: guessUpAxis(name) }));
-    setOrientFor(name || "this model");
   }, []);
 
   /*
@@ -1172,7 +1183,15 @@ function Index() {
                   product={product}
                   finish={finish}
                   resetSignal={resetSignal}
-                  hideLoader={upload !== null}
+                  /*
+                   * Also hidden when a link failed before anything loaded:
+                   * the stage is empty on purpose then, and the error below
+                   * says why, so a spinner would only promise a piece that is
+                   * not coming.
+                   */
+                  hideLoader={
+                    upload !== null || (product === LINK_PENDING && uploadMsg?.kind === "error")
+                  }
                   camera={cameraSettings}
                   lighting={lighting}
                   lights={lights}
@@ -1424,20 +1443,6 @@ function Index() {
         </SectionPanel>
 
         <IconRail active={section} onSelect={pickSection} />
-
-        {/*
-          Asked once, when a file arrives. The stage is behind it and updates as
-          the choice changes, which is the whole point — the answer is obvious
-          from looking, and impossible to reason about from the words alone.
-        */}
-        {orientFor && (
-          <ImportOrientation
-            fileName={orientFor}
-            value={cameraSettings.upAxis}
-            onChange={(upAxis) => setCameraSettings((c) => ({ ...c, upAxis }))}
-            onClose={() => setOrientFor(null)}
-          />
-        )}
       </div>
     </div>
   );

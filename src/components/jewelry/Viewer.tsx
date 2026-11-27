@@ -880,7 +880,9 @@ export default function Viewer({
     [partList, dimensionScale],
   );
 
-  const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object">("checking");
+  const [source, setSource] = useState<"checking" | "glb" | "fallback" | "object" | "none">(
+    "checking",
+  );
 
   /*
    * A built-in piece made in the browser (the try-on's own ring), rather than
@@ -905,6 +907,16 @@ export default function Viewer({
     onLoadedChange(false);
     if (pieceObject) {
       setSource("object");
+      return;
+    }
+    /*
+     * Nothing to show yet: a `?file=` link whose piece is still downloading.
+     * The stage stays empty behind the loading screen. Without this an empty
+     * URL fell through to the stand-in pendant, so a client opening a link to
+     * their ring saw some other piece first.
+     */
+    if (!product.glbUrl) {
+      setSource("none");
       return;
     }
     fetch(product.glbUrl, { method: "HEAD" })

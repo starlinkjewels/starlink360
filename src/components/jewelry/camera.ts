@@ -272,9 +272,9 @@ export const UP_AXES: { value: CameraSettings["upAxis"]; label: string; hint: st
 /**
  * The up-axis a file most likely uses, from its extension.
  *
- * A guess, and offered as one. It is right often enough to save the common case
- * and cheap enough to be worth making, but the prompt still shows the choice
- * rather than silently rotating someone's model.
+ * A guess, applied on load without asking. It is right often enough to save the
+ * common case; the Studio panel's camera section has the choice for a file it
+ * gets wrong.
  */
 export function guessUpAxis(fileName: string): CameraSettings["upAxis"] {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
