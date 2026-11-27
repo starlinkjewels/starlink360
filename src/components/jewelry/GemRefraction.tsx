@@ -1,6 +1,8 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { MeshBVH, MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
+import { MeshBVHUniformStruct, SAH } from "three-mesh-bvh";
+import { buildBVH } from "@/lib/bvhAsync";
+import { requestRender } from "./renderNow";
 import { parseId } from "./selection";
 import { planRuns, runMaterials, runSlots, drawableCount } from "./plan";
 import { createDiamondMaterial } from "./diamondMaterial";
@@ -156,18 +158,63 @@ export function GemRefraction({
    * rebuild it, or every swatch click would stall for seconds on a pave field.
    */
   const bvhCache = useRef(new Map<string, MeshBVHUniformStruct>());
+  /** Geometry whose tree is on its way from the worker. */
+  const inFlight = useRef(new Set<string>());
+  /** Geometry currently on screen, so a tree that arrives late for a piece
+   *  already closed is dropped rather than cached. */
+  const wanted = useRef(new Set<string>());
+  /** Bumped when the trees in flight have all arrived, so the materials below
+   *  are rebuilt with them. */
+  const [bvhVersion, setBvhVersion] = useState(0);
 
-  useLayoutEffect(() => {
+  /*
+   * Built in a worker (lib/bvhAsync.ts). On the main thread this froze the
+   * page for about 250 ms per pavé field on a desktop, several times that on a
+   * phone. Until a stone's tree arrives the stone keeps the material it
+   * loaded with, the same as it always did while waiting for its room.
+   *
+   * The cache is pruned to the stones on screen, not cleared whenever the
+   * mesh list changes: clearing it on every change built every tree twice on
+   * load, because the list is produced again as the piece settles.
+   */
+  useEffect(() => {
     const cache = bvhCache.current;
+    wanted.current = new Set(meshes.map((m) => m.geometry.uuid));
+    for (const uuid of [...cache.keys()]) if (!wanted.current.has(uuid)) cache.delete(uuid);
+
     for (const mesh of meshes) {
       const geo = mesh.geometry;
-      if (cache.has(geo.uuid)) continue;
-      const bvh = new MeshBVHUniformStruct();
-      bvh.updateFrom(new MeshBVH(bvhSource(geo), { strategy: SAH }));
-      cache.set(geo.uuid, bvh);
+      const uuid = geo.uuid;
+      if (cache.has(uuid) || inFlight.current.has(uuid)) continue;
+      inFlight.current.add(uuid);
+      buildBVH(bvhSource(geo), { strategy: SAH })
+        .then((tree) => {
+          if (!wanted.current.has(uuid)) return;
+          const uniform = new MeshBVHUniformStruct();
+          uniform.updateFrom(tree);
+          cache.set(uuid, uniform);
+        })
+        .catch((err) => console.warn("[gem] could not build a stone's BVH", err))
+        .finally(() => {
+          inFlight.current.delete(uuid);
+          /*
+           * Once the last one lands, not per tree: rebuilding the materials
+           * puts every stone back on its loaded material for a frame, so a
+           * rebuild per tree would flicker each pavé field once per field.
+           */
+          if (inFlight.current.size === 0) setBvhVersion((v) => v + 1);
+        });
     }
-    return () => cache.clear();
   }, [meshes]);
+
+  // Everything goes when the stones do.
+  useEffect(() => {
+    const cache = bvhCache.current;
+    return () => {
+      wanted.current = new Set();
+      cache.clear();
+    };
+  }, []);
 
   /*
    * One material per distinct stone spec, and a draw range per run.
@@ -344,6 +391,8 @@ export function GemRefraction({
     function step(i: number) {
       if (cancelled || i >= applySteps.length) return;
       applySteps[i]();
+      // Swapped outside a React render, so the on-demand viewer is told.
+      requestRender();
       raf = requestAnimationFrame(() => step(i + 1));
     }
     step(0);
@@ -358,7 +407,7 @@ export function GemRefraction({
       });
       disposable.forEach((m) => m.dispose());
     };
-  }, [meshes, envMap, overrides, optics]);
+  }, [meshes, envMap, overrides, optics, bvhVersion]);
 
   return null;
 }

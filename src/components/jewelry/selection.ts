@@ -507,20 +507,56 @@ export function splitSolids(geometry: THREE.BufferGeometry): number[] | null {
   // far above the float error along a shared seam.
   const quantum = Math.max(span, 1e-6) * 1e-5;
 
-  const byPos = new Map<string, number>();
+  /*
+   * The grid cell as ONE number rather than an "x,y,z" string.
+   *
+   * The string key cost about 1.4 seconds on the shipped model's 972k-vertex
+   * metal, on the main thread, in one block: the single longest freeze when
+   * a piece opened, several seconds on a phone. A number keys the Map without
+   * allocating anything.
+   *
+   * Same cells exactly: each axis is rounded just as before, then shifted by
+   * the (whole-number) cell of the bounding box minimum, which changes no
+   * equality. Every axis then spans at most span / quantum = 100,000 cells
+   * plus rounding, which fits in 17 bits; three of those is 51 bits, inside
+   * the 53 a double holds exactly.
+   */
+  const bbMin = geometry.boundingBox?.min ?? new THREE.Vector3();
+  const ox = Math.round(bbMin.x / quantum) - 1;
+  const oy = Math.round(bbMin.y / quantum) - 1;
+  const oz = Math.round(bbMin.z / quantum) - 1;
+  const AXIS = 131072; // 2^17
+  /*
+   * An open-addressing table in typed arrays rather than a Map: a Map of a
+   * million entries still spent most of its time allocating and rehashing.
+   * Twice the vertex count, rounded up to a power of two, keeps probe chains
+   * short. -1 marks an empty slot; real keys are never negative.
+   */
+  let capacity = 1;
+  while (capacity < vertCount * 2) capacity <<= 1;
+  const mask = capacity - 1;
+  const slotKey = new Float64Array(capacity).fill(-1);
+  const slotVert = new Int32Array(capacity);
+  const flat = !(position as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute;
+  const xyz = position.array as ArrayLike<number>;
   for (let v = 0; v < vertCount; v++) {
-    const key = `${Math.round(position.getX(v) / quantum)},${Math.round(
-      position.getY(v) / quantum,
-    )},${Math.round(position.getZ(v) / quantum)}`;
-    const seen = byPos.get(key);
-    if (seen === undefined) byPos.set(key, v);
-    else union(v, seen);
+    const qx = Math.round((flat ? xyz[v * 3] : position.getX(v)) / quantum) - ox;
+    const qy = Math.round((flat ? xyz[v * 3 + 1] : position.getY(v)) / quantum) - oy;
+    const qz = Math.round((flat ? xyz[v * 3 + 2] : position.getZ(v)) / quantum) - oz;
+    const key = (qx * AXIS + qy) * AXIS + qz;
+    let h = (Math.imul(qx, 73856093) ^ Math.imul(qy, 19349663) ^ Math.imul(qz, 83492791)) & mask;
+    while (slotKey[h] !== -1 && slotKey[h] !== key) h = (h + 1) & mask;
+    if (slotKey[h] === -1) {
+      slotKey[h] = key;
+      slotVert[h] = v;
+    } else union(v, slotVert[h]);
   }
 
+  const idx = index.array;
   const triCount = index.count / 3;
   for (let t = 0; t < triCount; t++) {
-    union(index.getX(t * 3), index.getX(t * 3 + 1));
-    union(index.getX(t * 3 + 1), index.getX(t * 3 + 2));
+    union(idx[t * 3], idx[t * 3 + 1]);
+    union(idx[t * 3 + 1], idx[t * 3 + 2]);
   }
 
   // First-seen order, so the numbering is stable across loads and a saved
@@ -544,15 +580,31 @@ export function splitSolids(geometry: THREE.BufferGeometry): number[] | null {
 
   const cursor = starts.slice(0, order.size);
   const sorted = new Uint32Array(index.count);
+  let highest = 0;
   for (let t = 0; t < triCount; t++) {
     const slot = order.get(triRoot[t])!;
     const to = cursor[slot];
-    sorted[to] = index.getX(t * 3);
-    sorted[to + 1] = index.getX(t * 3 + 1);
-    sorted[to + 2] = index.getX(t * 3 + 2);
+    const a = idx[t * 3];
+    const b = idx[t * 3 + 1];
+    const c = idx[t * 3 + 2];
+    sorted[to] = a;
+    sorted[to + 1] = b;
+    sorted[to + 2] = c;
+    if (a > highest) highest = a;
+    if (b > highest) highest = b;
+    if (c > highest) highest = c;
     cursor[slot] = to + 3;
   }
-  geometry.setIndex(Array.from(sorted));
+  /*
+   * Handed over as a typed array, not `Array.from(sorted)`: turning six
+   * million indices into a plain array, only for three to scan it and turn
+   * it back, was a third of a second on its own. The width is chosen by
+   * three's own rule (16-bit unless an index reaches 65535), so the result is
+   * the same attribute that path produced.
+   */
+  geometry.setIndex(
+    new THREE.BufferAttribute(highest >= 65535 ? sorted : Uint16Array.from(sorted), 1),
+  );
 
   // A plain array, because `Object3D.clone` round-trips userData through JSON
   // and a typed array comes back as an object with no length.

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh";
+import { buildBVH } from "@/lib/bvhAsync";
 
 /*
  * Picking that does not walk every triangle.
@@ -22,29 +23,35 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
+/** Geometry whose tree is being built, so a sweep does not start it twice. */
+const building = new WeakSet<THREE.BufferGeometry>();
+
 /**
  * Gives every mesh under `root` a bounds tree, once.
  *
- * Building one costs a beat on load, against a stall on every mouse move for
- * as long as the piece is open. Meshes already carrying a tree are skipped, so
- * this is safe to run whenever the scene changes.
+ * The trees are built in a worker (lib/bvhAsync.ts). Built on the main thread
+ * this was the largest single freeze on opening a piece: about a second for
+ * LP043's metal on a desktop, far longer on a phone, and paid on every load
+ * whether or not anyone clicked. Until a mesh's tree arrives, a click on it
+ * falls back to three's ordinary raycast, which is slower but correct.
+ *
+ * Meshes that have a tree, or are getting one, are skipped, so this is safe
+ * to run whenever the scene changes.
  */
 export function acceleratePicking(root: THREE.Object3D): void {
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const geometry = mesh.geometry;
-    if (!geometry || geometry.boundsTree) return;
+    if (!geometry || geometry.boundsTree || building.has(geometry)) return;
     const position = geometry.getAttribute("position");
     if (!position || position.count === 0) return;
-    /*
-     * Cast because the shipped types for 0.8.3 omit `indirect`, which the
-     * runtime supports — the option is threaded through its raycast and
-     * iteration paths. Dropping it to satisfy the compiler would reorder the
-     * index buffer, so the cast is the safe half of this trade.
-     */
-    geometry.computeBoundsTree({ indirect: true } as Parameters<
-      typeof geometry.computeBoundsTree
-    >[0]);
+    building.add(geometry);
+    buildBVH(geometry, { indirect: true })
+      .then((bvh) => {
+        geometry.boundsTree = bvh;
+      })
+      .catch((err) => console.warn("[picking] could not build a bounds tree", err))
+      .finally(() => building.delete(geometry));
   });
 }

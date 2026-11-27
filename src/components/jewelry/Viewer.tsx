@@ -14,6 +14,7 @@ import {
 } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { acceleratePicking } from "./pickBvh";
+import { RENDER_NOW_EVENT } from "./renderNow";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
@@ -301,34 +302,38 @@ function SelectionHighlight({
  *
  * Exports are untouched. They set the pixel ratio themselves and restore it,
  * and nothing here fires while one runs.
+ *
+ * This reports the drag to the viewer rather than setting the pixel ratio
+ * itself, and the Canvas's own `dpr` prop does the lowering. It used to call
+ * `setDpr` directly, which never held: R3F re-applies the Canvas's `dpr` prop
+ * on every render, and a drag re-renders the viewer continuously (the camera
+ * position is published as it moves), so the lowered ratio was undone within
+ * a frame and every drag ran at full resolution. It also restored to
+ * min(devicePixelRatio, 2) rather than the Canvas's own cap, so on a phone
+ * the first touch could lift the view past that cap for the rest of the
+ * session.
  */
-function InteractionQuality({
-  controlsRef,
-}: {
-  controlsRef: React.RefObject<OrbitControlsImpl | null>;
-}) {
-  const setDpr = useThree((s) => s.setDpr);
+function InteractionQuality({ onDragging }: { onDragging: (dragging: boolean) => void }) {
+  /*
+   * The live controls from the store (`makeDefault` puts them there), not a
+   * ref read once on mount. drei rebuilds OrbitControls when the default
+   * camera changes, which happens as soon as the viewer's own camera mounts,
+   * so a ref read in a mount-only effect held the first, discarded instance
+   * and its listeners never fired.
+   */
+  const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
 
   useEffect(() => {
-    const controls = controlsRef.current;
     if (!controls) return;
-
-    const full = Math.min(window.devicePixelRatio || 1, 2);
-    /*
-     * Never below 1. Going under it is visible as a soft, cheap-looking piece
-     * even in motion, and on the integrated graphics this is aimed at the win
-     * from halving again is small next to what it costs to look at.
-     */
-    const moving = Math.max(1, full / 2);
     let restore: ReturnType<typeof setTimeout> | undefined;
 
     const onStart = () => {
       clearTimeout(restore);
-      setDpr(moving);
+      onDragging(true);
     };
     const onEnd = () => {
       clearTimeout(restore);
-      restore = setTimeout(() => setDpr(full), 250);
+      restore = setTimeout(() => onDragging(false), 250);
     };
 
     controls.addEventListener("start", onStart);
@@ -337,9 +342,80 @@ function InteractionQuality({
       clearTimeout(restore);
       controls.removeEventListener("start", onStart);
       controls.removeEventListener("end", onEnd);
-      setDpr(full);
+      onDragging(false);
     };
-  }, [controlsRef, setDpr]);
+  }, [controls, onDragging]);
+
+  return null;
+}
+
+/*
+ * Draw only when something changed.
+ *
+ * The Canvas used to redraw continuously, 60 to 120 times a second, whether
+ * or not anything moved. Every one of those frames runs the ray-traced
+ * diamond shader over every stone pixel, the shadow pass and the post chain,
+ * so a piece sitting still kept the GPU at full load. Measured on a desktop
+ * with LP043: 29 fps standing still. On a phone that is heat, throttling and
+ * then the stutter and hangs clients report, plus a drained battery.
+ *
+ * The Canvas now runs `frameloop="demand"` and these are the triggers:
+ *
+ *  - Any React render of the viewer: every panel control, a loaded piece, a
+ *    new fit, a material change. Followed by a short settle of a few frames,
+ *    because effects that run after a render (material swaps, shadow camera
+ *    moves) change the scene without telling the renderer.
+ *  - Anything the shared loading manager finishes: textures, HDRIs, models.
+ *  - OrbitControls, which drei already wires to invalidate on every change,
+ *    damping glide included.
+ *  - `RenderNow`, for imperative changes made outside a render (the staggered
+ *    diamond material swap, a background BVH build finishing).
+ *
+ * Anything that animates on its own (turntable, spin, tap-to-focus) switches
+ * the Canvas back to a continuous loop while it runs; see `continuous`.
+ */
+const SETTLE_FRAMES = 6;
+
+function RenderOnChange() {
+  const invalidate = useThree((s) => s.invalidate);
+  const settle = useRef(0);
+
+  // No dependency list on purpose: every render of the viewer is a reason.
+  useEffect(() => {
+    settle.current = SETTLE_FRAMES;
+    invalidate();
+  });
+
+  useEffect(() => {
+    const manager = THREE.DefaultLoadingManager;
+    const previous = { onLoad: manager.onLoad, onProgress: manager.onProgress };
+    manager.onLoad = () => {
+      previous.onLoad?.();
+      settle.current = SETTLE_FRAMES;
+      invalidate();
+    };
+    manager.onProgress = (...args) => {
+      previous.onProgress?.(...args);
+      invalidate();
+    };
+    const onRenderNow = () => {
+      settle.current = SETTLE_FRAMES;
+      invalidate();
+    };
+    window.addEventListener(RENDER_NOW_EVENT, onRenderNow);
+    return () => {
+      manager.onLoad = previous.onLoad;
+      manager.onProgress = previous.onProgress;
+      window.removeEventListener(RENDER_NOW_EVENT, onRenderNow);
+    };
+  }, [invalidate]);
+
+  useFrame(() => {
+    if (settle.current > 0) {
+      settle.current--;
+      invalidate();
+    }
+  });
 
   return null;
 }
@@ -350,18 +426,18 @@ function InteractionQuality({
  * Swept from the frame loop rather than an effect on the parts, because a
  * mesh appears in the scene a beat after the state that produced it and one
  * mesh without a tree is enough to stall the pointer by itself. The sweep is
- * a traverse over a handful of objects, skipping any that already have one,
- * and runs twice a second — next to a stalled pointer it does not register.
+ * a traverse over a handful of objects, skipping any that already have one.
  */
 function PickAcceleration() {
   const scene = useThree((s) => s.scene);
-  const next = useRef(0);
-  useFrame(() => {
-    const now = performance.now();
-    if (now < next.current) return;
-    next.current = now + 500;
-    acceleratePicking(scene);
-  });
+  /*
+   * Every drawn frame, not throttled to twice a second as before: the viewer
+   * now draws only when something changes, so a throttled sweep could skip
+   * the few frames a newly loaded piece gets and leave it without trees
+   * until the next interaction. The sweep itself is a traverse that skips
+   * meshes with a tree or a build in flight; the builds run in a worker.
+   */
+  useFrame(() => acceleratePicking(scene));
   return null;
 }
 
@@ -1098,10 +1174,33 @@ export default function Viewer({
     [],
   );
 
+  /** The Canvas's resolution cap. */
+  const maxDpr = 2;
+  /*
+   * Lower resolution while the piece is being dragged (see InteractionQuality):
+   * half the full ratio, never below 1, since under 1x reads as a soft,
+   * cheap-looking piece even in motion.
+   */
+  const [dragging, setDragging] = useState(false);
+  const dpr: number | [number, number] = dragging
+    ? Math.max(
+        1,
+        Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, maxDpr) / 2,
+      )
+    : [1, maxDpr];
+
+  /*
+   * Whether something is animating by itself and needs a frame every tick.
+   * Otherwise the Canvas draws on demand (see `RenderOnChange`).
+   */
+  const continuous =
+    animationPlaying || (cameraSettings.spinAxis ?? "none") !== "none" || focus !== null;
+
   return (
     <div className="absolute inset-0" onPointerDownCapture={onPointerDownCapture}>
       <Canvas
-        dpr={[1, 2]}
+        dpr={dpr}
+        frameloop={continuous ? "always" : "demand"}
         gl={glConfig}
         style={{ background: "transparent" }}
         shadows={{ type: THREE.PCFShadowMap }}
@@ -1335,7 +1434,8 @@ export default function Viewer({
           piece={pieceRef}
         />
         <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
-        <InteractionQuality controlsRef={controlsRef} />
+        <InteractionQuality onDragging={setDragging} />
+        <RenderOnChange />
         {/*
           Bloom was written, tuned and given a panel, and then never mounted.
           Nothing drew through the composer, so every control in Post moved a
