@@ -35,7 +35,6 @@ import { gemById, metalById } from "@/components/jewelry/library";
 import { downloadBlob } from "@/components/jewelry/studio";
 import { getTryOnHandoff } from "@/components/tryon/handoff";
 import type { PreparedStudioPiece, StudioPieceSource } from "@/components/tryon/studioFit";
-import { CameraPermission, type PermissionStep } from "@/components/tryon/CameraPermission";
 
 const TryOnStage = lazy(() => import("@/components/tryon/TryOnStage"));
 
@@ -248,39 +247,21 @@ function TryOn() {
   /* ------------------------------------------------------------ camera */
 
   /*
-   * Asking for the camera, the standard way: say why first, in our own
-   * dialog, and only then let the browser show its prompt, so the one-time
-   * browser question is never a surprise and a "no" is never an accident.
-   *
-   *  - Already allowed: start straight away, no dialog.
-   *  - Blocked: explain how to unblock it; the browser will not ask again.
-   *  - Otherwise: our dialog, whose Allow button triggers the browser prompt.
+   * The camera button asks the browser directly, the standard flow: starting
+   * the camera calls getUserMedia, which shows the browser's own permission
+   * prompt the first time and starts at once when it is already allowed.
+   * There is no dialog of our own in front of it. When the browser refuses
+   * (blocked, or no camera), the engine reports it and the error card below
+   * says why, with Try again and the 3D view as the ways forward.
    */
-  const [permission, setPermission] = useState<PermissionStep | null>(null);
-
   const startCamera = useCallback(() => {
-    setPermission(null);
     setStatus({ phase: "camera" });
     setMode("camera");
     setStarted(true);
     setAttempt((n) => n + 1);
   }, []);
 
-  const requestCamera = useCallback(async () => {
-    let state: PermissionState | "unknown" = "unknown";
-    try {
-      state =
-        (await navigator.permissions?.query({ name: "camera" as PermissionName }))?.state ??
-        "unknown";
-    } catch {
-      // Safari before 16 and Firefox cannot be asked about the camera.
-    }
-    if (state === "granted") startCamera();
-    else setPermission(state === "denied" ? "blocked" : "ask");
-  }, [startCamera]);
-
   const viewIn3D = useCallback(() => {
-    setPermission(null);
     setStatus({ phase: "idle" });
     setMode("preview");
     setStarted(true);
@@ -355,7 +336,7 @@ function TryOn() {
           <Intro
             category={category}
             pieceName={wearingStudio ? prepared?.name : undefined}
-            onStart={requestCamera}
+            onStart={startCamera}
             onPreview={viewIn3D}
           />
         )}
@@ -384,7 +365,7 @@ function TryOn() {
           </h1>
           {started && mode === "preview" ? (
             <button
-              onClick={requestCamera}
+              onClick={startCamera}
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-black/40 px-3 text-xs text-white/85 backdrop-blur hover:bg-black/60"
               title="Try it on with your camera"
             >
@@ -426,7 +407,7 @@ function TryOn() {
               <Camera className="mx-auto mb-3 size-8 text-[var(--gold)]" />
               <p className="text-sm text-white/90">{status.message}</p>
               <button
-                onClick={requestCamera}
+                onClick={startCamera}
                 className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-5 py-2 text-sm font-medium text-[#16120c]"
               >
                 <RotateCcw className="size-4" /> Try again
@@ -652,16 +633,6 @@ function TryOn() {
         </p>
       </nav>
 
-      {permission && (
-        <CameraPermission
-          step={permission}
-          onAllow={startCamera}
-          onRetry={requestCamera}
-          onClose={() => setPermission(null)}
-          onPreview={viewIn3D}
-        />
-      )}
-
       {/* ------------------------------------------------------- snapshot */}
       {shot && (
         <div
@@ -760,7 +731,7 @@ function Intro({
         onClick={onStart}
         className="mt-6 inline-flex shrink-0 items-center gap-2 rounded-full bg-[var(--gold)] px-7 py-3 text-sm font-medium text-[#16120c] shadow-lg shadow-black/40 hover:brightness-110"
       >
-        <Camera className="size-4" /> Enable camera
+        <Camera className="size-4" /> Start camera
       </button>
       <button
         onClick={onPreview}
