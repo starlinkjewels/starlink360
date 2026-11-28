@@ -79,6 +79,7 @@ import {
 import { LoadingOverlay } from "@/components/jewelry/LoadingOverlay";
 import { UploadPiece, type UploadStatus } from "@/components/jewelry/UploadPiece";
 import { downloadBlob } from "@/components/jewelry/studio";
+import { setTryOnHandoff } from "@/components/tryon/handoff";
 import { estimateDecodeMs, useSmoothProgress } from "@/hooks/useSmoothProgress";
 
 const Viewer = lazy(() => import("@/components/jewelry/Viewer"));
@@ -1037,6 +1038,32 @@ function Index() {
   // alike. Only a passphrase the server accepts brings it back.
   const { canUpload } = Route.useLoaderData();
 
+  /*
+   * Try On wears the piece on this stage, not a catalogue piece. Kept current
+   * as the piece or its up axis changes, so the try-on always opens on what
+   * is showing here (tryon/handoff.ts).
+   */
+  useEffect(() => {
+    if (product.object) {
+      setTryOnHandoff({
+        kind: "studio",
+        piece: {
+          object: product.object,
+          name: product.name,
+          ref: product.ref,
+          upAxis: cameraSettings.upAxis,
+          mmPerUnit:
+            (product.object.userData as { detectedMMPerUnit?: number }).detectedMMPerUnit ?? null,
+        },
+        fileUrl: product.id === `link-${fileUrl}` ? fileUrl : undefined,
+      });
+    } else if (product.procedural) {
+      setTryOnHandoff({ kind: "catalogue", spec: product.procedural });
+    } else {
+      setTryOnHandoff(null);
+    }
+  }, [product, cameraSettings.upAxis, fileUrl]);
+
   useEffect(() => {
     if (!fileUrl) return;
     const abort = new AbortController();
@@ -1126,6 +1153,11 @@ function Index() {
         onOpen={() => projectFile.current?.click()}
         onUpload={canUpload ? () => setShowUpload(true) : undefined}
         canUpload={canUpload}
+        tryOnFile={
+          fileUrl && (product === LINK_PENDING || product.id === `link-${fileUrl}`)
+            ? fileUrl
+            : undefined
+        }
       />
       {/*
         The picker lives here rather than in the top bar so it survives every

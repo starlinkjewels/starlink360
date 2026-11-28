@@ -23,6 +23,7 @@ export function TopBar({
   onUpload,
   canUpload,
   saving,
+  tryOnFile,
 }: {
   onReset: () => void;
   onSave?: () => void;
@@ -30,6 +31,8 @@ export function TopBar({
   onUpload?: () => void;
   canUpload: boolean;
   saving?: boolean;
+  /** The piece's file link, so the try-on can load it again after a reload. */
+  tryOnFile?: string;
 }) {
   return (
     <header className="topbar">
@@ -38,7 +41,12 @@ export function TopBar({
       </span>
 
       <div className="topbar-actions">
-        <Link to="/try-on" className="tb-btn" title="Try jewellery on live through your camera">
+        <Link
+          to="/try-on"
+          search={tryOnFile ? { file: tryOnFile } : {}}
+          className="tb-btn"
+          title="Try this piece on live through your camera"
+        >
           <Sparkles className="size-3.5" />
           <span className="tb-label">Try On</span>
         </Link>

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Camera,
@@ -33,18 +33,24 @@ import type { ChainLength } from "@/components/tryon/jewelry";
 import { BACKDROPS, backdropById } from "@/components/tryon/backdrops";
 import { gemById, metalById } from "@/components/jewelry/library";
 import { downloadBlob } from "@/components/jewelry/studio";
+import { getTryOnHandoff } from "@/components/tryon/handoff";
+import type { PreparedStudioPiece, StudioPieceSource } from "@/components/tryon/studioFit";
+import { CameraPermission, type PermissionStep } from "@/components/tryon/CameraPermission";
 
 const TryOnStage = lazy(() => import("@/components/tryon/TryOnStage"));
 
 interface TryOnSearch {
   category?: Category;
   debug?: boolean;
+  /** The studio piece's file link, so a reload can load it again. */
+  file?: string;
 }
 
 export const Route = createFileRoute("/try-on")({
   validateSearch: (s: Record<string, unknown>): TryOnSearch => ({
     category: CATEGORIES.some((c) => c.id === s.category) ? (s.category as Category) : undefined,
     debug: s.debug === true || s.debug === 1 || s.debug === "1" || s.debug === "true" || undefined,
+    file: typeof s.file === "string" && s.file.trim() ? s.file.trim().slice(0, 2048) : undefined,
   }),
   head: () => ({
     meta: [
@@ -90,11 +96,96 @@ const LOADING_TEXT: Record<string, string> = {
 
 function TryOn() {
   const search = Route.useSearch();
+  /*
+   * What the studio was showing (tryon/handoff.ts). Read once: the try-on
+   * opens on the piece that was on the stage when Try On was pressed.
+   */
+  const [handoff] = useState(getTryOnHandoff);
+  const catalogue = handoff?.kind === "catalogue" ? handoff.spec : null;
+
   const [started, setStarted] = useState(false);
   const [mode, setMode] = useState<"camera" | "preview">("camera");
-  const [category, setCategory] = useState<Category>(search.category ?? "ring");
-  const [styles, setStyles] = useState<Partial<Record<Category, string>>>({});
-  const [carats, setCarats] = useState<Record<string, number>>({});
+  const [category, setCategory] = useState<Category>(
+    search.category ?? catalogue?.category ?? "ring",
+  );
+  /** Set once the visitor picks a category, so the guess never overrides them. */
+  const chosenCategory = useRef(!!search.category);
+  const [styles, setStyles] = useState<Partial<Record<Category, string>>>(
+    catalogue ? { [catalogue.category]: catalogue.style } : {},
+  );
+  const [carats, setCarats] = useState<Record<string, number>>(
+    catalogue ? { [`${catalogue.category}:${catalogue.style}`]: catalogue.carat } : {},
+  );
+
+  /*
+   * The studio's own piece: from the hand-off, or loaded again from the link
+   * when the page was opened (or reloaded) directly. Prepared once (stone
+   * BVHs, measurements), then worn in whichever category is chosen.
+   */
+  const [studioSrc, setStudioSrc] = useState<StudioPieceSource | null>(
+    handoff?.kind === "studio" ? handoff.piece : null,
+  );
+  const [prepared, setPrepared] = useState<PreparedStudioPiece | null>(null);
+  const [preparing, setPreparing] = useState(
+    handoff?.kind === "studio" || (!handoff && !!search.file),
+  );
+  /** Wearing the studio piece rather than a catalogue style. */
+  const [useStudio, setUseStudio] = useState(true);
+  const [studioError, setStudioError] = useState<string | null>(null);
+  /** A pendant hangs on the catalogue chain; a whole necklace brings its own. */
+  const [studioChain, setStudioChain] = useState(true);
+
+  useEffect(() => {
+    if (studioSrc || handoff || !search.file) return;
+    let live = true;
+    void (async () => {
+      try {
+        const { loadRemoteJewelry } = await import("@/lib/loadRemoteJewelry");
+        const { object, fileName } = await loadRemoteJewelry(search.file!);
+        if (!live) return;
+        const { guessUpAxis } = await import("@/components/jewelry/camera");
+        setStudioSrc({
+          object,
+          name: fileName,
+          upAxis: guessUpAxis(fileName),
+          mmPerUnit: (object.userData as { detectedMMPerUnit?: number }).detectedMMPerUnit ?? null,
+        });
+      } catch (e) {
+        if (!live) return;
+        setPreparing(false);
+        setStudioError(e instanceof Error ? e.message : "Could not load the piece.");
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [studioSrc, handoff, search.file]);
+
+  useEffect(() => {
+    if (!studioSrc) return;
+    let live = true;
+    setPreparing(true);
+    void (async () => {
+      try {
+        const { prepareStudioPiece, guessCategory, usesChainLength } =
+          await import("@/components/tryon/studioFit");
+        const prep = await prepareStudioPiece(studioSrc);
+        if (!live) return;
+        setPrepared(prep);
+        setStudioChain(usesChainLength(prep));
+        if (!chosenCategory.current) setCategory(guessCategory(prep));
+      } catch (e) {
+        if (live) setStudioError(e instanceof Error ? e.message : "Could not prepare the piece.");
+      } finally {
+        if (live) setPreparing(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [studioSrc]);
+
+  const wearingStudio = useStudio && prepared !== null;
   const [metalId, setMetalId] = useState(TRYON_METALS[0]);
   const [gemId, setGemId] = useState(TRYON_GEMS[0]);
   const [fit, setFit] = useState(1);
@@ -119,6 +210,8 @@ function TryOn() {
   const caratKey = `${category}:${style.id}`;
   const carat = carats[caratKey] ?? style.stone?.value ?? 0;
   const sparkle = sparkleChoice ?? mode === "camera";
+  /** Stone choices apply to a catalogue style with a stone, or a studio piece that has stones. */
+  const showStone = wearingStudio ? !!prepared?.hasGems : !!style.stone;
 
   const config = useMemo<TryOnConfig>(
     () => ({
@@ -133,6 +226,7 @@ function TryOn() {
       debug: !!search.debug,
       sparkle,
       backdrop,
+      studio: wearingStudio ? prepared : null,
     }),
     [
       category,
@@ -146,8 +240,51 @@ function TryOn() {
       search.debug,
       sparkle,
       backdrop,
+      wearingStudio,
+      prepared,
     ],
   );
+
+  /* ------------------------------------------------------------ camera */
+
+  /*
+   * Asking for the camera, the standard way: say why first, in our own
+   * dialog, and only then let the browser show its prompt, so the one-time
+   * browser question is never a surprise and a "no" is never an accident.
+   *
+   *  - Already allowed: start straight away, no dialog.
+   *  - Blocked: explain how to unblock it; the browser will not ask again.
+   *  - Otherwise: our dialog, whose Allow button triggers the browser prompt.
+   */
+  const [permission, setPermission] = useState<PermissionStep | null>(null);
+
+  const startCamera = useCallback(() => {
+    setPermission(null);
+    setStatus({ phase: "camera" });
+    setMode("camera");
+    setStarted(true);
+    setAttempt((n) => n + 1);
+  }, []);
+
+  const requestCamera = useCallback(async () => {
+    let state: PermissionState | "unknown" = "unknown";
+    try {
+      state =
+        (await navigator.permissions?.query({ name: "camera" as PermissionName }))?.state ??
+        "unknown";
+    } catch {
+      // Safari before 16 and Firefox cannot be asked about the camera.
+    }
+    if (state === "granted") startCamera();
+    else setPermission(state === "denied" ? "blocked" : "ask");
+  }, [startCamera]);
+
+  const viewIn3D = useCallback(() => {
+    setPermission(null);
+    setStatus({ phase: "idle" });
+    setMode("preview");
+    setStarted(true);
+  }, []);
 
   const capture = useCallback(async () => {
     if (!handle.current) return;
@@ -173,7 +310,7 @@ function TryOn() {
     }
   }, []);
 
-  const fileName = `netram-try-on-${category}-${style.id}.jpg`;
+  const fileName = `netram-try-on-${category}-${wearingStudio ? "my-piece" : style.id}.jpg`;
   const share = useCallback(async () => {
     if (!shot) return;
     const file = new File([shot.blob], fileName, { type: "image/jpeg" });
@@ -217,16 +354,9 @@ function TryOn() {
         ) : (
           <Intro
             category={category}
-            onStart={() => {
-              setStatus({ phase: "camera" });
-              setMode("camera");
-              setStarted(true);
-            }}
-            onPreview={() => {
-              setStatus({ phase: "idle" });
-              setMode("preview");
-              setStarted(true);
-            }}
+            pieceName={wearingStudio ? prepared?.name : undefined}
+            onStart={requestCamera}
+            onPreview={viewIn3D}
           />
         )}
 
@@ -254,10 +384,7 @@ function TryOn() {
           </h1>
           {started && mode === "preview" ? (
             <button
-              onClick={() => {
-                setStatus({ phase: "camera" });
-                setMode("camera");
-              }}
+              onClick={requestCamera}
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-black/40 px-3 text-xs text-white/85 backdrop-blur hover:bg-black/60"
               title="Try it on with your camera"
             >
@@ -299,19 +426,13 @@ function TryOn() {
               <Camera className="mx-auto mb-3 size-8 text-[var(--gold)]" />
               <p className="text-sm text-white/90">{status.message}</p>
               <button
-                onClick={() => {
-                  setStatus({ phase: "camera" });
-                  setAttempt((n) => n + 1);
-                }}
+                onClick={requestCamera}
                 className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-5 py-2 text-sm font-medium text-[#16120c]"
               >
                 <RotateCcw className="size-4" /> Try again
               </button>
               <button
-                onClick={() => {
-                  setStatus({ phase: "idle" });
-                  setMode("preview");
-                }}
+                onClick={viewIn3D}
                 className="mt-3 block w-full text-xs text-white/60 underline-offset-4 hover:text-white hover:underline"
               >
                 View the piece in 3D instead
@@ -346,7 +467,10 @@ function TryOn() {
             return (
               <button
                 key={c.id}
-                onClick={() => setCategory(c.id)}
+                onClick={() => {
+                  chosenCategory.current = true;
+                  setCategory(c.id);
+                }}
                 aria-pressed={on}
                 className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs transition ${
                   on ? "bg-[var(--gold)] text-[#16120c]" : "text-white/70 hover:bg-white/5"
@@ -358,13 +482,51 @@ function TryOn() {
           })}
         </div>
 
+        {(preparing || studioError) && (
+          <p className="flex items-center gap-2 px-3 pt-3 text-xs text-white/60" role="status">
+            {preparing ? (
+              <>
+                <Spinner /> Preparing your piece from the studio…
+              </>
+            ) : (
+              <>Your studio piece could not be loaded: {studioError}</>
+            )}
+          </p>
+        )}
+
         <div className="flex gap-2 overflow-x-auto px-3 pt-3 [scrollbar-width:none]">
+          {prepared && (
+            /*
+             * The piece from the studio, first and selected by default: it is
+             * what the visitor came here to try on. Shown in every category,
+             * since only they know whether their pendant is for the neck or
+             * the ear; the fit adapts to whichever they pick.
+             */
+            <button
+              onClick={() => setUseStudio(true)}
+              aria-pressed={wearingStudio}
+              title="The piece from the studio"
+              className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
+                wearingStudio
+                  ? "border-[var(--gold)] bg-white/5"
+                  : "border-white/10 hover:border-white/25"
+              }`}
+            >
+              <div className="text-xs font-medium text-white">Your piece</div>
+              <div className="max-w-[11rem] truncate text-[10px] text-white/50">
+                {prepared.name || "From the studio"}
+              </div>
+            </button>
+          )}
           {cat.styles.map((s) => {
-            const on = s.id === style.id;
+            const on = !wearingStudio && s.id === style.id;
             return (
               <button
                 key={s.id}
-                onClick={() => setStyles((m) => ({ ...m, [category]: s.id }))}
+                onClick={() => {
+                  setUseStudio(false);
+                  setStyles((m) => ({ ...m, [category]: s.id }));
+                }}
                 aria-pressed={on}
                 title={s.blurb}
                 className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
@@ -397,7 +559,7 @@ function TryOn() {
             </div>
           </Field>
 
-          {style.stone && (
+          {showStone && (
             <Field label="Stone" value={gemById(gemId)?.name}>
               <div className="flex gap-2">
                 {TRYON_GEMS.map((id) => {
@@ -416,7 +578,7 @@ function TryOn() {
             </Field>
           )}
 
-          {style.stone && (
+          {!wearingStudio && style.stone && (
             <Field label={style.stone.label} value={`${carat.toFixed(2)} ct`}>
               <input
                 type="range"
@@ -450,13 +612,13 @@ function TryOn() {
             </Field>
           )}
 
-          {category === "necklace" && style.id !== "riviere" && (
+          {category === "necklace" && (wearingStudio ? studioChain : style.id !== "riviere") && (
             <Field label="Chain length">
               <Segmented options={CHAIN_OPTIONS} value={chain} onChange={setChain} />
             </Field>
           )}
 
-          {style.stone && (
+          {showStone && (
             <Field label="Sparkle">
               <Segmented
                 options={[
@@ -489,6 +651,16 @@ function TryOn() {
           Tracking runs on your device with Google MediaPipe. Your camera video is never uploaded.
         </p>
       </nav>
+
+      {permission && (
+        <CameraPermission
+          step={permission}
+          onAllow={startCamera}
+          onRetry={requestCamera}
+          onClose={() => setPermission(null)}
+          onPreview={viewIn3D}
+        />
+      )}
 
       {/* ------------------------------------------------------- snapshot */}
       {shot && (
@@ -545,10 +717,13 @@ function StageMessage({ icon, text }: { icon: React.ReactNode; text: string }) {
 
 function Intro({
   category,
+  pieceName,
   onStart,
   onPreview,
 }: {
   category: Category;
+  /** Set when the studio's own piece is the one being tried on. */
+  pieceName?: string;
   onStart: () => void;
   onPreview: () => void;
 }) {
@@ -569,14 +744,23 @@ function Intro({
         Virtual Try-On
       </h2>
       <p className="mt-2 max-w-md text-sm text-white/60">
-        See brilliant-cut diamonds on your own hand, wrist, ears and neck, live through your camera.
-        Pick a piece below, then start.
+        {pieceName !== undefined ? (
+          <>
+            Try <span className="text-white/85">{pieceName || "your piece"}</span> on live through
+            your camera. Check where it should go below, then start.
+          </>
+        ) : (
+          <>
+            See brilliant-cut diamonds on your own hand, wrist, ears and neck, live through your
+            camera. Pick a piece below, then start.
+          </>
+        )}
       </p>
       <button
         onClick={onStart}
         className="mt-6 inline-flex shrink-0 items-center gap-2 rounded-full bg-[var(--gold)] px-7 py-3 text-sm font-medium text-[#16120c] shadow-lg shadow-black/40 hover:brightness-110"
       >
-        <Camera className="size-4" /> Start camera
+        <Camera className="size-4" /> Enable camera
       </button>
       <button
         onClick={onPreview}

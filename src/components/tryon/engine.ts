@@ -38,6 +38,7 @@ import {
   type ChainLength,
   type Kit,
 } from "./jewelry";
+import { buildStudioPieces, type PreparedStudioPiece } from "./studioFit";
 import { categoryById, type Category, type TrackerKind } from "./catalog";
 import { loadTracker, type Tracker } from "./landmarkers";
 import { environmentById } from "@/components/jewelry/lighting";
@@ -69,6 +70,11 @@ export interface TryOnConfig {
   sparkle?: boolean;
   /** Ground behind the piece in the 3D view; see backdrops.ts. */
   backdrop?: string;
+  /**
+   * The studio's own piece, worn instead of the catalogue style. `style` and
+   * `carat` are ignored while this is set; metal and stone still apply.
+   */
+  studio?: PreparedStudioPiece | null;
 }
 
 export type TryOnPhase =
@@ -468,8 +474,8 @@ export class TryOnEngine {
 
   private rebuild() {
     if (!this.stones) return;
-    const { category, style, metalId, gemId, carat, chain } = this.cfg;
-    const key = JSON.stringify([category, style, metalId, gemId, carat, chain]);
+    const { category, style, metalId, gemId, carat, chain, studio } = this.cfg;
+    const key = JSON.stringify([category, style, metalId, gemId, carat, chain, studio?.id ?? null]);
     if (key === this.pieceKey) return;
     this.pieceKey = key;
 
@@ -483,7 +489,15 @@ export class TryOnEngine {
 
     const centre = this.stones.make(gemId);
     this.kit = { metal: metalMaterial(metalId), centre, accent: this.stones.make("diamond") };
-    this.pieces = buildPieces({ category, style, carat, chain }, this.kit);
+    const stones = this.stones;
+    this.pieces = studio
+      ? buildStudioPieces(studio, category, chain, this.kit, (part) =>
+          stones.makeTraced(gemId, part.bvh!, {
+            absorbRef: part.absorbRef ?? 4,
+            epsilon: part.epsilon ?? 5e-4,
+          }),
+        )
+      : buildPieces({ category, style, carat, chain }, this.kit);
     this.swings = this.pieces.map((p) =>
       p.swing
         ? {

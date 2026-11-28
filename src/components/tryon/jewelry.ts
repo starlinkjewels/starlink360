@@ -94,6 +94,20 @@ export class StoneMaterials {
   ) {}
 
   make(gemId: string): THREE.Material {
+    return this.makeTraced(gemId, brilliantAsset().bvh);
+  }
+
+  /**
+   * The same stone material, traced against any stone geometry rather than
+   * the shared brilliant: a piece brought over from the studio carries its
+   * own cut stones (studioFit.ts). `absorbRef` and `epsilon` are in that
+   * geometry's object space; see DiamondOptions.
+   */
+  makeTraced(
+    gemId: string,
+    bvh: MeshBVHUniformStruct,
+    scale?: { absorbRef: number; epsilon: number },
+  ): THREE.Material {
     const gem = gemById(gemId) ?? gemById("diamond")!;
     const spec = resolveGem(gem);
 
@@ -111,7 +125,8 @@ export class StoneMaterials {
       return opaque;
     }
 
-    const material = createDiamondMaterial(brilliantAsset().bvh, this.env, spec, {
+    const material = createDiamondMaterial(bvh, this.env, spec, {
+      ...scale,
       envRotation: this.envRotation,
       // Marks stone pixels for the glint pass (sparkle.ts).
       outputAlpha: STONE_ALPHA,
@@ -372,7 +387,13 @@ function arcRail(radius: number, tube: number, span: number): THREE.BufferGeomet
   return g;
 }
 
-function occluderCylinder(rx: number, rz: number, height: number, y: number, z = 0): THREE.Mesh {
+export function occluderCylinder(
+  rx: number,
+  rz: number,
+  height: number,
+  y: number,
+  z = 0,
+): THREE.Mesh {
   const geo = new THREE.CylinderGeometry(1, 1, 1, 32, 1, false);
   const mesh = new THREE.Mesh(geo);
   mesh.scale.set(rx, height, rz);
@@ -677,9 +698,13 @@ function buildEarring(style: string, kit: Kit, carat: number): BuiltPiece {
 
 export type ChainLength = "choker" | "princess" | "matinee";
 /** How far below the neck-side points the front of the chain falls, shoulder widths. */
-const CHAIN_DROP: Record<ChainLength, number> = { choker: 0.1, princess: 0.22, matinee: 0.38 };
+export const CHAIN_DROP: Record<ChainLength, number> = {
+  choker: 0.1,
+  princess: 0.22,
+  matinee: 0.38,
+};
 /** Neck-side contact points sit this far above the shoulder line. */
-const NECK_SIDE_Y = 0.1;
+export const NECK_SIDE_Y = 0.1;
 
 function chainCurve(length: ChainLength): THREE.CatmullRomCurve3 {
   const D = CHAIN_DROP[length];
@@ -703,8 +728,15 @@ function chainCurve(length: ChainLength): THREE.CatmullRomCurve3 {
   return new THREE.CatmullRomCurve3([...front, ...back], true, "centripetal");
 }
 
-function buildNecklace(style: string, kit: Kit, carat: number, length: ChainLength): BuiltPiece {
-  const root = new THREE.Group();
+/**
+ * A cable chain around the neck, and the point at the bottom of its front
+ * drape where a pendant hangs. Shared by the catalogue necklaces and by a
+ * pendant brought over from the studio (studioFit.ts).
+ */
+export function chainDrape(
+  kit: Kit,
+  length: ChainLength,
+): { links: THREE.Object3D; curve: THREE.CatmullRomCurve3; total: number; uBottom: number } {
   const mm = 1 / UNIT_MM.necklace;
   const curve = chainCurve(length);
   const total = curve.getLength();
@@ -727,7 +759,6 @@ function buildNecklace(style: string, kit: Kit, carat: number, length: ChainLeng
     const bin = new THREE.Vector3().crossVectors(t, nrm);
     links.push(placeBasis(p, t, i % 2 ? nrm : bin, 1));
   }
-  root.add(instanced(linkGeo, kit.metal, links));
 
   // The lowest point of the front drape, where the pendant hangs.
   let uBottom = 0;
@@ -739,6 +770,15 @@ function buildNecklace(style: string, kit: Kit, carat: number, length: ChainLeng
       uBottom = i / 400;
     }
   }
+  return { links: instanced(linkGeo, kit.metal, links), curve, total, uBottom };
+}
+
+function buildNecklace(style: string, kit: Kit, carat: number, length: ChainLength): BuiltPiece {
+  const root = new THREE.Group();
+  const mm = 1 / UNIT_MM.necklace;
+  const { links, curve, total, uBottom } = chainDrape(kit, length);
+  root.add(links);
+  const fwd = new THREE.Vector3(0, 0, 1);
   const bottom = curve.getPointAt(uBottom);
   let swing: THREE.Group | undefined;
   let swingLength: number | undefined;
@@ -850,11 +890,17 @@ export function buildPieces(o: PieceOptions, kit: Kit): BuiltPiece[] {
   }
 }
 
-/** Frees everything a piece made, leaving the shared stone geometry alone. */
+/**
+ * Frees everything a piece made, leaving the shared stone geometry alone, and
+ * any geometry the piece only borrowed (`userData.borrowed` on the mesh): a
+ * piece from the studio draws the studio's own buffers, and disposing them on
+ * every metal or stone change would re-upload a million vertices each time.
+ */
 export function disposePiece(piece: BuiltPiece): void {
   piece.root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
+    if (mesh.geometry && !mesh.geometry.userData.shared && !mesh.userData.borrowed)
+      mesh.geometry.dispose();
     if ((mesh as unknown as THREE.InstancedMesh).isInstancedMesh)
       (mesh as unknown as THREE.InstancedMesh).dispose();
   });
