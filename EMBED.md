@@ -8,9 +8,33 @@ and no server involved on our side.
 <iframe
   src="https://viewer.example.com/?file=https%3A%2F%2Fyour-app.com%2Ffiles%2FLP043.3dm&embed=true"
   style="width: 100%; height: 80vh; border: 0"
-  allow="fullscreen"
+  allow="camera; fullscreen"
 ></iframe>
 ```
+
+## Camera for Try On
+
+Try On asks for the camera as soon as it opens. Inside an iframe the browser
+only allows that when **the iframe grants it**: keep `camera` in the `allow`
+attribute above. Without it the browser refuses silently. It never shows its
+permission prompt, and nothing the visitor changes in settings will fix it.
+Try On then offers "Open try-on in a new tab" instead, where the browser asks
+normally.
+
+If the viewer runs inside your **own mobile app** (a WebView rather than a
+browser), the app must also pass the camera through:
+
+- **iOS (WKWebView):** add `NSCameraUsageDescription` to `Info.plist`, set
+  `allowsInlineMediaPlayback = true`, and grant camera requests in
+  `WKUIDelegate`'s `webView(_:requestMediaCapturePermissionFor:...)`
+  (return `.grant`, or `.prompt` to let iOS ask).
+- **Android (WebView):** declare `android.permission.CAMERA`, request it at
+  runtime, and grant it in `WebChromeClient.onPermissionRequest`
+  (`request.grant(request.resources)`).
+
+The browser itself remembers a "Block": once a visitor blocks the camera for
+the site, the browser will not ask again until they allow it in its site
+settings. That is the browser's rule; no page can override it.
 
 ## Parameters
 

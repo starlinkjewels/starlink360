@@ -267,6 +267,59 @@ function TryOn() {
     setStarted(true);
   }, []);
 
+  /*
+   * Embedded without the camera.
+   *
+   * Inside another site's iframe the browser only lets the page use the
+   * camera if the iframe was given allow="camera" (EMBED.md). Without it the
+   * request is refused silently, with no prompt at all, and no setting a
+   * visitor can change will fix it. Chrome and Edge can say so up front; for
+   * the rest, a refusal inside a frame is treated the same way. Either way the
+   * way forward is the try-on in its own tab, where the browser asks normally.
+   */
+  const [embedded] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  });
+  /** Whether the frame's camera permission is known to be missing, or unknowable. */
+  const [frameCamera] = useState<"allowed" | "blocked" | "unknown">(() => {
+    if (!embedded || typeof document === "undefined") return "allowed";
+    const doc = document as Document & {
+      permissionsPolicy?: { allowsFeature(f: string): boolean };
+      featurePolicy?: { allowsFeature(f: string): boolean };
+    };
+    const policy = doc.permissionsPolicy ?? doc.featurePolicy;
+    if (!policy) return "unknown"; // Safari and Firefox cannot say
+    try {
+      return policy.allowsFeature("camera") ? "allowed" : "blocked";
+    } catch {
+      return "unknown";
+    }
+  });
+  const frameBlocksCamera = frameCamera === "blocked";
+  /** A refusal that is the frame's doing, not the visitor's choice. */
+  const frameMayBlockCamera = frameCamera !== "allowed";
+  const openInOwnTab = useCallback(() => {
+    window.open(window.location.href, "_blank", "noopener");
+  }, []);
+
+  /*
+   * Opening the try-on asks for the camera straight away: the browser's own
+   * prompt appears as the page opens, the way a camera app does it, rather
+   * than after a second tap. Not inside a frame that cannot have the camera,
+   * where it would only fail; that case shows the own-tab option instead.
+   */
+  useEffect(() => {
+    if (frameBlocksCamera) return;
+    startCamera();
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const capture = useCallback(async () => {
     if (!handle.current) return;
     try {
@@ -336,7 +389,8 @@ function TryOn() {
           <Intro
             category={category}
             pieceName={wearingStudio ? prepared?.name : undefined}
-            onStart={startCamera}
+            onStart={frameBlocksCamera ? openInOwnTab : startCamera}
+            ownTab={frameBlocksCamera}
             onPreview={viewIn3D}
           />
         )}
@@ -405,13 +459,34 @@ function TryOn() {
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
             <div className="max-w-sm rounded-2xl border border-white/10 bg-[#0c0a10] p-6 text-center">
               <Camera className="mx-auto mb-3 size-8 text-[var(--gold)]" />
-              <p className="text-sm text-white/90">{status.message}</p>
-              <button
-                onClick={startCamera}
-                className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-5 py-2 text-sm font-medium text-[#16120c]"
-              >
-                <RotateCcw className="size-4" /> Try again
-              </button>
+              <p className="text-sm text-white/90">
+                {frameMayBlockCamera
+                  ? "The camera can't be used inside this window. Open the try-on in its own tab and your browser will ask for it."
+                  : status.message}
+              </p>
+              {frameMayBlockCamera ? (
+                <button
+                  onClick={openInOwnTab}
+                  className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-5 py-2 text-sm font-medium text-[#16120c]"
+                >
+                  <Camera className="size-4" /> Open try-on in a new tab
+                </button>
+              ) : (
+                <button
+                  onClick={startCamera}
+                  className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-5 py-2 text-sm font-medium text-[#16120c]"
+                >
+                  <RotateCcw className="size-4" /> Try again
+                </button>
+              )}
+              {embedded && !frameMayBlockCamera && (
+                <button
+                  onClick={openInOwnTab}
+                  className="mt-3 block w-full text-xs text-white/60 underline-offset-4 hover:text-white hover:underline"
+                >
+                  Open the try-on in a new tab
+                </button>
+              )}
               <button
                 onClick={viewIn3D}
                 className="mt-3 block w-full text-xs text-white/60 underline-offset-4 hover:text-white hover:underline"
@@ -690,12 +765,15 @@ function Intro({
   category,
   pieceName,
   onStart,
+  ownTab,
   onPreview,
 }: {
   category: Category;
   /** Set when the studio's own piece is the one being tried on. */
   pieceName?: string;
   onStart: () => void;
+  /** Embedded where the camera is not allowed: the button opens a new tab. */
+  ownTab?: boolean;
   onPreview: () => void;
 }) {
   const Icon = CATEGORY_ICON[category];
@@ -731,7 +809,7 @@ function Intro({
         onClick={onStart}
         className="mt-6 inline-flex shrink-0 items-center gap-2 rounded-full bg-[var(--gold)] px-7 py-3 text-sm font-medium text-[#16120c] shadow-lg shadow-black/40 hover:brightness-110"
       >
-        <Camera className="size-4" /> Start camera
+        <Camera className="size-4" /> {ownTab ? "Open try-on in a new tab" : "Start camera"}
       </button>
       <button
         onClick={onPreview}
