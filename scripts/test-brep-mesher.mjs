@@ -265,5 +265,87 @@ console.log("\n=== a face that cannot be meshed is reported, not thrown ===");
   );
 }
 
+/*
+ * The last-resort path: a face the trim-aware mesher cannot place is built
+ * from its 3D edges instead (meshFaceFromEdges). Forced here on every face,
+ * as if the whole file had loose tolerances. It must still close up against
+ * its neighbours (shared edge samples), face outward, and keep holes as holes.
+ */
+function edgeSampler(brep) {
+  const edges = brep.edges();
+  const cache = {};
+  return (ei) => {
+    if (cache[ei] !== undefined) return cache[ei];
+    const e = edges.get(ei);
+    const d = e.domain;
+    const out = [];
+    for (let i = 0; i <= 96; i++) out.push(e.pointAt(d[0] + ((d[1] - d[0]) * i) / 96));
+    return (cache[ei] = out);
+  };
+}
+function fromEdges(brep, faces, opts) {
+  const sample = edgeSampler(brep);
+  const pos = [];
+  const nrm = [];
+  const idx = [];
+  let failed = 0;
+  for (const f of faces) {
+    const m = mesher.meshFaceFromEdges(brep, f, sample, opts);
+    if (!m) {
+      failed++;
+      continue;
+    }
+    const base = pos.length / 3;
+    pos.push(...m.position);
+    nrm.push(...m.normal);
+    for (const i of m.index) idx.push(i + base);
+  }
+  return { failed, ...measure({ pos, nrm, idx }) };
+}
+{
+  const opts = { tol: 0.01, okDist: 0.04 };
+  console.log("\n=== edge-built fallback: a box, every face forced through it ===");
+  const box = rh.Brep.createFromBoundingBox(new rh.BoundingBox([-1, -2, -3], [4, 5, 6]));
+  const r = fromEdges(box, [0, 1, 2, 3, 4, 5], opts);
+  const trueArea = 2 * (35 + 45 + 63);
+  check(r.failed === 0, "every face built from its edges", `${6 - r.failed}/6`);
+  check(r.open === 0, "watertight against its neighbours", `${r.open} open edges`);
+  check(r.volume > 0, "wound outward (positive volume)", r.volume.toFixed(3));
+  check(
+    Math.abs(r.area - trueArea) / trueArea < 1e-4,
+    "planar faces come out exact",
+    `${r.area.toFixed(3)} vs ${trueArea}`,
+  );
+  const share = r.agree / (r.agree + r.disagree);
+  check(share > 0.99, "normals agree with the winding", `${(share * 100).toFixed(2)}%`);
+
+  console.log("\n=== edge-built fallback: a cap with a hole keeps its hole ===");
+  const tube = rh.Extrusion.create(rh.NurbsCurve.createFromCircle(new rh.Circle(3)), 5, true);
+  const hole = new rh.Circle(1.5);
+  hole.center = [0, 3, 0];
+  tube.addInnerProfile(rh.NurbsCurve.createFromCircle(hole));
+  const brep = tube.toBrep(true);
+  const caps = [...Array(brep.faces().count).keys()].filter(
+    (f) => brep.faces().get(f).loops.count === 2,
+  );
+  const c = fromEdges(brep, caps, opts);
+  const capArea = 2 * (Math.PI * 9 - Math.PI * 2.25);
+  const err = (Math.abs(c.area - capArea) / capArea) * 100;
+  check(
+    c.failed === 0 && err < 1,
+    "the ring's area, not the full disc's",
+    `${c.area.toFixed(3)} vs ${capArea.toFixed(3)} (${err.toFixed(2)}%)`,
+  );
+
+  console.log("\n=== the retry chain leaves good faces alone ===");
+  // With the fallbacks in place, a face the exact mesher handles must still
+  // come from the exact mesher, not be downgraded to the edge build.
+  const exact = mesher.meshBrepFaces(box, [0, 1, 2, 3, 4, 5]);
+  check(
+    exact.every((m) => m && !m.fromEdges),
+    "every face of a clean box is meshed exactly, not by the fallback",
+  );
+}
+
 console.log(fail === 0 ? "\n  All checks passed" : `\n  ${fail} FAILED`);
 process.exit(fail ? 1 : 0);

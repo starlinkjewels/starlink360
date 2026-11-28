@@ -341,18 +341,32 @@ function InteractionQuality({ onDragging }: { onDragging: (dragging: boolean) =>
     const onStart = () => {
       clearTimeout(restore);
       onDragging(true);
+      // A fallback in case "end" never comes, see onMove.
+      restore = setTimeout(() => onDragging(false), 1500);
     };
     const onEnd = () => {
       clearTimeout(restore);
       restore = setTimeout(() => onDragging(false), 250);
     };
+    /*
+     * Sharp again once the view stops moving, even if "end" never arrives.
+     * Inside an app's embedded web view a touch can be cancelled (the host
+     * scrolls, a system gesture takes over) without the pointer-up that ends
+     * a drag, and the view used to stay at its low drag resolution for good.
+     */
+    const onMove = () => {
+      clearTimeout(restore);
+      restore = setTimeout(() => onDragging(false), 400);
+    };
 
     controls.addEventListener("start", onStart);
     controls.addEventListener("end", onEnd);
+    controls.addEventListener("change", onMove);
     return () => {
       clearTimeout(restore);
       controls.removeEventListener("start", onStart);
       controls.removeEventListener("end", onEnd);
+      controls.removeEventListener("change", onMove);
       onDragging(false);
     };
   }, [controls, onDragging]);
@@ -1302,16 +1316,30 @@ export default function Viewer({
   );
 
   /*
-   * Up to 2x, the same as the try-on. The cap used to be 1.5x, chosen when
-   * the viewer redrew continuously and every extra pixel was paid 60+ times a
-   * second. On a phone (3x) or a Retina laptop (2x) that stretched a half- or
-   * three-quarter-resolution image to fill the screen, and clients saw a soft,
-   * blurry piece: thin prongs and facet edges are exactly what blur first.
-   * The viewer now draws only when something changes (RenderOnChange), so a
-   * sharp still costs one frame, and a drag still drops to 1x below. Safe
-   * mode (after a lost context) stays at 1x.
+   * The screen's own pixel density, up to 3x, within a pixel budget.
+   *
+   * The cap used to be 1.5x, chosen when the viewer redrew continuously and
+   * every extra pixel was paid 60+ times a second. On an iPhone (3x) that is
+   * half resolution stretched to fill the screen, and clients saw a soft,
+   * blurry piece: thin prongs and facet edges are what blur first. The viewer
+   * now draws only when something changes (RenderOnChange), so a sharp still
+   * costs one frame, and a drag still drops to 1x below.
+   *
+   * A phone is small enough to take its full 3x (a 390x844 screen is about
+   * 3 million pixels at 3x). A large desktop window is held to the same
+   * budget, about 6 million pixels, so a 4K monitor does not ask the diamond
+   * shader for 33 million.
+   *
+   * Safe mode, after a real loss of the GPU context, lowers it to 1.5x rather
+   * than 1x: 1x on a 3x phone is a third of the detail, which reads as broken.
    */
-  const maxDpr = safeMode ? 1 : 2;
+  const restDpr = useMemo(() => {
+    if (typeof window === "undefined") return 2;
+    const area = Math.max(1, window.innerWidth * window.innerHeight);
+    const budget = Math.sqrt(6e6 / area);
+    return Math.max(1, Math.min(window.devicePixelRatio || 1, 3, budget));
+  }, []);
+  const maxDpr = safeMode ? Math.min(restDpr, 1.5) : restDpr;
   /*
    * Lower resolution while the piece is being dragged (see InteractionQuality):
    * half the full ratio, never below 1, since under 1x reads as a soft,

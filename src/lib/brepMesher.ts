@@ -1089,6 +1089,123 @@ function createBrepMesher(rhino, earcut) {
   }
 
   /**
+   * The last resort for a face the trim-aware mesher cannot place: triangles
+   * straight from its 3D edges.
+   *
+   * The usual cause is a file whose edges sit further from their surfaces
+   * than the inversion allows (loose modelling tolerance, an imported or
+   * repaired Brep), so the outline cannot be put into (u, v). The edges
+   * themselves are still good, and they are exactly what the neighbouring
+   * faces were meshed against (edgeCache), so a patch built from them closes
+   * the gap with no crack. Each loop is laid flat on its best-fit plane and
+   * filled with earcut, holes included; every vertex takes the true surface
+   * normal where the point can be found on the surface, so it shades like its
+   * neighbours. A strongly curved face comes out flatter than the real one,
+   * which is still far better than a hole in the piece.
+   */
+  function meshFaceFromEdges(brep, faceIndex, edgeCache, opts) {
+    var face = brep.faces().get(faceIndex);
+    var view = new View(face);
+    var loops = face.loops;
+    var rings = [], outer = -1;
+    for (var l = 0; l < loops.count; l++) {
+      var L = loops.get(l);
+      var kind = loopKind(L);
+      if (kind === "other") continue;
+      var pts = [], ok = true;
+      for (var t = 0; t < L.trimCount; t++) {
+        var T = L.trims.get(t);
+        if (T.edgeIndex < 0) continue; // a pole: one point, already on its neighbours
+        var e = edgeCache(T.edgeIndex);
+        if (!e) { ok = false; break; }
+        if (T.isReversed) e = e.slice().reverse();
+        for (var k = 0; k < e.length; k++) {
+          var last = pts[pts.length - 1];
+          if (last && dist(last, e[k]) <= opts.tol * 1e-3) continue;
+          pts.push(e[k]);
+        }
+      }
+      if (ok && pts.length > 2 && dist(pts[0], pts[pts.length - 1]) <= opts.tol * 1e-3) pts.pop();
+      if (!ok || pts.length < 3) {
+        if (kind === "outer") return null;
+        continue;
+      }
+      if (kind === "outer" && outer < 0) outer = rings.length;
+      rings.push(pts);
+    }
+    if (!rings.length) return null;
+    if (outer < 0) outer = 0;
+    if (outer !== 0) { var sw = rings[0]; rings[0] = rings[outer]; rings[outer] = sw; }
+
+    // The outer loop's plane (Newell's method copes with non-planar loops).
+    var O = rings[0], nP = [0, 0, 0], c = [0, 0, 0];
+    for (var i = 0, j = O.length - 1; i < O.length; j = i++) {
+      nP[0] += (O[j][1] - O[i][1]) * (O[j][2] + O[i][2]);
+      nP[1] += (O[j][2] - O[i][2]) * (O[j][0] + O[i][0]);
+      nP[2] += (O[j][0] - O[i][0]) * (O[j][1] + O[i][1]);
+      c[0] += O[i][0]; c[1] += O[i][1]; c[2] += O[i][2];
+    }
+    var ln = len(nP);
+    if (!(ln > 1e-18)) return null;
+    nP = [nP[0] / ln, nP[1] / ln, nP[2] / ln];
+
+    // Face the plane the way the surface faces, where the surface says.
+    var uc = (view.u0 + view.u1) / 2, vc = (view.v0 + view.v1) / 2;
+    var nS = view.normal(uc, vc);
+    var X = [], N = [];
+    var sum = [0, 0, 0];
+    for (var r = 0; r < rings.length; r++) {
+      for (var q = 0; q < rings[r].length; q++) {
+        var P = rings[r][q];
+        var nv = null;
+        var hit = view.invertGlobal(P);
+        if (hit && hit.d <= opts.okDist * 5) nv = view.normal(hit.u, hit.v);
+        X.push(P); N.push(nv);
+        if (nv) { sum[0] += nv[0]; sum[1] += nv[1]; sum[2] += nv[2]; }
+      }
+    }
+    var ref = len(sum) > 1e-9 ? sum : nS;
+    if (ref && dot(ref, nP) < 0) nP = [-nP[0], -nP[1], -nP[2]];
+
+    var a = Math.abs(nP[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    var e1 = cross(nP, a); var l1 = len(e1); e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
+    var e2 = cross(nP, e1);
+    var coords = [], holes = [];
+    for (var r2 = 0, base = 0; r2 < rings.length; r2++) {
+      if (r2 > 0) holes.push(base);
+      for (var q2 = 0; q2 < rings[r2].length; q2++) {
+        var d = sub(rings[r2][q2], O[0]);
+        coords.push(dot(d, e1), dot(d, e2));
+      }
+      base += rings[r2].length;
+    }
+    var flat = earcut(coords, holes.length ? holes : null, 2);
+    if (!flat || !flat.length) return null;
+
+    var nvtx = X.length;
+    var pos = new Float32Array(nvtx * 3), nrm = new Float32Array(nvtx * 3);
+    for (var v = 0; v < nvtx; v++) {
+      var nn = N[v] || nP;
+      pos[v * 3] = X[v][0]; pos[v * 3 + 1] = X[v][1]; pos[v * 3 + 2] = X[v][2];
+      nrm[v * 3] = nn[0]; nrm[v * 3 + 1] = nn[1]; nrm[v * 3 + 2] = nn[2];
+    }
+    var idx = new Uint32Array(flat.length), w = 0;
+    for (var f = 0; f < flat.length; f += 3) {
+      var A = X[flat[f]], B = X[flat[f + 1]], C = X[flat[f + 2]];
+      var tn = cross(sub(B, A), sub(C, A));
+      if (!(len(tn) > 0)) continue;
+      // Wound to face the same way as the surface.
+      var flip = dot(tn, nP) < 0;
+      idx[w] = flat[f];
+      idx[w + 1] = flip ? flat[f + 2] : flat[f + 1];
+      idx[w + 2] = flip ? flat[f + 1] : flat[f + 2];
+      w += 3;
+    }
+    if (!w) return null;
+    return { position: pos, normal: nrm, index: idx.subarray(0, w), fromEdges: true };
+  }
+
+  /**
    * Meshes the given faces of one Brep. Faces that cannot be meshed come back
    * as null in their slot, so the caller can still count them.
    *
@@ -1129,15 +1246,28 @@ function createBrepMesher(rhino, earcut) {
       return (cache[ei] = pts);
     }
 
+    /*
+     * A face that cannot be placed at the usual tolerance is tried again with
+     * the edge-to-surface allowance loosened fivefold (CAD files with loose
+     * modelling tolerance), and then built from its edges alone. Rhino would
+     * mesh every face of a file that opens; so should this. Only a face with
+     * no usable edges at all is left out.
+     */
+    var loose = {};
+    for (var key in opts) loose[key] = opts[key];
+    loose.okDist = opts.okDist * 5;
+
     var out = [];
     for (var i = 0; i < faceIndices.length; i++) {
       var m = null;
       try { m = meshFace(brep, faceIndices[i], edgeCache, opts); } catch (err) { m = null; }
+      if (!m) { try { m = meshFace(brep, faceIndices[i], edgeCache, loose); } catch (err) { m = null; } }
+      if (!m) { try { m = meshFaceFromEdges(brep, faceIndices[i], edgeCache, opts); } catch (err) { m = null; } }
       out.push(m);
     }
     return out;
   }
 
-  return { meshBrepFaces: meshBrepFaces };
+  return { meshBrepFaces: meshBrepFaces, meshFaceFromEdges: meshFaceFromEdges };
 }
 `;

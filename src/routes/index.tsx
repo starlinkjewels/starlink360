@@ -1037,6 +1037,9 @@ function Index() {
   // Hidden everywhere by default — on the plain route and behind a ?file= link
   // alike. Only a passphrase the server accepts brings it back.
   const { canUpload } = Route.useLoaderData();
+  // Read by the link loader without re-downloading the piece when it changes.
+  const canUploadRef = useRef(canUpload);
+  canUploadRef.current = canUpload;
 
   /*
    * Try On wears the piece on this stage, not a catalogue piece. Kept current
@@ -1108,10 +1111,16 @@ function Index() {
           object,
         });
 
-        // Parts Rhino saved without a render mesh cannot be drawn — say so
-        // rather than let the piece show up missing its band unexplained.
+        /*
+         * Notes about the file (a part that could not be meshed, and what to
+         * do about it in Rhino) are for whoever manages the files, not for a
+         * client looking at a piece through a shared link. Shown only with an
+         * upload key; a client sees the piece and nothing else.
+         */
         const notices = (object.userData as { notices?: string[] }).notices;
-        if (notices?.length) setUploadMsg({ kind: "notice", text: notices.join(" ") });
+        if (notices?.length && canUploadRef.current) {
+          setUploadMsg({ kind: "notice", text: notices.join(" ") });
+        }
       } catch (e) {
         if (!live || (e instanceof DOMException && e.name === "AbortError")) return;
         const { RemoteLoadError } = await import("@/lib/loadRemoteJewelry");
