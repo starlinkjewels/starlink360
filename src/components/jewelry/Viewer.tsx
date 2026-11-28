@@ -1,4 +1,14 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  Fragment,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ErrorInfo, ReactNode } from "react";
 import * as THREE from "three";
 import { Canvas, useThree, useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
@@ -419,6 +429,45 @@ function RenderOnChange() {
   });
 
   return null;
+}
+
+/**
+ * Rebuilds the 3D view if it crashes, at full quality.
+ *
+ * An error inside the R3F tree tears the whole Canvas down and leaves a dead
+ * canvas on the page. Nothing used to bring it back except, by accident, the
+ * safe-mode rebuild that a torn-down context set off, which is why a crash
+ * showed up as a permanently 1x, blurry view rather than as an error. Now a
+ * crash remounts the Canvas directly, at the same quality, up to three times;
+ * only a genuine loss of the GPU context (ContextLossWatch) lowers quality.
+ */
+class CanvasBoundary extends Component<
+  { children: ReactNode },
+  { tries: number; failed: boolean }
+> {
+  state = { tries: 0, failed: false };
+
+  static getDerivedStateFromError() {
+    return null;
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.warn("[viewer] the 3D view crashed; rebuilding it", error, info.componentStack);
+    this.setState(({ tries }) =>
+      tries < 3 ? { tries: tries + 1, failed: false } : { tries, failed: true },
+    );
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm opacity-70">
+          The 3D view could not start on this device. Reload the page to try again.
+        </div>
+      );
+    }
+    return <Fragment key={this.state.tries}>{this.props.children}</Fragment>;
+  }
 }
 
 /**
@@ -1189,14 +1238,52 @@ export default function Viewer({
    */
   const [glGeneration, setGlGeneration] = useState(0);
   const safeMode = glGeneration > 0;
+  /*
+   * What to do when the canvas loses its WebGL context.
+   *
+   * Two very different things fire the same event. A real GPU crash (the
+   * driver resets, memory runs out) needs the lighter safe mode. A deliberate
+   * release (R3F calls gl.forceContextLoss() whenever it tears its root down,
+   * including when an error or React's development double-mount does so with
+   * the Canvas still on the page) just needs the view rebuilt as it was.
+   *
+   * The first version could not tell them apart: every release counted as a
+   * crash, the rebuild's own release counted again, and the viewer ended up
+   * locked at 1x, the soft and blurry view clients reported on phones. Now
+   * forceContextLoss is wrapped to mark a release, a canvas that has already
+   * left the page (an old one after a rebuild) is ignored, and only an
+   * unmarked loss lowers quality.
+   */
+  const [canvasKey, setCanvasKey] = useState(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const handleCreated = useCallback(({ gl }: { gl: THREE.WebGLRenderer }) => {
-    const el = gl.domElement;
+    const canvas = gl.domElement;
+    let released = false;
+    const release = gl.forceContextLoss.bind(gl);
+    gl.forceContextLoss = () => {
+      released = true;
+      release();
+    };
     const onLost = (e: Event) => {
       e.preventDefault();
-      console.warn("[viewer] WebGL context lost; rebuilding the 3D view in safe mode");
-      setTimeout(() => setGlGeneration((g) => (g < MAX_GL_REBUILDS ? g + 1 : g)), 500);
+      setTimeout(() => {
+        if (!mounted.current || !canvas.isConnected) return;
+        if (released) {
+          console.warn("[viewer] the 3D view was torn down; rebuilding it");
+          setCanvasKey((k) => (k < MAX_GL_REBUILDS ? k + 1 : k));
+        } else {
+          console.warn("[viewer] WebGL context lost; rebuilding the 3D view in safe mode");
+          setGlGeneration((g) => (g < MAX_GL_REBUILDS ? g + 1 : g));
+        }
+      }, 500);
     };
-    el.addEventListener("webglcontextlost", onLost, { once: true });
+    canvas.addEventListener("webglcontextlost", onLost, { once: true });
   }, []);
 
   const glConfig = useMemo(
@@ -1215,12 +1302,16 @@ export default function Viewer({
   );
 
   /*
-   * Up to 1.5x, not 2x: 2x is 78% more pixels than 1.5x for a difference that
-   * is hard to see on a jewellery render, and on an integrated GPU those pixels
-   * are the margin between running and losing the context. Safe mode (after a
-   * loss) drops to 1x.
+   * Up to 2x, the same as the try-on. The cap used to be 1.5x, chosen when
+   * the viewer redrew continuously and every extra pixel was paid 60+ times a
+   * second. On a phone (3x) or a Retina laptop (2x) that stretched a half- or
+   * three-quarter-resolution image to fill the screen, and clients saw a soft,
+   * blurry piece: thin prongs and facet edges are exactly what blur first.
+   * The viewer now draws only when something changes (RenderOnChange), so a
+   * sharp still costs one frame, and a drag still drops to 1x below. Safe
+   * mode (after a lost context) stays at 1x.
    */
-  const maxDpr = safeMode ? 1 : 1.5;
+  const maxDpr = safeMode ? 1 : 2;
   /*
    * Lower resolution while the piece is being dragged (see InteractionQuality):
    * half the full ratio, never below 1, since under 1x reads as a soft,
@@ -1243,176 +1334,179 @@ export default function Viewer({
 
   return (
     <div className="absolute inset-0" onPointerDownCapture={onPointerDownCapture}>
-      <Canvas
-        key={glGeneration}
-        dpr={dpr}
-        frameloop={continuous ? "always" : "demand"}
-        onCreated={handleCreated}
-        gl={glConfig}
-        style={{ background: "transparent" }}
-        shadows={{ type: THREE.PCFShadowMap }}
-        onPointerMissed={handleBackgroundMiss}
-      >
-        {/*
+      <CanvasBoundary>
+        <Canvas
+          key={`${glGeneration}-${canvasKey}`}
+          onCreated={handleCreated}
+          dpr={dpr}
+          frameloop={continuous ? "always" : "demand"}
+          gl={glConfig}
+          style={{ background: "transparent" }}
+          shadows={{ type: THREE.PCFShadowMap }}
+          onPointerMissed={handleBackgroundMiss}
+        >
+          {/*
           Two real cameras, not one faked with a long lens. Swapping the default
           re-points OrbitControls at the new one; `key` forces a fresh instance
           so drei cannot keep the old projection alive.
         */}
-        {cameraSettings.projection === "orthographic" ? (
-          <OrthographicCamera key="ortho" makeDefault position={[0, 0, 5]} />
-        ) : (
-          <PerspectiveCamera
-            key="persp"
-            makeDefault
-            fov={cameraSettings.fov}
-            position={[0, 0, 5]}
-          />
-        )}
+          {cameraSettings.projection === "orthographic" ? (
+            <OrthographicCamera key="ortho" makeDefault position={[0, 0, 5]} />
+          ) : (
+            <PerspectiveCamera
+              key="persp"
+              makeDefault
+              fov={cameraSettings.fov}
+              position={[0, 0, 5]}
+            />
+          )}
 
-        {/*
+          {/*
           The rig, from the light list.
 
           These were five hardcoded elements, so the rig was whatever had been
           typed and nothing could be added, moved or switched off. The list is
           seeded with exactly those five, so the default render is unchanged.
         */}
-        <LightRig lights={lights} fit={fit} shadows={shadows} debug={debugLights} />
+          <LightRig lights={lights} fit={fit} shadows={shadows} debug={debugLights} />
 
-        {/*
+          {/*
           `gl` only takes an initial exposure at construction — it is not a
           prop that stays wired up, so the slider in Environment moved state
           and nothing else. This is the only thing that ever writes it after.
         */}
-        <ExposureSync exposure={lighting.exposure} />
+          <ExposureSync exposure={lighting.exposure} />
 
-        {/*
+          {/*
           What the metal reflects. The stones do NOT use this unless the gem
           environment is left shared — their shader samples its own map.
         */}
-        <Environment
-          /*
-           * A real HDRI `file` (see `EnvironmentOption.file`) takes priority
-           * over a drei `preset` name — see the matching logic in Model.tsx
-           * for why the gem side needs the same rule.
-           */
-          {...(environmentById(lighting.environment).file
-            ? { files: environmentById(lighting.environment).file }
-            : {
-                preset: (environmentById(lighting.environment).preset ??
-                  "warehouse") as "warehouse",
-              })}
-          /*
-           * Rotating the environment moves every reflection, which on a metal
-           * band is where the highlight sits — most of whether a render reads
-           * as composed. Only Y: tipping an environment sideways puts the
-           * horizon on a diagonal and nothing looks photographed.
-           */
-          environmentRotation={[0, lighting.environmentRotation, 0]}
-          environmentIntensity={lighting.environmentIntensity}
-        />
+          <Environment
+            /*
+             * A real HDRI `file` (see `EnvironmentOption.file`) takes priority
+             * over a drei `preset` name — see the matching logic in Model.tsx
+             * for why the gem side needs the same rule.
+             */
+            {...(environmentById(lighting.environment).file
+              ? { files: environmentById(lighting.environment).file }
+              : {
+                  preset: (environmentById(lighting.environment).preset ??
+                    "warehouse") as "warehouse",
+                })}
+            /*
+             * Rotating the environment moves every reflection, which on a metal
+             * band is where the highlight sits — most of whether a render reads
+             * as composed. Only Y: tipping an environment sideways puts the
+             * horizon on a diagonal and nothing looks photographed.
+             */
+            environmentRotation={[0, lighting.environmentRotation, 0]}
+            environmentIntensity={lighting.environmentIntensity}
+          />
 
-        {dimensions.showOnCanvas && fit && (
-          <DimensionOverlay fit={fit} scale={dimensionScale} summary={dimensionSummary} />
-        )}
+          {dimensions.showOnCanvas && fit && (
+            <DimensionOverlay fit={fit} scale={dimensionScale} summary={dimensionSummary} />
+          )}
 
-        <Suspense fallback={null}>
-          {/* Tap anywhere on the piece to orbit and zoom around that spot. */}
-          {/*
+          <Suspense fallback={null}>
+            {/* Tap anywhere on the piece to orbit and zoom around that spot. */}
+            {/*
             The group an object move drives.
 
             A ref rather than state: it is written every frame, and putting it
             through React would re-render the whole viewport sixty times a
             second to move one transform.
           */}
-          <group
-            ref={pieceRef}
-            onClick={handleModelTap}
-            onPointerMove={handleHover}
-            onPointerOut={clearHover}
-          >
-            {source === "glb" && (
-              <GLBModel
-                key={product.id}
-                url={product.glbUrl}
-                finish={finish}
-                onFit={handleFit}
-                camera={cameraSettings}
-                lighting={lighting}
-                stoneColors={stoneColors}
-                metalOverrides={metalOverrides}
-                gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
-                onStones={onStones}
-                onParts={handleParts}
-                stamps={stamps}
-                stampFont={stampFont}
-                selectedStampId={selectedStampId}
-              />
-            )}
-            {source === "fallback" && (
-              <FallbackModel
-                finish={finish}
-                onFit={handleFit}
-                camera={cameraSettings}
-                lighting={lighting}
-                stoneColors={stoneColors}
-                metalOverrides={metalOverrides}
-                gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
-                onStones={onStones}
-                onParts={handleParts}
-                stamps={stamps}
-                stampFont={stampFont}
-                selectedStampId={selectedStampId}
-              />
-            )}
-            {source === "object" && pieceObject && (
-              <ObjectModel
-                key={product.id}
-                object={pieceObject}
-                finish={finish}
-                onFit={handleFit}
-                camera={cameraSettings}
-                lighting={lighting}
-                stoneColors={stoneColors}
-                metalOverrides={metalOverrides}
-                gemOverrides={gemOverrides}
-                prongHeights={prongHeights}
-                onStones={onStones}
-                onParts={handleParts}
-                stamps={stamps}
-                stampFont={stampFont}
-                selectedStampId={selectedStampId}
-              />
-            )}
-          </group>
-        </Suspense>
+            <group
+              ref={pieceRef}
+              onClick={handleModelTap}
+              onPointerMove={handleHover}
+              onPointerOut={clearHover}
+            >
+              {source === "glb" && (
+                <GLBModel
+                  key={product.id}
+                  url={product.glbUrl}
+                  finish={finish}
+                  onFit={handleFit}
+                  camera={cameraSettings}
+                  lighting={lighting}
+                  stoneColors={stoneColors}
+                  metalOverrides={metalOverrides}
+                  gemOverrides={gemOverrides}
+                  prongHeights={prongHeights}
+                  onStones={onStones}
+                  onParts={handleParts}
+                  stamps={stamps}
+                  stampFont={stampFont}
+                  selectedStampId={selectedStampId}
+                />
+              )}
+              {source === "fallback" && (
+                <FallbackModel
+                  finish={finish}
+                  onFit={handleFit}
+                  camera={cameraSettings}
+                  lighting={lighting}
+                  stoneColors={stoneColors}
+                  metalOverrides={metalOverrides}
+                  gemOverrides={gemOverrides}
+                  prongHeights={prongHeights}
+                  onStones={onStones}
+                  onParts={handleParts}
+                  stamps={stamps}
+                  stampFont={stampFont}
+                  selectedStampId={selectedStampId}
+                />
+              )}
+              {source === "object" && pieceObject && (
+                <ObjectModel
+                  key={product.id}
+                  object={pieceObject}
+                  finish={finish}
+                  onFit={handleFit}
+                  camera={cameraSettings}
+                  lighting={lighting}
+                  stoneColors={stoneColors}
+                  metalOverrides={metalOverrides}
+                  gemOverrides={gemOverrides}
+                  prongHeights={prongHeights}
+                  onStones={onStones}
+                  onParts={handleParts}
+                  stamps={stamps}
+                  stampFont={stampFont}
+                  selectedStampId={selectedStampId}
+                />
+              )}
+            </group>
+          </Suspense>
 
-        {/*
+          {/*
           Scaled to the piece, which is normalised to a unit sphere on load — a
           fixed-size grid is either invisible around a ring or swallows a
           necklace. `fadeDistance` keeps it from drawing to the horizon.
         */}
-        {fit && showGrid && (
-          <Grid
-            position={[0, groundY(fit.halfHeight, fit.radius).shadow, 0]}
-            args={[fit.radiusXZ * 20, fit.radiusXZ * 20]}
-            cellSize={fit.radiusXZ * 0.5}
-            sectionSize={fit.radiusXZ * 2.5}
-            cellThickness={0.6}
-            sectionThickness={1}
-            fadeDistance={fit.radius * 28}
-            fadeStrength={1.5}
-            infiniteGrid={false}
-            followCamera={false}
-          />
-        )}
+          {fit && showGrid && (
+            <Grid
+              position={[0, groundY(fit.halfHeight, fit.radius).shadow, 0]}
+              args={[fit.radiusXZ * 20, fit.radiusXZ * 20]}
+              cellSize={fit.radiusXZ * 0.5}
+              sectionSize={fit.radiusXZ * 2.5}
+              cellThickness={0.6}
+              sectionThickness={1}
+              fadeDistance={fit.radius * 28}
+              fadeStrength={1.5}
+              infiniteGrid={false}
+              followCamera={false}
+            />
+          )}
 
-        {selected && <SelectionHighlight parts={partList} selected={selected} hovered={hovered} />}
+          {selected && (
+            <SelectionHighlight parts={partList} selected={selected} hovered={hovered} />
+          )}
 
-        {fit && ground.enabled && <Ground fit={fit} settings={ground} />}
+          {fit && ground.enabled && <Ground fit={fit} settings={ground} />}
 
-        {/*
+          {/*
           Two shadow mechanisms, and they are genuinely different things.
 
           Contact is a blurred render of the silhouette from below: cheap,
@@ -1424,66 +1518,66 @@ export default function Viewer({
           Directional is a real shadow camera, driven by whichever light is the
           caster. It throws the actual outline of a shank across the ground.
         */}
-        {fit && shadows.enabled && shadows.mode === "contact" && (
-          // Sit the shadow just under the piece rather than under its
-          // bounding sphere, so a wide, flat necklace isn't floating.
-          <ContactShadows
-            position={[0, groundY(fit.halfHeight, fit.radius).shadow, 0]}
-            opacity={shadows.opacity}
-            scale={fit.radiusXZ * shadows.spread}
-            blur={shadows.blur}
-            far={fit.radius * 4}
-          />
-        )}
+          {fit && shadows.enabled && shadows.mode === "contact" && (
+            // Sit the shadow just under the piece rather than under its
+            // bounding sphere, so a wide, flat necklace isn't floating.
+            <ContactShadows
+              position={[0, groundY(fit.halfHeight, fit.radius).shadow, 0]}
+              opacity={shadows.opacity}
+              scale={fit.radiusXZ * shadows.spread}
+              blur={shadows.blur}
+              far={fit.radius * 4}
+            />
+          )}
 
-        {/*
+          {/*
           A real cast shadow needs something to land on. The ground plane is
           optional, so this is a receiver that only exists in directional mode —
           without it the shadow falls into empty space and nothing shows, which
           reads as the mode being broken.
         */}
-        {fit && shadows.enabled && shadows.mode === "directional" && !ground.enabled && (
-          <mesh
-            position={[0, groundY(fit.halfHeight, fit.radius).ground, 0]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            receiveShadow
-          >
-            <planeGeometry args={[fit.radiusXZ * 30, fit.radiusXZ * 30]} />
-            <shadowMaterial opacity={shadows.opacity} />
-          </mesh>
-        )}
+          {fit && shadows.enabled && shadows.mode === "directional" && !ground.enabled && (
+            <mesh
+              position={[0, groundY(fit.halfHeight, fit.radius).ground, 0]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              receiveShadow
+            >
+              <planeGeometry args={[fit.radiusXZ * 30, fit.radiusXZ * 30]} />
+              <shadowMaterial opacity={shadows.opacity} />
+            </mesh>
+          )}
 
-        <AnimationRig
-          preset={animation}
-          objectMove={objectMove}
-          object={pieceRef.current}
-          playing={animationPlaying}
-          seconds={animationSeconds}
-          fit={fit}
-          settings={cameraSettings}
-          onProgress={onAnimationProgress}
-        />
+          <AnimationRig
+            preset={animation}
+            objectMove={objectMove}
+            object={pieceRef.current}
+            playing={animationPlaying}
+            seconds={animationSeconds}
+            fit={fit}
+            settings={cameraSettings}
+            onProgress={onAnimationProgress}
+          />
 
-        <Framing
-          fit={fit}
-          settings={cameraSettings}
-          onMoved={onCameraMoved}
-          resetSignal={resetSignal}
-          controlsRef={controlsRef}
-        />
-        {/* `piece` lets an export play an object move and put the piece back
+          <Framing
+            fit={fit}
+            settings={cameraSettings}
+            onMoved={onCameraMoved}
+            resetSignal={resetSignal}
+            controlsRef={controlsRef}
+          />
+          {/* `piece` lets an export play an object move and put the piece back
             afterwards, rather than leaving it wherever the last frame was. */}
-        <StudioRig
-          fit={fit}
-          camera={cameraSettings}
-          apiRef={studio}
-          controlsRef={controlsRef}
-          piece={pieceRef}
-        />
-        <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
-        <InteractionQuality onDragging={setDragging} />
-        <RenderOnChange />
-        {/*
+          <StudioRig
+            fit={fit}
+            camera={cameraSettings}
+            apiRef={studio}
+            controlsRef={controlsRef}
+            piece={pieceRef}
+          />
+          <FocusRig focus={focus} controlsRef={controlsRef} onArrived={clearFocus} />
+          <InteractionQuality onDragging={setDragging} />
+          <RenderOnChange />
+          {/*
           Bloom was written, tuned and given a panel, and then never mounted.
           Nothing drew through the composer, so every control in Post moved a
           number that reached no pixel — which is why the highlights on a stone
@@ -1491,20 +1585,20 @@ export default function Viewer({
           the sensor around each flash, and that halo is most of what makes a
           photograph of one look like a photograph.
         */}
-        {post && <BloomRig settings={post} onRenderer={setSceneRenderer} />}
-        <PickAcceleration />
-        {/*
+          {post && <BloomRig settings={post} onRenderer={setSceneRenderer} />}
+          <PickAcceleration />
+          {/*
           Bottom-left orientation ball, and a way to snap to an axis.
 
           Its margin is larger on a phone: at 64px the ball sat underneath the
           toolbar, which shares that corner once the panel is a sheet rather
           than a column beside the viewport.
         */}
-        <GizmoHelper alignment="bottom-left" margin={compact ? [52, 108] : [64, 64]}>
-          <GizmoViewport axisColors={["#d15b5b", "#7bbd6a", "#5b83d1"]} labelColor="#ffffff" />
-        </GizmoHelper>
+          <GizmoHelper alignment="bottom-left" margin={compact ? [52, 108] : [64, 64]}>
+            <GizmoViewport axisColors={["#d15b5b", "#7bbd6a", "#5b83d1"]} labelColor="#ffffff" />
+          </GizmoHelper>
 
-        {/*
+          {/*
           No `autoRotate`.
           
           The viewer used to open spinning, with no way to stop it once the
@@ -1514,16 +1608,17 @@ export default function Viewer({
           Turntable move in Animation, which drives the camera along the same
           path the video export renders.
         */}
-        <OrbitControls
-          ref={controlsRef}
-          enabled={!locked}
-          enableDamping
-          dampingFactor={0.06}
-          enablePan
-          zoomToCursor
-          makeDefault
-        />
-      </Canvas>
+          <OrbitControls
+            ref={controlsRef}
+            enabled={!locked}
+            enableDamping
+            dampingFactor={0.06}
+            enablePan
+            zoomToCursor
+            makeDefault
+          />
+        </Canvas>
+      </CanvasBoundary>
 
       {!fit && !hideLoader && <LoadingOverlay />}
     </div>
