@@ -50,15 +50,15 @@ console.log("=== the default rig is the render that was signed off ===");
 
   const key = by("key");
   check(
-    key.type === "spot" && key.intensity === 5.5 && key.color === "#fff6ee",
-    "the key is a 5.5 spot at #fff6ee",
+    key.type === "spot" && key.intensity === 5.5 && key.color === "#ffffff",
+    "the key is a 5.5 spot, white (display.ts: coloured lights tint the metal)",
   );
   check(
     JSON.stringify(key.position) === "[2.8,6,3.5]" && key.angle === 0.38 && key.penumbra === 0.55,
     "at [2.8, 6, 3.5], cone 0.38, penumbra 0.55",
   );
-  check(by("fill").intensity === 1.4 && by("fill").color === "#b8ccff", "the fill is 1.4, cool");
-  check(by("rim").intensity === 1.1 && by("rim").color === "#ffd8a0", "the rim is 1.1, warm");
+  check(by("fill").intensity === 1.4 && by("fill").color === "#ffffff", "the fill is 1.4, white");
+  check(by("rim").intensity === 1.1 && by("rim").color === "#ffffff", "the rim is 1.1, white");
   check(by("ambient").intensity === 0.12, "ambient is 0.12");
   check(
     by("sparkle").intensity === 1.6 && by("sparkle").distance === 10,

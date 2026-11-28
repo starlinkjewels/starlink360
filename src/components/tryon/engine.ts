@@ -41,7 +41,8 @@ import {
 import { buildStudioPieces, type PreparedStudioPiece } from "./studioFit";
 import { categoryById, type Category, type TrackerKind } from "./catalog";
 import { loadTracker, type Tracker } from "./landmarkers";
-import { environmentById } from "@/components/jewelry/lighting";
+import { DEFAULT_LIGHTING, environmentById } from "@/components/jewelry/lighting";
+import { LIGHT_WHITE, TONE_MAPPING } from "@/components/jewelry/display";
 import { loadGemPhoto } from "@/components/jewelry/gemStudio";
 import { backdropById, backdropCss } from "./backdrops";
 
@@ -222,7 +223,7 @@ export class TryOnEngine {
   private status: TryOnStatus = { phase: "idle" };
   private hint: string | undefined;
   private frameCount = 0;
-  private exposure = 1;
+  private exposure = DEFAULT_LIGHTING.exposure;
   private probe: CanvasRenderingContext2D | null = null;
   private resizeObserver: ResizeObserver;
   /** Turntable mode: no camera, the piece spins in the middle of the stage. */
@@ -254,13 +255,13 @@ export class TryOnEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
     /*
-     * ACES Filmic at exposure 1, as the leading commercial real-time jewellery
-     * viewers run it. Its contrast curve deepens the dark facets and rolls the
-     * brightest flashes off smoothly, which is most of the crisp, punchy look
-     * of a photographed stone. Neutral was tried: truer colour, flatter stones.
+     * The studio's display path exactly (jewelry/display.ts): the same tone
+     * mapping and the same exposure, so a piece looks the same here as on
+     * the studio's stage. Stone contrast comes from the gem tuning instead of
+     * the tone curve.
      */
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1;
+    this.renderer.toneMapping = TONE_MAPPING;
+    this.renderer.toneMappingExposure = DEFAULT_LIGHTING.exposure;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     /*
@@ -283,7 +284,8 @@ export class TryOnEngine {
 
     const key = new THREE.DirectionalLight(0xffffff, 1.4);
     key.position.set(0.4, 1, 1);
-    const fill = new THREE.DirectionalLight(0xfff3e0, 0.5);
+    // White, as the studio's lights are (display.ts).
+    const fill = new THREE.DirectionalLight(LIGHT_WHITE, 0.5);
     fill.position.set(-1, 0.3, 0.6);
     this.scene.add(key, fill);
 
@@ -980,7 +982,8 @@ export class TryOnEngine {
     for (let i = 0; i < d.length; i += 4)
       sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
     const lum = sum / (d.length / 4) / 255;
-    const target = Math.min(1.25, Math.max(0.72, 0.7 + lum * 0.85));
+    // Centred on the studio's exposure, so a mid-grey room matches the studio.
+    const target = DEFAULT_LIGHTING.exposure * Math.min(1.25, Math.max(0.72, 0.7 + lum * 0.85));
     this.exposure += (target - this.exposure) * 0.25;
     this.renderer.toneMappingExposure = this.exposure;
   }

@@ -33,21 +33,24 @@ const check = (ok, label, detail) => {
 
 /*
  * Same display path as test-lighting.mjs's tent measurement: three's
- * ACESFilmicToneMapping (scalar form) at the viewer's default exposure, then
+ * NeutralToneMapping (Khronos PBR Neutral, scalar form) at the viewer's exposure, then
  * sRGB. Duplicated rather than imported — this file only compiles bloom.ts,
  * and the constant is small enough that sharing a module across two
  * independent suites is more coupling than the duplication it would save.
  * 1.4 / 0.6 mirrors DEFAULT_LIGHTING.exposure there.
  */
 const EXPOSURE_SCALE = 1.4 / 0.6;
-const aces = (c) => {
-  c *= EXPOSURE_SCALE;
-  const a = c * (c + 0.0245786) - 0.000090537;
-  const b = c * (0.983729 * c + 0.432951) + 0.238081;
-  return Math.min(1, Math.max(0, a / b));
+const neutral = (c) => {
+  const start = 0.8 - 0.04;
+  const offset = c < 0.08 ? c - 6.25 * c * c : 0.04;
+  c -= offset;
+  if (c < start) return Math.min(1, Math.max(0, c));
+  const d = 1 - start;
+  return Math.min(1, Math.max(0, 1 - (d * d) / (c + d - start)));
 };
+const toneMap = (c) => neutral(c * EXPOSURE_SCALE * 0.6);
 const srgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
-const screen = (c) => Math.round(srgb(aces(c)) * 255);
+const screen = (c) => Math.round(srgb(toneMap(c)) * 255);
 
 const withBloom = (patch) => ({ ...DEFAULT_POST, bloom: { ...DEFAULT_BLOOM, ...patch } });
 const withDof = (patch) => ({ ...DEFAULT_POST, dof: { ...DEFAULT_DOF, ...patch } });
@@ -126,10 +129,10 @@ check(
   `${DEFAULT_HIGHLIGHTS.strength}`,
 );
 /*
- * Worked out against this renderer's own ACES curve, not guessed: at the
+ * Worked out against this renderer's own tone curve, not guessed: at the
  * first value tried (0.5) a facet 10x over white and one 40x over both
  * rounded to the same 8-bit output — invisible. This checks the default
- * actually separates them, using the aces()/srgb() path defined above.
+ * actually separates them, using the toneMap()/srgb() path defined above.
  */
 {
   const compress = (peak, strength) => {

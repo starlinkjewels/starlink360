@@ -54,13 +54,17 @@ export function fieldsFor(type: LightType): {
  * The rig as it was, before any of this existed.
  *
  * Transcribed from the viewport JSX. Do not "tidy" these numbers.
+ *
+ * The colours are white on purpose (display.ts): the fill used to be blue
+ * (#b8ccff), the rim orange (#ffd8a0) and the key warm (#fff6ee), which tinted
+ * measured metal colours one way on each side of the piece.
  */
 export const DEFAULT_LIGHTS: LightDef[] = [
   {
     id: "key",
     type: "spot",
     label: "Key — jeweller's lamp",
-    color: "#fff6ee",
+    color: "#ffffff",
     intensity: 5.5,
     position: [2.8, 6, 3.5],
     visible: true,
@@ -71,8 +75,8 @@ export const DEFAULT_LIGHTS: LightDef[] = [
   {
     id: "fill",
     type: "directional",
-    label: "Fill — cool, from the left",
-    color: "#b8ccff",
+    label: "Fill — from the left",
+    color: "#ffffff",
     intensity: 1.4,
     position: [-4, 2, -1],
     visible: true,
@@ -80,8 +84,8 @@ export const DEFAULT_LIGHTS: LightDef[] = [
   {
     id: "rim",
     type: "directional",
-    label: "Rim — warm, from behind",
-    color: "#ffd8a0",
+    label: "Rim — from behind",
+    color: "#ffffff",
     intensity: 1.1,
     position: [0.5, 1.5, -4],
     visible: true,
@@ -99,7 +103,7 @@ export const DEFAULT_LIGHTS: LightDef[] = [
     id: "sparkle",
     type: "point",
     label: "Sparkle — ignites the facets",
-    color: "#fff4e0",
+    color: "#ffffff",
     intensity: 1.6,
     position: [0, 2.5, 1.2],
     visible: true,

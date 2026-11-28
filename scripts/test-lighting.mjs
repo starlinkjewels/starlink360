@@ -117,15 +117,18 @@ console.log("\n=== the tent, as it will actually render ===");
  * tent's own contract (nothing below a readable grey) is about the tent.
  */
 const TENT_EXPOSURE = 1.4;
-/* three's ACESFilmicToneMapping, scalar form, then sRGB. */
-const aces = (c) => {
-  c *= TENT_EXPOSURE / 0.6;
-  const a = c * (c + 0.0245786) - 0.000090537;
-  const b = c * (0.983729 * c + 0.432951) + 0.238081;
-  return Math.min(1, Math.max(0, a / b));
+/* three's NeutralToneMapping (Khronos PBR Neutral, display.ts), scalar form, then sRGB. */
+const neutral = (c) => {
+  const start = 0.8 - 0.04;
+  const offset = c < 0.08 ? c - 6.25 * c * c : 0.04;
+  c -= offset;
+  if (c < start) return Math.min(1, Math.max(0, c));
+  const d = 1 - start;
+  return Math.min(1, Math.max(0, 1 - (d * d) / (c + d - start)));
 };
+const toneMap = (c) => neutral(c * TENT_EXPOSURE);
 const srgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
-const screen = (r) => Math.round(srgb(aces(r)) * 255);
+const screen = (r) => Math.round(srgb(toneMap(r)) * 255);
 
 const N = 200000;
 const GA = Math.PI * (3 - Math.sqrt(5));
@@ -148,7 +151,12 @@ check(
   "nothing renders as a black hole (<90)",
   `${pc((v) => v < 90).toFixed(1)}%`,
 );
-check(px[0] >= 120, "even the darkest direction is a readable grey", `min ${px[0]}`);
+/*
+ * 105, not the 120 set under ACES: ACES lifted dark tones (three scales by
+ * 1/0.6 before its curve), PBR Neutral keeps them where the light puts them.
+ * Still a clear grey; the black-hole check above is unchanged.
+ */
+check(px[0] >= 105, "even the darkest direction is a readable grey", `min ${px[0]}`);
 const bright = pc((v) => v >= 180);
 check(
   bright > 50 && bright < 85,

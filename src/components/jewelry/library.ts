@@ -30,6 +30,32 @@ export interface MetalMaterial {
   metalness: number;
 }
 
+/*
+ * Metal colours are MEASURED reflectance, not picked by eye.
+ *
+ * A metal's colour in this renderer is its reflectance at normal incidence
+ * (F0): `color` with metalness 1. These used to be hand-tuned swatches,
+ * which looked like gold on a palette and drifted once lit and tone mapped.
+ * They are now set from published measurements, converted to sRGB:
+ *
+ *  - Gold alloys: ISO 8654:2018/Amd 1:2019, Table B.2, the jewellery
+ *    industry's standard gold colours (CIELAB, 10° observer):
+ *      0N 93.0/-1.14/21.15   green gold (pale yellow-green)
+ *      1N 91.6/ 2.27/21.84   14k yellow; 9k is halfway between 0N and 1N
+ *      3N 89.1/ 5.74/23.05   18k yellow
+ *      4N 88.1/ 7.78/20.71   18k rose (pink)
+ *      5N 87.0/ 9.51/18.11   18k red; 14k rose is halfway between 4N and 5N
+ *    22k sits between 3N and pure gold by gold content (91.7% vs 75%).
+ *  - Pure gold, silver, platinum, palladium, copper: physicallybased.info
+ *    (CC0), from measured refractive indices. Sterling is silver with 7.5%
+ *    copper mixed in.
+ *  - White gold is rhodium plated: a neutral 77%, NIST's measured visible
+ *    reflectance of electroplated rhodium. 18k and 14k white wear the same
+ *    plate, so they look the same, as they do in a shop.
+ *
+ * They read true only under a neutral display path: the viewers use Khronos
+ * PBR Neutral tone mapping and white lights for exactly that reason.
+ */
 /**
  * Eighteen alloys a jeweller would actually quote.
  *
@@ -54,7 +80,7 @@ export const METALS: MetalMaterial[] = [
     id: "gold-24k",
     name: "24k Yellow Gold",
     group: "Gold",
-    color: "#ffd75e",
+    color: "#ffe496",
     roughness: 0.02,
     metalness: 1,
   },
@@ -62,7 +88,7 @@ export const METALS: MetalMaterial[] = [
     id: "gold-22k",
     name: "22k Yellow Gold",
     group: "Gold",
-    color: "#fcd070",
+    color: "#fee1a1",
     roughness: 0.02,
     metalness: 1,
   },
@@ -70,7 +96,7 @@ export const METALS: MetalMaterial[] = [
     id: "gold-18k",
     name: "18k Yellow Gold",
     group: "Gold",
-    color: "#f2cf76",
+    color: "#fbdbb3",
     roughness: 0.02,
     metalness: 1,
   },
@@ -78,7 +104,7 @@ export const METALS: MetalMaterial[] = [
     id: "gold-14k",
     name: "14k Yellow Gold",
     group: "Gold",
-    color: "#eed08d",
+    color: "#fbe4bc",
     roughness: 0.02,
     metalness: 1,
   },
@@ -86,7 +112,7 @@ export const METALS: MetalMaterial[] = [
     id: "gold-9k",
     name: "9k Yellow Gold",
     group: "Gold",
-    color: "#e6d2a6",
+    color: "#fae7be",
     roughness: 0.02,
     metalness: 1,
   },
@@ -94,7 +120,7 @@ export const METALS: MetalMaterial[] = [
     id: "rose-18k",
     name: "18k Rose Gold",
     group: "Gold",
-    color: "#f0b79c",
+    color: "#fad7b5",
     roughness: 0.02,
     metalness: 1,
   },
@@ -102,7 +128,7 @@ export const METALS: MetalMaterial[] = [
     id: "rose-14k",
     name: "14k Rose Gold",
     group: "Gold",
-    color: "#eebda8",
+    color: "#fad5b6",
     roughness: 0.02,
     metalness: 1,
   },
@@ -110,7 +136,7 @@ export const METALS: MetalMaterial[] = [
     id: "red-18k",
     name: "18k Red Gold",
     group: "Gold",
-    color: "#e79c7d",
+    color: "#f9d3b7",
     roughness: 0.02,
     metalness: 1,
   },
@@ -118,7 +144,7 @@ export const METALS: MetalMaterial[] = [
     id: "green-18k",
     name: "18k Green Gold",
     group: "Gold",
-    color: "#dcd694",
+    color: "#f9eac1",
     roughness: 0.02,
     metalness: 1,
   },
@@ -127,7 +153,7 @@ export const METALS: MetalMaterial[] = [
     id: "white-18k",
     name: "18k White Gold",
     group: "White",
-    color: "#ecebe6",
+    color: "#e3e3e3",
     roughness: 0.02,
     metalness: 1,
   },
@@ -135,7 +161,7 @@ export const METALS: MetalMaterial[] = [
     id: "white-14k",
     name: "14k White Gold",
     group: "White",
-    color: "#e8e6df",
+    color: "#e3e3e3",
     roughness: 0.02,
     metalness: 1,
   },
@@ -143,7 +169,7 @@ export const METALS: MetalMaterial[] = [
     id: "platinum-950",
     name: "Platinum 950",
     group: "White",
-    color: "#dadbe0",
+    color: "#e3ded7",
     roughness: 0.02,
     metalness: 1,
   },
@@ -151,7 +177,7 @@ export const METALS: MetalMaterial[] = [
     id: "palladium-950",
     name: "Palladium 950",
     group: "White",
-    color: "#d3d4d6",
+    color: "#dedad5",
     roughness: 0.02,
     metalness: 1,
   },
@@ -160,7 +186,7 @@ export const METALS: MetalMaterial[] = [
     id: "silver-925",
     name: "Sterling Silver",
     group: "Silver",
-    color: "#cfd0d4",
+    color: "#fdfaf8",
     roughness: 0.02,
     metalness: 1,
   },
@@ -168,7 +194,7 @@ export const METALS: MetalMaterial[] = [
     id: "silver-999",
     name: "Fine Silver",
     group: "Silver",
-    color: "#dcdde0",
+    color: "#fefdfc",
     roughness: 0.02,
     metalness: 1,
   },

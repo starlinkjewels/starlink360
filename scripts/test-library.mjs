@@ -211,9 +211,20 @@ console.log("\n=== every swatch is shaded, and they differ ===");
     }),
     "stops ascend and stay in 0..1, which addColorStop requires",
   );
+  /*
+   * Rhodium-plated white golds share one surface whatever the karat under
+   * the plate (library.ts), so they are allowed, and expected, to look alike.
+   * Every other entry must still be told apart at a glance.
+   */
+  const SAME_SURFACE = new Set(["white-14k"]);
+  const distinct = specs.filter((s) => !SAME_SURFACE.has(s.id));
   check(
-    new Set(specs.map((s) => s.key)).size === specs.length,
-    "every entry caches under its own key — no two swatches share an image",
+    specs.find((s) => s.id === "white-14k")?.key === specs.find((s) => s.id === "white-18k")?.key,
+    "18k and 14k white gold share the rhodium plate's look",
+  );
+  check(
+    new Set(distinct.map((s) => s.key)).size === distinct.length,
+    "every other entry caches under its own key — no two swatches share an image",
     `${new Set(specs.map((s) => s.key)).size} of ${specs.length}`,
   );
 }

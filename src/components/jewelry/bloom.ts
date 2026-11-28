@@ -219,7 +219,12 @@ export interface HighlightSettings {
 export const DEFAULT_HIGHLIGHTS: HighlightSettings = {
   // Off by default: it compressed the diamond's brightest facets toward grey.
   enabled: false,
-  strength: 2,
+  /*
+   * 4 under PBR Neutral tone mapping (display.ts). Neutral's own shoulder
+   * already rolls bright flashes off, so the 2 tuned for ACES let a facet 10x
+   * and one 40x over white land on the same 8-bit value (test-post.mjs).
+   */
+  strength: 4,
 };
 
 /** Everything the composer draws, in one object. */

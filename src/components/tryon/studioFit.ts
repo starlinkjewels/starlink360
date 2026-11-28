@@ -241,21 +241,120 @@ interface Fit {
   chain?: boolean;
 }
 
+/** A circle through 2D points, by least squares (Kasa's method). */
+function fitCircle(pts: { u: number; v: number }[]): { cu: number; cv: number; r: number } {
+  // Solve u² + v² + D·u + E·v + F = 0 via the 3×3 normal equations.
+  let suu = 0,
+    suv = 0,
+    svv = 0,
+    su = 0,
+    sv = 0,
+    n = 0;
+  let suz = 0,
+    svz = 0,
+    sz = 0;
+  for (const { u, v } of pts) {
+    const z = -(u * u + v * v);
+    suu += u * u;
+    suv += u * v;
+    svv += v * v;
+    su += u;
+    sv += v;
+    n++;
+    suz += u * z;
+    svz += v * z;
+    sz += z;
+  }
+  const m = new THREE.Matrix3().set(suu, suv, su, suv, svv, sv, su, sv, n);
+  const det = m.determinant();
+  if (!n || Math.abs(det) < 1e-18) return { cu: 0, cv: 0, r: 0 };
+  const [D, E, F] = new THREE.Vector3(suz, svz, sz).applyMatrix3(m.invert()).toArray();
+  const cu = -D / 2;
+  const cv = -E / 2;
+  return { cu, cv, r: Math.sqrt(Math.max(0, cu * cu + cv * cv - F)) };
+}
+
 /**
- * Ring, bracelet, bangle: the hole's axis along +Y, the stones toward +Z,
- * and the inside of the band at `innerRadius`.
+ * Ring, bracelet, bangle: the hole's axis along +Y, the head toward +Z (out
+ * of the back of the hand), and the inside of the band at `innerRadius`.
+ *
+ * Which way is "the head" is the part that decides whether a ring is worn
+ * properly, and the first version got it wrong: it pointed the ring toward
+ * the average stone position. On a ring with stones round the band (pavé
+ * shank, halo, three-stone with shoulders) that average sits near the middle
+ * of the hole, so the head could end up on the palm side. Now:
+ *
+ *  1. The hole is found by fitting a circle to the band, with the head left
+ *     out (points far outside the band are dropped and the fit repeated).
+ *  2. The head is whatever sticks out furthest from that circle's centre:
+ *     a setting always does, a band does not.
+ *  3. Only a piece with nothing sticking out (a plain band, an eternity ring,
+ *     where it does not matter) falls back to the stones, then to "up" as
+ *     the studio showed it.
  */
 function fitBand(prep: PreparedStudioPiece, innerRadius: number): Fit {
   const metal = prep.metalPoints;
-  const axis = principalAxes([...metal, ...prep.gemPoints])[0];
+  const all = [...metal, ...prep.gemPoints];
+  const axis = principalAxes(all)[0];
 
-  // Toward the stones; failing that, whatever was up on screen.
-  const toward = (v: THREE.Vector3) => v.clone().addScaledVector(axis, -v.dot(axis));
-  let crest = prep.gemPoints.length
-    ? toward(centroid(prep.gemPoints).sub(centroid(metal)))
-    : new THREE.Vector3();
-  if (crest.lengthSq() < 1e-8) crest = toward(new THREE.Vector3(0, 1, 0));
-  if (crest.lengthSq() < 1e-8) crest = toward(new THREE.Vector3(1, 0, 0));
+  // Any two directions across the hole, to work in 2D.
+  const U = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(U.dot(axis)) > 0.9) U.set(0, 1, 0);
+  U.addScaledVector(axis, -U.dot(axis)).normalize();
+  const V = new THREE.Vector3().crossVectors(axis, U).normalize();
+  const flat = (p: THREE.Vector3) => ({ u: p.dot(U), v: p.dot(V) });
+
+  // 1. The hole: a circle through the band, refitted without the head.
+  const band2d = metal.map(flat);
+  let circle = fitCircle(band2d);
+  for (let i = 0; i < 4 && circle.r > 0; i++) {
+    const r = circle.r;
+    const kept = band2d.filter(({ u, v }) => {
+      const d = Math.hypot(u - circle.cu, v - circle.cv);
+      return d > r * 0.55 && d < r * 1.3;
+    });
+    if (kept.length < 20) break;
+    circle = fitCircle(kept);
+  }
+
+  // 2. The head: the direction of the points furthest from the centre.
+  const radial = all.map((p) => {
+    const { u, v } = flat(p);
+    return { du: u - circle.cu, dv: v - circle.cv, d: Math.hypot(u - circle.cu, v - circle.cv) };
+  });
+  const far = quantile(
+    radial.map((p) => p.d),
+    0.97,
+  );
+  let hu = 0;
+  let hv = 0;
+  let count = 0;
+  for (const p of radial) {
+    if (p.d < far || p.d === 0) continue;
+    hu += p.du / p.d;
+    hv += p.dv / p.d;
+    count++;
+  }
+  const outer = quantile(
+    radial.map((p) => p.d),
+    0.5,
+  );
+  // A head both points one way and stands clear of the band.
+  const headed = count > 0 && Math.hypot(hu, hv) / count > 0.5 && far > outer * 1.08;
+
+  let crest: THREE.Vector3;
+  if (headed) {
+    crest = U.clone().multiplyScalar(hu).addScaledVector(V, hv);
+  } else {
+    // 3. Nothing sticks out: the stones, then the studio's up.
+    const toward = (v: THREE.Vector3) => v.clone().addScaledVector(axis, -v.dot(axis));
+    const centre3 = U.clone().multiplyScalar(circle.cu).addScaledVector(V, circle.cv);
+    crest = prep.gemPoints.length
+      ? toward(centroid(prep.gemPoints).sub(centre3))
+      : new THREE.Vector3();
+    if (crest.lengthSq() < 1e-8) crest = toward(new THREE.Vector3(0, 1, 0));
+    if (crest.lengthSq() < 1e-8) crest = U.clone();
+  }
   crest.normalize();
 
   const Y = axis.clone();
@@ -263,21 +362,28 @@ function fitBand(prep: PreparedStudioPiece, innerRadius: number): Fit {
   const X = new THREE.Vector3().crossVectors(Y, Z).normalize();
   const toLocal = new THREE.Matrix4().makeBasis(X, Y, Z).transpose();
 
-  const local = metal.map((p) => p.clone().applyMatrix4(toLocal));
-  const b = bounds(local);
-  // Symmetric across the band, so its middle is the hole's middle; along the
-  // crest the far side of the band is the reliable edge (the head sticks out).
-  const rOuter = (b.max.x - b.min.x) / 2;
-  const centre = new THREE.Vector3(
-    (b.min.x + b.max.x) / 2,
-    (b.min.y + b.max.y) / 2,
-    b.min.z + rOuter,
-  );
+  // The hole's centre, and the middle of the band along the finger.
+  const along = metal
+    .filter((p) => {
+      const { u, v } = flat(p);
+      return Math.hypot(u - circle.cu, v - circle.cv) < circle.r * 1.3;
+    })
+    .map((p) => p.dot(axis));
+  const mid = along.length
+    ? (Math.min(...along) + Math.max(...along)) / 2
+    : centroid(metal).dot(axis);
+  const centre = U.clone()
+    .multiplyScalar(circle.cu)
+    .addScaledVector(V, circle.cv)
+    .addScaledVector(axis, mid)
+    .applyMatrix4(toLocal);
+
+  // The inside of the band: the closest metal gets to the centre.
   let rInner = quantile(
-    local.map((p) => Math.hypot(p.x - centre.x, p.z - centre.z)),
+    band2d.map(({ u, v }) => Math.hypot(u - circle.cu, v - circle.cv)),
     0.01,
   );
-  if (!(rInner > rOuter * 0.25)) rInner = rOuter * 0.85;
+  if (!(rInner > circle.r * 0.4)) rInner = circle.r * 0.9;
 
   const s = innerRadius / rInner;
   const matrix = new THREE.Matrix4()

@@ -15,6 +15,7 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { acceleratePicking } from "./pickBvh";
 import { RENDER_NOW_EVENT } from "./renderNow";
+import { TONE_MAPPING } from "./display";
 import type { Finish } from "@/data/finishes";
 import type { Product } from "@/data/products";
 import { FallbackModel, GLBModel, ObjectModel, type Fit } from "./Model";
@@ -1205,7 +1206,8 @@ export default function Viewer({
       // Required to read pixels back after a render. Without it the buffer is
       // already cleared by the time an export tries to grab the frame.
       preserveDrawingBuffer: true,
-      toneMapping: THREE.ACESFilmicToneMapping,
+      // Shared with the try-on; see display.ts for why it is not ACES.
+      toneMapping: TONE_MAPPING,
       toneMappingExposure: DEFAULT_LIGHTING.exposure,
       outputColorSpace: THREE.SRGBColorSpace,
     }),
